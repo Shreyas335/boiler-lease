@@ -15,13 +15,6 @@ export async function getCurrentUser(): Promise<User | null> {
   }
 }
 
-export async function login(email: string, password: string): Promise<User> {
-  // Ensure CSRF token is fetched before login
-  await fetchCsrfToken();
-  const { data } = await api.post<User>("/auth/login/", { email, password });
-  return data;
-}
-
 export async function register(params: {
   username: string;
   email: string;
@@ -38,11 +31,54 @@ export async function register(params: {
 }
 
 export async function logout(): Promise<void> {
-  // Ensure CSRF token is available before logout
   try {
     await api.get("/auth/csrf/");
   } catch {
-    // If CSRF fetch fails, continue anyway
+    // continue
   }
   await api.post("/auth/logout/");
+}
+
+// Login can return user OR requires_2fa + temp_token
+export interface LoginResponse {
+  requires_2fa?: boolean;
+  temp_token?: string;
+  id?: number;
+  username?: string;
+  email?: string;
+  user_type?: string;
+  first_name?: string;
+  last_name?: string;
+  email_verified?: boolean;
+  two_factor_enabled?: boolean;
+}
+
+export async function login(email: string, password: string): Promise<LoginResponse> {
+  await fetchCsrfToken();
+  const { data } = await api.post<LoginResponse>("/auth/login/", { email, password });
+  return data;
+}
+
+export async function verify2FALogin(tempToken: string, code: string): Promise<User> {
+  const { data } = await api.post<User>("/auth/2fa/", { temp_token: tempToken, code });
+  return data;
+}
+
+export async function sendVerificationEmail(): Promise<void> {
+  await api.post("/auth/send-verification-email/");
+}
+
+export async function verifyEmail(token: string): Promise<{ detail: string; user?: User }> {
+  const { data } = await api.post<{ detail: string; user?: User }>("/auth/verify-email/", {
+    token,
+  });
+  return data;
+}
+
+export async function twoFactorEnable(): Promise<void> {
+  await api.post("/account/2fa/enable/");
+}
+
+export async function twoFactorDisable(): Promise<void> {
+  await api.post("/account/2fa/disable/");
 }

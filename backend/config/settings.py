@@ -176,3 +176,24 @@ else:
             "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
         }
     }
+
+# Email (verification links, 2FA codes).
+# Default: console backend prints to terminal (no real delivery). To send real email, set:
+#   EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend
+#   EMAIL_HOST=smtp.example.com  EMAIL_PORT=587  EMAIL_USE_TLS=True
+#   EMAIL_HOST_USER=...  EMAIL_HOST_PASSWORD=...
+# (e.g. Gmail, SendGrid, Mailgun).
+EMAIL_BACKEND = os.environ.get(
+    "EMAIL_BACKEND",
+    "django.core.mail.backends.console.EmailBackend",
+)
+DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "noreply@boilerlease.local")
+EMAIL_HOST = os.environ.get("EMAIL_HOST", "")
+EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "587"))
+EMAIL_USE_TLS = os.environ.get("EMAIL_USE_TLS", "true").lower() in ("1", "true", "yes")
+EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
+# Frontend base URL for verification links (e.g. http://localhost:5173)
+FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:5173")
+# Backend base URL for links in emails (e.g. http://localhost:8000)
+BACKEND_URL = os.environ.get("BACKEND_URL", "http://localhost:8000").rstrip("/")
