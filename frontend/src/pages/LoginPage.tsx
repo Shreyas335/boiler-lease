@@ -13,15 +13,18 @@ import {
 } from "@mui/material";
 import EmailRoundedIcon from "@mui/icons-material/EmailRounded";
 import LockRoundedIcon from "@mui/icons-material/LockRounded";
+import PinRoundedIcon from "@mui/icons-material/PinRounded";
 import { useAuth } from "../contexts/AuthContext";
 import type { AxiosError } from "axios";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [twoFactorToken, setTwoFactorToken] = useState<string | null>(null);
+  const [twoFactorCode, setTwoFactorCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const { user, login } = useAuth();
+  const { user, login, verify2FA } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -34,8 +37,14 @@ export default function LoginPage() {
     setSubmitting(true);
 
     try {
-      await login(email, password);
-      navigate("/dashboard");
+      const result = await login(email, password);
+      if (result.success) {
+        navigate("/dashboard");
+        return;
+      }
+      if (result.requires_2fa && result.temp_token) {
+        setTwoFactorToken(result.temp_token);
+      }
     } catch (err) {
       const axiosError = err as AxiosError<{ email?: string[]; password?: string[]; detail?: string | string[] }>;
       if (!axiosError.response) {
@@ -61,17 +70,92 @@ export default function LoginPage() {
     }
   }
 
+  async function handle2FASubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!twoFactorToken) return;
+    setError(null);
+    setSubmitting(true);
+    try {
+      await verify2FA(twoFactorToken, twoFactorCode);
+      navigate("/dashboard");
+    } catch (err) {
+      const axiosError = err as AxiosError<{ code?: string[]; detail?: string }>;
+      const msg = axiosError.response?.data;
+      if (msg?.code?.[0]) {
+        setError(msg.code[0]);
+      } else if (msg?.detail) {
+        setError(msg.detail);
+      } else {
+        setError("Invalid or expired code. Please try again.");
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  const show2FAStep = Boolean(twoFactorToken);
+
   return (
     <Box sx={{ py: 8, px: 2 }}>
       <Container maxWidth="sm">
         <Paper elevation={0} sx={{ p: 4, border: "1px solid", borderColor: "divider" }}>
           <Typography variant="h4" sx={{ mb: 1, fontWeight: 700 }}>
-            Log in
+            {show2FAStep ? "Two-factor authentication" : "Log in"}
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-            Welcome back. Sign in to your account.
+            {show2FAStep
+              ? "We sent a 6-digit code to your email. Enter it below."
+              : "Welcome back. Sign in to your account."}
           </Typography>
-          <form onSubmit={handleSubmit}>
+
+          {show2FAStep ? (
+            <form onSubmit={handle2FASubmit}>
+              {error && (
+                <Alert severity="error" sx={{ mb: 2 }}>
+                  {error}
+                </Alert>
+              )}
+              <TextField
+                fullWidth
+                label="Verification code"
+                value={twoFactorCode}
+                onChange={(e) => setTwoFactorCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                placeholder="000000"
+                inputProps={{ maxLength: 6, pattern: "[0-9]*" }}
+                disabled={submitting}
+                sx={{ mb: 2 }}
+                InputProps={{
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <PinRoundedIcon color="action" />
+                    </InputAdornment>
+                  ),
+                }}
+              />
+              <Button
+                type="submit"
+                variant="contained"
+                fullWidth
+                size="large"
+                disabled={submitting || twoFactorCode.length !== 6}
+                sx={{ py: 1.5 }}
+              >
+                {submitting ? "Verifying…" : "Verify"}
+              </Button>
+              <Button
+                fullWidth
+                sx={{ mt: 2 }}
+                onClick={() => {
+                  setTwoFactorToken(null);
+                  setTwoFactorCode("");
+                  setError(null);
+                }}
+              >
+                Back to login
+              </Button>
+            </form>
+          ) : (
+            <form onSubmit={handleSubmit}>
             {error && (
               <Alert severity="error" sx={{ mb: 2 }}>
                 {error}
@@ -124,6 +208,8 @@ export default function LoginPage() {
               {submitting ? "Logging in…" : "Log in"}
             </Button>
           </form>
+          )}
+
           <Typography variant="body2" color="text.secondary" sx={{ mt: 3, textAlign: "center" }}>
             Don't have an account?{" "}
             <Link component={RouterLink} to="/register" sx={{ color: "primary.main", fontWeight: 600 }}>

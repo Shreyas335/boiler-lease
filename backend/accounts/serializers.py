@@ -7,8 +7,26 @@ from .models import User
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ("id", "username", "email", "user_type", "first_name", "last_name")
-        read_only_fields = ("id", "username", "email", "user_type", "first_name", "last_name")
+        fields = (
+            "id",
+            "username",
+            "email",
+            "user_type",
+            "first_name",
+            "last_name",
+            "email_verified",
+            "two_factor_enabled",
+        )
+        read_only_fields = (
+            "id",
+            "username",
+            "email",
+            "user_type",
+            "first_name",
+            "last_name",
+            "email_verified",
+            "two_factor_enabled",
+        )
 
 
 class RegisterSerializer(serializers.ModelSerializer):
@@ -74,3 +92,31 @@ class LoginSerializer(serializers.Serializer):
 
         data["user"] = user
         return data
+
+
+class TwoFactorSetupSerializer(serializers.Serializer):
+    """Response: secret and qr_code_url for authenticator app."""
+
+    secret = serializers.CharField(read_only=True)
+    qr_code_url = serializers.CharField(read_only=True)
+
+
+class TwoFactorConfirmSerializer(serializers.Serializer):
+    code = serializers.CharField(max_length=8, min_length=6)
+
+    def validate_code(self, value):
+        value = value.strip().replace(" ", "")
+        if not value.isdigit():
+            raise serializers.ValidationError("Code must be 6 digits.")
+        return value
+
+
+class TwoFactorVerifyLoginSerializer(serializers.Serializer):
+    temp_token = serializers.CharField()
+    code = serializers.CharField(max_length=8, min_length=6)
+
+    def validate_code(self, value):
+        value = value.strip().replace(" ", "")
+        if not value.isdigit():
+            raise serializers.ValidationError("Code must be 6 digits.")
+        return value

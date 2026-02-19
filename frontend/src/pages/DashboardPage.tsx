@@ -6,10 +6,12 @@ import {
   CardContent,
   Button,
   Chip,
+  Alert,
 } from "@mui/material";
 import HomeWorkRoundedIcon from "@mui/icons-material/HomeWorkRounded";
 import PersonSearchRoundedIcon from "@mui/icons-material/PersonSearchRounded";
 import BusinessRoundedIcon from "@mui/icons-material/BusinessRounded";
+import WarningAmberRoundedIcon from "@mui/icons-material/WarningAmberRounded";
 import { useAuth } from "../contexts/AuthContext";
 
 const USER_TYPE_CONFIG: Record<string, { label: string; icon: React.ReactNode; description: string }> = {
@@ -40,6 +42,16 @@ export default function DashboardPage() {
   return (
     <Box sx={{ py: 6, px: 2 }}>
       <Container maxWidth="lg">
+        {!user.email_verified && (
+          <Alert
+            severity="warning"
+            icon={<WarningAmberRoundedIcon />}
+            sx={{ mb: 3 }}
+          >
+            Your email hasn&apos;t been verified yet. Please check your inbox for the verification link, or open Account settings (gear icon) to resend it.
+          </Alert>
+        )}
+
         <Box sx={{ mb: 4 }}>
           <Typography variant="h4" sx={{ fontWeight: 700, mb: 0.5 }}>
             Welcome back, {user.first_name || user.username}
