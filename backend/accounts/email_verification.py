@@ -1,0 +1,55 @@
+"""Send email verification link."""
+from django.conf import settings
+from django.core.mail import send_mail
+from django.utils import timezone
+
+
+def send_verification_email(user):
+    """Generate token, save on user, send email with link to frontend verify-email page."""
+    from .models import User
+
+    token = user.email_verification_token
+    if not token:
+        import secrets
+        token = secrets.token_urlsafe(32)
+        # Ensure uniqueness
+        while User.objects.filter(email_verification_token=token).exists():
+            token = secrets.token_urlsafe(32)
+        user.email_verification_token = token
+        user.email_verification_sent_at = timezone.now()
+        user.save(update_fields=["email_verification_token", "email_verification_sent_at"])
+
+    # Link goes to backend; backend verifies and redirects to frontend (avoids CORS when opening from email)
+    verify_url = f"{settings.BACKEND_URL}/api/auth/verify-email/?token={token}"
+    subject = "Verify your Boiler Lease email"
+    message = (
+        f"Hi {user.get_full_name() or user.username},\n\n"
+        f"Please verify your email by clicking this link:\n{verify_url}\n\n"
+        "If you didn't create an account, you can ignore this email.\n\n"
+        "— Boiler Lease"
+    )
+    send_mail(
+        subject=subject,
+        message=message,
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        recipient_list=[user.email],
+        fail_silently=False,
+    )
+
+
+def send_2fa_code_email(user, code):
+    """Send the 6-digit 2FA login code to the user's email."""
+    subject = "Your Boiler Lease login code"
+    message = (
+        f"Hi {user.get_full_name() or user.username},\n\n"
+        f"Your one-time login code is: {code}\n\n"
+        "This code expires in 5 minutes. If you didn't request it, you can ignore this email.\n\n"
+        "— Boiler Lease"
+    )
+    send_mail(
+        subject=subject,
+        message=message,
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        recipient_list=[user.email],
+        fail_silently=False,
+    )

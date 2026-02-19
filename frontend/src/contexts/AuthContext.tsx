@@ -9,12 +9,18 @@ import {
 import type { User } from "../types/auth";
 import * as authApi from "../api/auth";
 
+type LoginResult =
+  | { success: true }
+  | { requires_2fa: true; temp_token: string };
+
 interface AuthContextType {
   user: User | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<LoginResult>;
+  verify2FA: (tempToken: string, code: string) => Promise<void>;
   register: (params: Parameters<typeof authApi.register>[0]) => Promise<void>;
   logout: () => Promise<void>;
+  refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -40,12 +46,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [loadUser]);
 
   const login = useCallback(
-    async (email: string, password: string) => {
-      const loggedInUser = await authApi.login(email, password);
-      setUser(loggedInUser);
+    async (email: string, password: string): Promise<LoginResult> => {
+      const data = await authApi.login(email, password);
+      if (data.requires_2fa && data.temp_token) {
+        return { requires_2fa: true, temp_token: data.temp_token };
+      }
+      setUser(data as User);
+      return { success: true };
     },
     []
   );
+
+  const verify2FA = useCallback(async (tempToken: string, code: string) => {
+    const loggedInUser = await authApi.verify2FALogin(tempToken, code);
+    setUser(loggedInUser);
+  }, []);
 
   const register = useCallback(
     async (params: Parameters<typeof authApi.register>[0]) => {
@@ -60,8 +75,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   }, []);
 
+  const refreshUser = useCallback(async () => {
+    const currentUser = await authApi.getCurrentUser();
+    setUser(currentUser);
+  }, []);
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout }}>
+    <AuthContext.Provider value={{ user, loading, login, verify2FA, register, logout, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );

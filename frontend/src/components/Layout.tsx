@@ -1,4 +1,4 @@
-import { ReactNode } from "react";
+import { ReactNode, useState } from "react";
 import { Link as RouterLink, useNavigate } from "react-router-dom";
 import {
   AppBar,
@@ -7,12 +7,15 @@ import {
   Typography,
   Button,
   Container,
+  IconButton,
 } from "@mui/material";
 import HomeRoundedIcon from "@mui/icons-material/HomeRounded";
 import LoginRoundedIcon from "@mui/icons-material/LoginRounded";
 import PersonAddRoundedIcon from "@mui/icons-material/PersonAddRounded";
 import LogoutRoundedIcon from "@mui/icons-material/LogoutRounded";
+import SettingsRoundedIcon from "@mui/icons-material/SettingsRounded";
 import { useAuth } from "../contexts/AuthContext";
+import AccountSettingsModal from "./AccountSettingsModal";
 
 interface LayoutProps {
   children: ReactNode;
@@ -21,6 +24,7 @@ interface LayoutProps {
 export default function Layout({ children }: LayoutProps) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   async function handleLogout() {
     await logout();
@@ -40,12 +44,20 @@ export default function Layout({ children }: LayoutProps) {
             >
               Boiler Lease
             </Button>
-            <Box sx={{ display: "flex", gap: 1 }}>
+            <Box sx={{ display: "flex", gap: 0.5, alignItems: "center" }}>
               {user ? (
                 <>
-                  <Typography variant="body2" sx={{ alignSelf: "center", mr: 1, color: "text.secondary" }}>
+                  <Typography variant="body2" sx={{ alignSelf: "center", mr: 0.5, color: "text.secondary" }}>
                     {user.first_name || user.username}
                   </Typography>
+                  <IconButton
+                    aria-label="Account settings"
+                    onClick={() => setSettingsOpen(true)}
+                    sx={{ color: "text.secondary" }}
+                  >
+                    <SettingsRoundedIcon />
+                  </IconButton>
+                  <AccountSettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
                   <Button
                     color="inherit"
                     startIcon={<LogoutRoundedIcon />}

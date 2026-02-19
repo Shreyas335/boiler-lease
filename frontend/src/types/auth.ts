@@ -7,4 +7,6 @@ export interface User {
   user_type: UserType;
   first_name: string;
   last_name: string;
+  email_verified: boolean;
+  two_factor_enabled: boolean;
 }
