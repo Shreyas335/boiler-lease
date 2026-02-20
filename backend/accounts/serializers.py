@@ -1,4 +1,4 @@
-from django.contrib.auth import authenticate
+from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
 
 from .models import User
@@ -27,6 +27,59 @@ class UserSerializer(serializers.ModelSerializer):
             "email_verified",
             "two_factor_enabled",
         )
+
+
+class AccountUpdateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ("username", "first_name", "last_name")
+        extra_kwargs = {
+            "username": {"required": False},
+            "first_name": {"required": False},
+            "last_name": {"required": False},
+        }
+
+    def validate_username(self, value):
+        user = self.instance
+        if value and User.objects.exclude(pk=user.pk).filter(username=value).exists():
+            raise serializers.ValidationError("A user with this username already exists.")
+        return value
+
+
+class PasswordChangeSerializer(serializers.Serializer):
+    current_password = serializers.CharField(write_only=True)
+    new_password = serializers.CharField(write_only=True)
+    new_password_confirm = serializers.CharField(write_only=True)
+
+    def validate(self, attrs):
+        # Import here to avoid shadowing DRF's ValidationError with Django's.
+        from django.core.exceptions import ValidationError as DjangoValidationError
+
+        user = self.context["request"].user
+        current_password = attrs["current_password"]
+        new_password = attrs["new_password"]
+        new_password_confirm = attrs["new_password_confirm"]
+
+        if not user.check_password(current_password):
+            raise serializers.ValidationError(
+                {"current_password": ["Current password is incorrect."]}
+            )
+
+        if new_password != new_password_confirm:
+            raise serializers.ValidationError(
+                {"new_password_confirm": ["New passwords do not match."]}
+            )
+
+        if new_password == current_password:
+            raise serializers.ValidationError(
+                {"new_password": ["New password must be different from current password."]}
+            )
+
+        try:
+            validate_password(new_password, user=user)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError({"new_password": list(exc.messages)})
+        return attrs
 
 
 class RegisterSerializer(serializers.ModelSerializer):

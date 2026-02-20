@@ -1,4 +1,5 @@
-import { ReactNode, useState } from "react";
+import { useState } from "react";
+import type { ReactNode } from "react";
 import { Link as RouterLink, useNavigate } from "react-router-dom";
 import {
   AppBar,
@@ -14,6 +15,7 @@ import LoginRoundedIcon from "@mui/icons-material/LoginRounded";
 import PersonAddRoundedIcon from "@mui/icons-material/PersonAddRounded";
 import LogoutRoundedIcon from "@mui/icons-material/LogoutRounded";
 import SettingsRoundedIcon from "@mui/icons-material/SettingsRounded";
+import AccountCircleRoundedIcon from "@mui/icons-material/AccountCircleRounded";
 import { useAuth } from "../contexts/AuthContext";
 import AccountSettingsModal from "./AccountSettingsModal";
 
@@ -50,6 +52,15 @@ export default function Layout({ children }: LayoutProps) {
                   <Typography variant="body2" sx={{ alignSelf: "center", mr: 0.5, color: "text.secondary" }}>
                     {user.first_name || user.username}
                   </Typography>
+                  <Button
+                    component={RouterLink}
+                    to="/account"
+                    color="inherit"
+                    startIcon={<AccountCircleRoundedIcon />}
+                    sx={{ color: "text.secondary" }}
+                  >
+                    Account
+                  </Button>
                   <IconButton
                     aria-label="Account settings"
                     onClick={() => setSettingsOpen(true)}
