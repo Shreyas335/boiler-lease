@@ -75,8 +75,13 @@ docker-compose exec backend python manage.py dbshell
 Runs a PostgreSQL shell connected to your project database.
 
 
-
+## To have linting locally
 
 Frontend
 
 run npm install
+
+npm run dev
+
+
+
