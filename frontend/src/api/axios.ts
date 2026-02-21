@@ -1,7 +1,29 @@
 import axios from "axios";
 
+function normalizeApiBaseUrl(rawBaseUrl?: string): string {
+  const base = (rawBaseUrl || "").trim();
+  if (!base) return "/api";
+  if (base.startsWith("http://") || base.startsWith("https://")) {
+    return base.replace(/\/+$/, "");
+  }
+  // Ensure non-absolute values like "api" become root-relative "/api".
+  return `/${base.replace(/^\/+|\/+$/g, "")}`;
+}
+
+function resolveApiBaseUrl(rawBaseUrl?: string): string {
+  const normalized = normalizeApiBaseUrl(rawBaseUrl);
+  // In local dev, always use Vite proxy instead of absolute localhost URLs.
+  if (
+    import.meta.env.DEV &&
+    /^https?:\/\/localhost(?::\d+)?(?:\/|$)/i.test(normalized)
+  ) {
+    return "/api";
+  }
+  return normalized;
+}
+
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || "/api",
+  baseURL: resolveApiBaseUrl(import.meta.env.VITE_API_URL),
   withCredentials: true,
   xsrfCookieName: "csrftoken",
   xsrfHeaderName: "X-CSRFToken",

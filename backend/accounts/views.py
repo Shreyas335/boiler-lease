@@ -13,7 +13,9 @@ from rest_framework.response import Response
 from .email_verification import send_2fa_code_email, send_verification_email
 from .models import User
 from .serializers import (
+    AccountUpdateSerializer,
     LoginSerializer,
+    PasswordChangeSerializer,
     RegisterSerializer,
     UserSerializer,
     TwoFactorVerifyLoginSerializer,
@@ -106,10 +108,30 @@ def logout_view(request):
     return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-@api_view(["GET"])
+@api_view(["GET", "PATCH"])
 @permission_classes([IsAuthenticated])
 def current_user(request):
+    if request.method == "PATCH":
+        serializer = AccountUpdateSerializer(
+            request.user, data=request.data, partial=True
+        )
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        serializer.save()
+        return Response(UserSerializer(request.user).data, status=status.HTTP_200_OK)
     return Response(UserSerializer(request.user).data)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def change_password(request):
+    serializer = PasswordChangeSerializer(data=request.data, context={"request": request})
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    request.user.set_password(serializer.validated_data["new_password"])
+    request.user.save(update_fields=["password"])
+    return Response({"detail": "Password updated successfully."}, status=status.HTTP_200_OK)
 
 
 @api_view(["GET"])
