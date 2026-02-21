@@ -10,7 +10,9 @@ cp .env.example .env   # if you haven't already
 docker-compose up --build
 ```
 
-**IMPORTANT:** After containers start, you MUST run migrations in another terminal:
+**have 
+
+**IMPORTANT:** After containers start, you MUST run migrations in another terminal: Also make sure to delete any existing volumes or change the existing volumnes for existing services
 
 ```bash
 docker-compose exec backend python manage.py migrate
@@ -71,3 +73,15 @@ docker-compose exec backend python manage.py dbshell
 ```
 
 Runs a PostgreSQL shell connected to your project database.
+
+
+## To have linting locally
+
+Frontend
+
+run npm install
+
+npm run dev
+
+
+

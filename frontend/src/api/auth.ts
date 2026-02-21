@@ -1,4 +1,5 @@
 import api from "./axios";
+import type { AxiosError } from "axios";
 import type { User } from "../types/auth";
 
 export async function fetchCsrfToken(): Promise<void> {
@@ -9,7 +10,7 @@ export async function getCurrentUser(): Promise<User | null> {
   try {
     const { data } = await api.get<User>("/auth/me/");
     return data;
-  } catch (error) {
+  } catch {
     // Return null if not authenticated (401/403) or any other error
     return null;
   }
@@ -36,7 +37,15 @@ export async function logout(): Promise<void> {
   } catch {
     // continue
   }
-  await api.post("/auth/logout/");
+  try {
+    await api.post("/auth/logout/");
+  } catch (error) {
+    const axiosError = error as AxiosError;
+    const status = axiosError.response?.status;
+    // If session is already invalid (common after password change), treat as logged out.
+    if (status === 401 || status === 403) return;
+    throw error;
+  }
 }
 
 // Login can return user OR requires_2fa + temp_token
@@ -81,4 +90,31 @@ export async function twoFactorEnable(): Promise<void> {
 
 export async function twoFactorDisable(): Promise<void> {
   await api.post("/account/2fa/disable/");
+}
+
+export interface UpdateAccountPayload {
+  username?: string;
+  first_name?: string;
+  last_name?: string;
+}
+
+export async function getAccountProfile(): Promise<User> {
+  const { data } = await api.get<User>("/account/");
+  return data;
+}
+
+export async function updateAccountProfile(payload: UpdateAccountPayload): Promise<User> {
+  const { data } = await api.patch<User>("/account/", payload);
+  return data;
+}
+
+export interface ChangePasswordPayload {
+  current_password: string;
+  new_password: string;
+  new_password_confirm: string;
+}
+
+export async function changePassword(payload: ChangePasswordPayload): Promise<{ detail: string }> {
+  const { data } = await api.post<{ detail: string }>("/account/password/", payload);
+  return data;
 }
