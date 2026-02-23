@@ -10,6 +10,7 @@ import RegisterPage from "./pages/RegisterPage";
 import DashboardPage from "./pages/DashboardPage";
 import VerifyEmailPage from "./pages/VerifyEmailPage";
 import AccountPage from "./pages/AccountPage";
+import HelpPage from "./pages/HelpPage";
 
 function App() {
   return (
@@ -35,6 +36,14 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <AccountPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/help"
+                element={
+                  <ProtectedRoute>
+                    <HelpPage />
                   </ProtectedRoute>
                 }
               />

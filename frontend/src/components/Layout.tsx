@@ -16,6 +16,7 @@ import PersonAddRoundedIcon from "@mui/icons-material/PersonAddRounded";
 import LogoutRoundedIcon from "@mui/icons-material/LogoutRounded";
 import SettingsRoundedIcon from "@mui/icons-material/SettingsRounded";
 import AccountCircleRoundedIcon from "@mui/icons-material/AccountCircleRounded";
+import HelpOutlineRoundedIcon from "@mui/icons-material/HelpOutlineRounded";
 import { useAuth } from "../contexts/AuthContext";
 import AccountSettingsModal from "./AccountSettingsModal";
 
@@ -60,6 +61,15 @@ export default function Layout({ children }: LayoutProps) {
                     sx={{ color: "text.secondary" }}
                   >
                     Account
+                  </Button>
+                  <Button
+                    component={RouterLink}
+                    to="/help"
+                    color="inherit"
+                    startIcon={<HelpOutlineRoundedIcon />}
+                    sx={{ color: "text.secondary" }}
+                  >
+                    Help
                   </Button>
                   <IconButton
                     aria-label="Account settings"
