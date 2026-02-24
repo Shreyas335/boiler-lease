@@ -1,23 +1,30 @@
 import random
 import secrets
+import hashlib
+from datetime import timedelta
 from django.contrib.auth import login, logout
 from django.core.mail import send_mail
 from django.core.cache import cache
 from django.conf import settings
 from django.http import HttpResponseRedirect
+from django.utils import timezone
 from django.views.decorators.csrf import ensure_csrf_cookie
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
-from .email_verification import send_2fa_code_email, send_verification_email
-from .models import User
+from .email_verification import send_2fa_code_email, send_password_reset_email, send_verification_email
+from .models import ListingAmenity, PasswordResetToken, User
 from .serializers import (
     AccountUpdateSerializer,
     FeedbackSubmissionSerializer,
     LoginSerializer,
     PasswordChangeSerializer,
+    PasswordResetConfirmSerializer,
+    PasswordResetRequestSerializer,
+    PropertyListingCreateSerializer,
+    PropertyListingSerializer,
     RegisterSerializer,
     UserSerializer,
     TwoFactorVerifyLoginSerializer,
@@ -35,6 +42,10 @@ def _make_2fa_temp_token(user):
         cache.delete(f"2fa_login:{token}")
         raise
     return token
+
+
+def _hash_token(token):
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
 @api_view(["POST"])
@@ -134,6 +145,74 @@ def change_password(request):
     request.user.set_password(serializer.validated_data["new_password"])
     request.user.save(update_fields=["password"])
     return Response({"detail": "Password updated successfully."}, status=status.HTTP_200_OK)
+
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def password_reset_request(request):
+    serializer = PasswordResetRequestSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    email = serializer.validated_data["email"]
+    user = User.objects.filter(email__iexact=email).first()
+
+    if user:
+        raw_token = secrets.token_urlsafe(32)
+        token_hash = _hash_token(raw_token)
+        while PasswordResetToken.objects.filter(token_hash=token_hash).exists():
+            raw_token = secrets.token_urlsafe(32)
+            token_hash = _hash_token(raw_token)
+
+        PasswordResetToken.objects.create(
+            user=user,
+            token_hash=token_hash,
+            expires_at=timezone.now() + timedelta(minutes=30),
+        )
+        try:
+            send_password_reset_email(user, raw_token)
+        except Exception:
+            pass
+
+    # Generic success response to prevent email enumeration.
+    return Response(
+        {"detail": "If an account exists for that email, a reset link has been sent."},
+        status=status.HTTP_200_OK,
+    )
+
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def password_reset_confirm(request):
+    token = request.data.get("token")
+    if not token:
+        return Response({"token": ["Token is required."]}, status=status.HTTP_400_BAD_REQUEST)
+
+    token_hash = _hash_token(token)
+    reset_token = PasswordResetToken.objects.select_related("user").filter(token_hash=token_hash).first()
+    if not reset_token or not reset_token.is_usable:
+        return Response(
+            {"detail": "Invalid or expired reset link."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    serializer = PasswordResetConfirmSerializer(
+        data=request.data,
+        context={"user": reset_token.user},
+    )
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    user = reset_token.user
+    user.set_password(serializer.validated_data["new_password"])
+    user.save(update_fields=["password"])
+
+    now = timezone.now()
+    reset_token.used_at = now
+    reset_token.save(update_fields=["used_at"])
+    PasswordResetToken.objects.filter(user=user, used_at__isnull=True).update(used_at=now)
+
+    return Response({"detail": "Password reset successful."}, status=status.HTTP_200_OK)
 
 
 @api_view(["GET"])
@@ -266,4 +345,48 @@ def submit_help_feedback(request):
     return Response(
         {"detail": "Feedback submitted successfully."},
         status=status.HTTP_201_CREATED,
+    )
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def create_property_listing(request):
+    if request.user.user_type != User.UserType.SUBLEASER:
+        return Response(
+            {"detail": "Only subleasers can create property listings."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    serializer = PropertyListingCreateSerializer(data=request.data, context={"request": request})
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    listing = serializer.save()
+    return Response(PropertyListingSerializer(listing).data, status=status.HTTP_201_CREATED)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def my_property_listings(request):
+    if request.user.user_type != User.UserType.SUBLEASER:
+        return Response(
+            {"detail": "Only subleasers can view property listings."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    listings = request.user.property_listings.filter(deleted_at__isnull=True).order_by("-created_at")
+    return Response(PropertyListingSerializer(listings, many=True).data)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def listing_amenities(request):
+    if request.user.user_type != User.UserType.SUBLEASER:
+        return Response(
+            {"detail": "Only subleasers can access listing amenities."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    amenities = ListingAmenity.objects.filter(is_active=True).order_by("label")
+    return Response(
+        [{"id": amenity.id, "code": amenity.code, "label": amenity.label} for amenity in amenities]
     )

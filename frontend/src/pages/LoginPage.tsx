@@ -197,6 +197,11 @@ export default function LoginPage() {
                 ),
               }}
             />
+            <Box sx={{ display: "flex", justifyContent: "flex-end", mb: 2 }}>
+              <Link component={RouterLink} to="/forgot-password" sx={{ fontSize: "0.9rem" }}>
+                Forgot password?
+              </Link>
+            </Box>
             <Button
               type="submit"
               variant="contained"
