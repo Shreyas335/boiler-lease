@@ -1,7 +1,7 @@
 from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
 
-from .models import User
+from .models import FeedbackSubmission, User
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -172,4 +172,20 @@ class TwoFactorVerifyLoginSerializer(serializers.Serializer):
         value = value.strip().replace(" ", "")
         if not value.isdigit():
             raise serializers.ValidationError("Code must be 6 digits.")
+        return value
+
+
+class FeedbackSubmissionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = FeedbackSubmission
+        fields = ("id", "subject", "message", "created_at")
+        read_only_fields = ("id", "created_at")
+
+    def validate_subject(self, value):
+        return value.strip()
+
+    def validate_message(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("Message is required.")
         return value
