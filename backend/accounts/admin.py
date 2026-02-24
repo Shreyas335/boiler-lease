@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 
-from .models import User
+from .models import FeedbackSubmission, User
 
 
 @admin.register(User)
@@ -14,3 +14,17 @@ class UserAdmin(BaseUserAdmin):
     add_fieldsets = BaseUserAdmin.add_fieldsets + (
         ("User Type", {"fields": ("user_type",)}),
     )
+
+
+@admin.register(FeedbackSubmission)
+class FeedbackSubmissionAdmin(admin.ModelAdmin):
+    list_display = ("id", "user", "subject", "created_at")
+    search_fields = ("subject", "message", "user__email", "user__username")
+    list_filter = ("created_at",)
+    readonly_fields = ("user", "subject", "message", "created_at")
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return request.user.is_staff

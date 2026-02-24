@@ -29,3 +29,24 @@ class User(AbstractUser):
 
     class Meta:
         db_table = "accounts_user"
+
+
+class FeedbackSubmission(models.Model):
+    """Feedback message submitted from the Help page."""
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="feedback_submissions",
+    )
+    subject = models.CharField(max_length=120, blank=True)
+    message = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+
+    def __str__(self):
+        if self.subject:
+            return self.subject
+        return f"Feedback #{self.pk}"

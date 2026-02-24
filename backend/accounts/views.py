@@ -1,6 +1,7 @@
 import random
 import secrets
 from django.contrib.auth import login, logout
+from django.core.mail import send_mail
 from django.core.cache import cache
 from django.conf import settings
 from django.http import HttpResponseRedirect
@@ -14,6 +15,7 @@ from .email_verification import send_2fa_code_email, send_verification_email
 from .models import User
 from .serializers import (
     AccountUpdateSerializer,
+    FeedbackSubmissionSerializer,
     LoginSerializer,
     PasswordChangeSerializer,
     RegisterSerializer,
@@ -234,3 +236,34 @@ def two_factor_disable(request):
     user.two_factor_enabled = False
     user.save(update_fields=["totp_secret", "two_factor_enabled"])
     return Response({"detail": "Two-factor authentication disabled."})
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def submit_help_feedback(request):
+    serializer = FeedbackSubmissionSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    feedback = serializer.save(user=request.user)
+
+    # Best-effort email notification for admins; failures should not block submit.
+    try:
+        send_mail(
+            subject=f"[Boiler Lease Feedback] {feedback.subject or 'No subject'}",
+            message=(
+                f"From: {request.user.email} ({request.user.username})\n\n"
+                f"{feedback.message}\n\n"
+                f"Submission ID: {feedback.id}"
+            ),
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[email for _, email in settings.ADMINS] if settings.ADMINS else [],
+            fail_silently=True,
+        )
+    except Exception:
+        pass
+
+    return Response(
+        {"detail": "Feedback submitted successfully."},
+        status=status.HTTP_201_CREATED,
+    )

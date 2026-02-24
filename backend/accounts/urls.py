@@ -16,4 +16,5 @@ urlpatterns = [
     path("account/settings/", views.account_settings),
     path("account/2fa/enable/", views.two_factor_enable),
     path("account/2fa/disable/", views.two_factor_disable),
+    path("help/feedback/", views.submit_help_feedback),
 ]
