@@ -118,3 +118,25 @@ export async function changePassword(payload: ChangePasswordPayload): Promise<{ 
   const { data } = await api.post<{ detail: string }>("/account/password/", payload);
   return data;
 }
+
+export interface PasswordResetRequestPayload {
+  email: string;
+}
+
+export async function requestPasswordReset(payload: PasswordResetRequestPayload): Promise<{ detail: string }> {
+  await fetchCsrfToken();
+  const { data } = await api.post<{ detail: string }>("/auth/password-reset/request/", payload);
+  return data;
+}
+
+export interface PasswordResetConfirmPayload {
+  token: string;
+  new_password: string;
+  new_password_confirm: string;
+}
+
+export async function confirmPasswordReset(payload: PasswordResetConfirmPayload): Promise<{ detail: string }> {
+  await fetchCsrfToken();
+  const { data } = await api.post<{ detail: string }>("/auth/password-reset/confirm/", payload);
+  return data;
+}

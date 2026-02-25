@@ -1,7 +1,15 @@
 from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
-from .models import FeedbackSubmission, User
+from .models import (
+    FeedbackSubmission,
+    ListingAmenity,
+    ListingAmenityMap,
+    ListingMedia,
+    PropertyListing,
+    User,
+)
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -189,3 +197,193 @@ class FeedbackSubmissionSerializer(serializers.ModelSerializer):
         if not value:
             raise serializers.ValidationError("Message is required.")
         return value
+
+
+class ListingMediaSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ListingMedia
+        fields = ("id", "media_type", "file_url", "thumbnail_url", "display_order", "is_primary")
+
+
+class ListingAmenitySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ListingAmenity
+        fields = ("id", "code", "label", "category")
+
+
+class PropertyListingSerializer(serializers.ModelSerializer):
+    amenities = serializers.SerializerMethodField()
+    media = ListingMediaSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = PropertyListing
+        fields = (
+            "id",
+            "title",
+            "description",
+            "property_type",
+            "bedrooms",
+            "bathrooms",
+            "square_feet",
+            "furnished_status",
+            "monthly_rent",
+            "security_deposit",
+            "utilities_included",
+            "availability_start_date",
+            "availability_end_date",
+            "lease_term_min_months",
+            "lease_term_max_months",
+            "pets_allowed",
+            "smoking_allowed",
+            "street_line_1",
+            "street_line_2",
+            "city",
+            "state",
+            "postal_code",
+            "country_code",
+            "latitude",
+            "longitude",
+            "unit_number",
+            "building_name",
+            "parking_available",
+            "parking_details",
+            "contact_email",
+            "contact_phone",
+            "virtual_tour_url",
+            "status",
+            "approval_status",
+            "published_at",
+            "created_at",
+            "updated_at",
+            "amenities",
+            "media",
+        )
+
+    def get_amenities(self, obj):
+        amenities = ListingAmenity.objects.filter(listing_links__listing=obj, is_active=True).distinct()
+        return ListingAmenitySerializer(amenities, many=True).data
+
+
+class PropertyListingCreateSerializer(serializers.ModelSerializer):
+    amenity_codes = serializers.ListField(
+        child=serializers.CharField(max_length=60),
+        required=False,
+        allow_empty=True,
+        write_only=True,
+    )
+
+    class Meta:
+        model = PropertyListing
+        fields = (
+            "title",
+            "description",
+            "property_type",
+            "bedrooms",
+            "bathrooms",
+            "square_feet",
+            "furnished_status",
+            "monthly_rent",
+            "security_deposit",
+            "utilities_included",
+            "availability_start_date",
+            "availability_end_date",
+            "lease_term_min_months",
+            "lease_term_max_months",
+            "pets_allowed",
+            "smoking_allowed",
+            "street_line_1",
+            "street_line_2",
+            "city",
+            "state",
+            "postal_code",
+            "country_code",
+            "latitude",
+            "longitude",
+            "unit_number",
+            "building_name",
+            "parking_available",
+            "parking_details",
+            "contact_email",
+            "contact_phone",
+            "virtual_tour_url",
+            "status",
+            "amenity_codes",
+        )
+        extra_kwargs = {
+            "title": {"required": True},
+            "description": {"required": True},
+            "monthly_rent": {"required": True},
+            "availability_start_date": {"required": True},
+            "availability_end_date": {"required": True},
+            "street_line_1": {"required": True},
+            "city": {"required": True},
+            "state": {"required": True},
+            "postal_code": {"required": True},
+        }
+
+    def validate(self, attrs):
+        start_date = attrs.get("availability_start_date")
+        end_date = attrs.get("availability_end_date")
+        if start_date and end_date and start_date > end_date:
+            raise serializers.ValidationError(
+                {"availability_end_date": ["End date must be on or after start date."]}
+            )
+
+        lease_term_min = attrs.get("lease_term_min_months")
+        lease_term_max = attrs.get("lease_term_max_months")
+        if (
+            lease_term_min is not None
+            and lease_term_max is not None
+            and lease_term_min > lease_term_max
+        ):
+            raise serializers.ValidationError(
+                {"lease_term_max_months": ["Max lease term must be greater than or equal to min lease term."]}
+            )
+
+        if attrs.get("parking_available") is False and attrs.get("parking_details"):
+            raise serializers.ValidationError(
+                {"parking_details": ["Parking details are only allowed when parking is available."]}
+            )
+
+        return attrs
+
+    def create(self, validated_data):
+        amenity_codes = validated_data.pop("amenity_codes", [])
+        owner = self.context["request"].user
+        if not validated_data.get("contact_email"):
+            validated_data["contact_email"] = owner.email
+        listing = PropertyListing.objects.create(owner=owner, **validated_data)
+
+        if amenity_codes:
+            amenities = ListingAmenity.objects.filter(code__in=amenity_codes, is_active=True)
+            ListingAmenityMap.objects.bulk_create(
+                [ListingAmenityMap(listing=listing, amenity=amenity) for amenity in amenities],
+                ignore_conflicts=True,
+            )
+        return listing
+
+
+class PasswordResetRequestSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+
+
+class PasswordResetConfirmSerializer(serializers.Serializer):
+    token = serializers.CharField()
+    new_password = serializers.CharField(write_only=True)
+    new_password_confirm = serializers.CharField(write_only=True)
+
+    def validate(self, attrs):
+        new_password = attrs["new_password"]
+        new_password_confirm = attrs["new_password_confirm"]
+
+        if new_password != new_password_confirm:
+            raise serializers.ValidationError(
+                {"new_password_confirm": ["New passwords do not match."]}
+            )
+
+        user = self.context.get("user")
+        try:
+            validate_password(new_password, user=user)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError({"new_password": list(exc.messages)})
+        return attrs
