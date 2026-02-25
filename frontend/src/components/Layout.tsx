@@ -17,6 +17,8 @@ import LogoutRoundedIcon from "@mui/icons-material/LogoutRounded";
 import SettingsRoundedIcon from "@mui/icons-material/SettingsRounded";
 import AccountCircleRoundedIcon from "@mui/icons-material/AccountCircleRounded";
 import HelpOutlineRoundedIcon from "@mui/icons-material/HelpOutlineRounded";
+import AddHomeRoundedIcon from "@mui/icons-material/AddHomeRounded";
+import ApartmentRoundedIcon from "@mui/icons-material/ApartmentRounded";
 import { useAuth } from "../contexts/AuthContext";
 import AccountSettingsModal from "./AccountSettingsModal";
 
@@ -71,6 +73,28 @@ export default function Layout({ children }: LayoutProps) {
                   >
                     Help
                   </Button>
+                  {user.user_type === "subleaser" && (
+                    <>
+                      <Button
+                        component={RouterLink}
+                        to="/listings/new"
+                        color="inherit"
+                        startIcon={<AddHomeRoundedIcon />}
+                        sx={{ color: "text.secondary" }}
+                      >
+                        Create Listing
+                      </Button>
+                      <Button
+                        component={RouterLink}
+                        to="/my-listings"
+                        color="inherit"
+                        startIcon={<ApartmentRoundedIcon />}
+                        sx={{ color: "text.secondary" }}
+                      >
+                        My Listings
+                      </Button>
+                    </>
+                  )}
                   <IconButton
                     aria-label="Account settings"
                     onClick={() => setSettingsOpen(true)}

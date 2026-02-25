@@ -53,3 +53,22 @@ def send_2fa_code_email(user, code):
         recipient_list=[user.email],
         fail_silently=False,
     )
+
+
+def send_password_reset_email(user, raw_token):
+    reset_url = f"{settings.FRONTEND_URL}/reset-password?token={raw_token}"
+    subject = "Reset your Boiler Lease password"
+    message = (
+        f"Hi {user.get_full_name() or user.username},\n\n"
+        "We received a request to reset your password.\n"
+        f"Reset it here: {reset_url}\n\n"
+        "This link expires in 30 minutes. If you didn't request this, you can ignore this email.\n\n"
+        "— Boiler Lease"
+    )
+    send_mail(
+        subject=subject,
+        message=message,
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        recipient_list=[user.email],
+        fail_silently=False,
+    )

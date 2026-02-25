@@ -11,6 +11,10 @@ import DashboardPage from "./pages/DashboardPage";
 import VerifyEmailPage from "./pages/VerifyEmailPage";
 import AccountPage from "./pages/AccountPage";
 import HelpPage from "./pages/HelpPage";
+import CreateListingPage from "./pages/CreateListingPage";
+import MyListingsPage from "./pages/MyListingsPage";
+import ForgotPasswordPage from "./pages/ForgotPasswordPage";
+import ResetPasswordPage from "./pages/ResetPasswordPage";
 
 function App() {
   return (
@@ -22,6 +26,8 @@ function App() {
             <Routes>
               <Route path="/" element={<LandingPage />} />
               <Route path="/login" element={<LoginPage />} />
+              <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+              <Route path="/reset-password" element={<ResetPasswordPage />} />
               <Route path="/register" element={<RegisterPage />} />
               <Route
                 path="/dashboard"
@@ -44,6 +50,22 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <HelpPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/listings/new"
+                element={
+                  <ProtectedRoute>
+                    <CreateListingPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/my-listings"
+                element={
+                  <ProtectedRoute>
+                    <MyListingsPage />
                   </ProtectedRoute>
                 }
               />
