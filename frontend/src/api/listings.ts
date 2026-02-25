@@ -83,7 +83,9 @@ export interface CreatePropertyListingPayload {
   amenity_codes?: string[];
 }
 
-export async function createListing(payload: CreatePropertyListingPayload): Promise<PropertyListing> {
+export async function createListing(
+  payload: CreatePropertyListingPayload,
+): Promise<PropertyListing> {
   const { data } = await api.post<PropertyListing>("/listings/", payload);
   return data;
 }
@@ -96,4 +98,19 @@ export async function getMyListings(): Promise<PropertyListing[]> {
 export async function getListingAmenities(): Promise<ListingAmenity[]> {
   const { data } = await api.get<ListingAmenity[]>("/listings/amenities/");
   return data;
+}
+
+export async function updateListing(
+  id: number,
+  payload: Partial<CreatePropertyListingPayload>,
+): Promise<PropertyListing> {
+  const { data } = await api.patch<PropertyListing>(
+    `/listings/${id}/`,
+    payload,
+  );
+  return data;
+}
+
+export async function deleteListing(id: number): Promise<void> {
+  await api.delete(`/listings/${id}/delete/`);
 }

@@ -25,6 +25,7 @@ from .serializers import (
     PasswordResetRequestSerializer,
     PropertyListingCreateSerializer,
     PropertyListingSerializer,
+    PropertyListingUpdateSerializer,
     RegisterSerializer,
     UserSerializer,
     TwoFactorVerifyLoginSerializer,
@@ -389,4 +390,55 @@ def listing_amenities(request):
     amenities = ListingAmenity.objects.filter(is_active=True).order_by("label")
     return Response(
         [{"id": amenity.id, "code": amenity.code, "label": amenity.label} for amenity in amenities]
+    )
+
+
+@api_view(["PATCH"])
+@permission_classes([IsAuthenticated])
+def update_property_listing(request, listing_id):
+    if request.user.user_type != User.UserType.SUBLEASER:
+        return Response(
+            {"detail": "Only subleasers can update property listings."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    try:
+        listing = PropertyListing.objects.get(id=listing_id, owner=request.user, deleted_at__isnull=True)
+    except PropertyListing.DoesNotExist:
+        return Response(
+            {"detail": "Listing not found."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    serializer = PropertyListingUpdateSerializer(listing, data=request.data, partial=True)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    serializer.save()
+    return Response(PropertyListingSerializer(listing).data, status=status.HTTP_200_OK)
+
+
+@api_view(["DELETE"])
+@permission_classes([IsAuthenticated])
+def delete_property_listing(request, listing_id):
+    if request.user.user_type != User.UserType.SUBLEASER:
+        return Response(
+            {"detail": "Only subleasers can delete property listings."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    try:
+        listing = PropertyListing.objects.get(id=listing_id, owner=request.user, deleted_at__isnull=True)
+    except PropertyListing.DoesNotExist:
+        return Response(
+            {"detail": "Listing not found."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    listing.deleted_at = timezone.now()
+    listing.save(update_fields=["deleted_at"])
+
+    return Response(
+        {"detail": "Listing deleted successfully."},
+        status=status.HTTP_204_NO_CONTENT,
     )

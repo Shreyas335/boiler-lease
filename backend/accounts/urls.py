@@ -21,5 +21,7 @@ urlpatterns = [
     path("help/feedback/", views.submit_help_feedback),
     path("listings/", views.create_property_listing),
     path("listings/mine/", views.my_property_listings),
+    path("listings/<int:listing_id>/", views.update_property_listing),
+    path("listings/<int:listing_id>/delete/", views.delete_property_listing),
     path("listings/amenities/", views.listing_amenities),
 ]

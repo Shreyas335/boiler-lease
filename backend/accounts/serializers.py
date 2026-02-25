@@ -363,6 +363,110 @@ class PropertyListingCreateSerializer(serializers.ModelSerializer):
         return listing
 
 
+class PropertyListingUpdateSerializer(serializers.ModelSerializer):
+    amenity_codes = serializers.ListField(
+        child=serializers.CharField(max_length=60),
+        required=False,
+        allow_empty=True,
+        write_only=True,
+    )
+
+    class Meta:
+        model = PropertyListing
+        fields = (
+            "title",
+            "description",
+            "property_type",
+            "bedrooms",
+            "bathrooms",
+            "square_feet",
+            "furnished_status",
+            "monthly_rent",
+            "security_deposit",
+            "utilities_included",
+            "availability_start_date",
+            "availability_end_date",
+            "lease_term_min_months",
+            "lease_term_max_months",
+            "pets_allowed",
+            "smoking_allowed",
+            "street_line_1",
+            "street_line_2",
+            "city",
+            "state",
+            "postal_code",
+            "country_code",
+            "latitude",
+            "longitude",
+            "unit_number",
+            "building_name",
+            "parking_available",
+            "parking_details",
+            "contact_email",
+            "contact_phone",
+            "virtual_tour_url",
+            "status",
+            "amenity_codes",
+        )
+        extra_kwargs = {
+            "title": {"required": False},
+            "description": {"required": False},
+            "monthly_rent": {"required": False},
+            "availability_start_date": {"required": False},
+            "availability_end_date": {"required": False},
+            "street_line_1": {"required": False},
+            "city": {"required": False},
+            "state": {"required": False},
+            "postal_code": {"required": False},
+        }
+
+    def validate(self, attrs):
+        start_date = attrs.get("availability_start_date") or self.instance.availability_start_date
+        end_date = attrs.get("availability_end_date") or self.instance.availability_end_date
+        if start_date and end_date and start_date > end_date:
+            raise serializers.ValidationError(
+                {"availability_end_date": ["End date must be on or after start date."]}
+            )
+
+        lease_term_min = attrs.get("lease_term_min_months") or self.instance.lease_term_min_months
+        lease_term_max = attrs.get("lease_term_max_months") or self.instance.lease_term_max_months
+        if (
+            lease_term_min is not None
+            and lease_term_max is not None
+            and lease_term_min > lease_term_max
+        ):
+            raise serializers.ValidationError(
+                {"lease_term_max_months": ["Max lease term must be greater than or equal to min lease term."]}
+            )
+
+        parking_available = attrs.get("parking_available", self.instance.parking_available)
+        parking_details = attrs.get("parking_details", self.instance.parking_details)
+        if parking_available is False and parking_details:
+            raise serializers.ValidationError(
+                {"parking_details": ["Parking details are only allowed when parking is available."]}
+            )
+
+        return attrs
+
+    def update(self, instance, validated_data):
+        amenity_codes = validated_data.pop("amenity_codes", None)
+
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+
+        if amenity_codes is not None:
+            instance.amenity_links.all().delete()
+            if amenity_codes:
+                amenities = ListingAmenity.objects.filter(code__in=amenity_codes, is_active=True)
+                ListingAmenityMap.objects.bulk_create(
+                    [ListingAmenityMap(listing=instance, amenity=amenity) for amenity in amenities],
+                    ignore_conflicts=True,
+                )
+
+        return instance
+
+
 class PasswordResetRequestSerializer(serializers.Serializer):
     email = serializers.EmailField()
 

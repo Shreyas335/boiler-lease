@@ -12,6 +12,7 @@ import VerifyEmailPage from "./pages/VerifyEmailPage";
 import AccountPage from "./pages/AccountPage";
 import HelpPage from "./pages/HelpPage";
 import CreateListingPage from "./pages/CreateListingPage";
+import EditListingPage from "./pages/EditListingPage";
 import MyListingsPage from "./pages/MyListingsPage";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
@@ -58,6 +59,14 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <CreateListingPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/listings/:id/edit"
+                element={
+                  <ProtectedRoute>
+                    <EditListingPage />
                   </ProtectedRoute>
                 }
               />
