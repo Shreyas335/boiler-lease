@@ -10,13 +10,17 @@ from django.db.models.functions import Coalesce
 from django.http import HttpResponseRedirect
 from django.utils import timezone
 from django.views.decorators.csrf import ensure_csrf_cookie
+from django.db.models import Q, Prefetch
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
 from .email_verification import send_2fa_code_email, send_password_reset_email, send_verification_email
-from .models import FavoriteListing, ListingAmenity, PasswordResetToken, PropertyBooking, PropertyListing, User
+
+from .models import ListingAmenity, ListingAmenityMap, PasswordResetToken, PropertyListing, User, FavoriteListing, ListingAmenity, PasswordResetToken, PropertyBooking, PropertyListing, User
+from .pagination import PropertyListingPagination
+
 from .serializers import (
     AccountUpdateSerializer,
     FavoriteListingSerializer,
@@ -25,6 +29,8 @@ from .serializers import (
     PasswordChangeSerializer,
     PasswordResetConfirmSerializer,
     PasswordResetRequestSerializer,
+    PropertyListingBrowseSerializer,
+    PropertyListingUpdateSerializer,
     PropertyBookingSerializer,
     PropertyListingCreateSerializer,
     PropertyListingSerializer,
@@ -440,6 +446,180 @@ def listing_amenities(request):
     )
 
 
+@api_view(["PATCH"])
+@permission_classes([IsAuthenticated])
+def update_property_listing(request, listing_id):
+    if request.user.user_type != User.UserType.SUBLEASER:
+        return Response(
+            {"detail": "Only subleasers can update property listings."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    try:
+        listing = PropertyListing.objects.get(id=listing_id, owner=request.user, deleted_at__isnull=True)
+    except PropertyListing.DoesNotExist:
+        return Response(
+            {"detail": "Listing not found."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    serializer = PropertyListingUpdateSerializer(listing, data=request.data, partial=True)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    serializer.save()
+    return Response(PropertyListingSerializer(listing).data, status=status.HTTP_200_OK)
+
+
+@api_view(["DELETE"])
+@permission_classes([IsAuthenticated])
+def delete_property_listing(request, listing_id):
+    if request.user.user_type != User.UserType.SUBLEASER:
+        return Response(
+            {"detail": "Only subleasers can delete property listings."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    try:
+        listing = PropertyListing.objects.get(id=listing_id, owner=request.user, deleted_at__isnull=True)
+    except PropertyListing.DoesNotExist:
+        return Response(
+            {"detail": "Listing not found."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    listing.deleted_at = timezone.now()
+    listing.save(update_fields=["deleted_at"])
+
+    return Response(
+        {"detail": "Listing deleted successfully."},
+        status=status.HTTP_200_OK,
+    )
+
+
+# ----- Property Listing Browse (Public) -----
+
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def browse_property_listings(request):
+    """
+    Browse available sublease properties with filtering, sorting, and pagination.
+    Query parameters: search, price_min, price_max, bedrooms_min, bedrooms_max,
+    bathrooms_min, bathrooms_max, city, state, sort_by, page, page_size
+    """
+    # Base queryset: only published and approved listings
+    queryset = PropertyListing.objects.filter(
+        status=PropertyListing.ListingStatus.PUBLISHED,
+        approval_status=PropertyListing.ApprovalStatus.APPROVED,
+        deleted_at__isnull=True,
+    )
+
+    # Optimization: select_related and prefetch_related
+    queryset = queryset.select_related('owner').prefetch_related(
+        Prefetch('media'),
+        Prefetch('amenity_links__amenity', queryset=ListingAmenity.objects.filter(is_active=True))
+    )
+
+    # Apply search filter (search across title, description, city, state, postal_code)
+    search_query = request.query_params.get('search', '').strip()
+    if search_query:
+        queryset = queryset.filter(
+            Q(title__icontains=search_query) |
+            Q(description__icontains=search_query) |
+            Q(city__icontains=search_query) |
+            Q(state__icontains=search_query) |
+            Q(postal_code__icontains=search_query)
+        )
+
+    # Apply price range filter
+    price_min = request.query_params.get('price_min')
+    price_max = request.query_params.get('price_max')
+    if price_min:
+        try:
+            queryset = queryset.filter(monthly_rent__gte=int(price_min))
+        except (ValueError, TypeError):
+            pass
+    if price_max:
+        try:
+            queryset = queryset.filter(monthly_rent__lte=int(price_max))
+        except (ValueError, TypeError):
+            pass
+
+    # Apply bedroom filter
+    bedrooms_min = request.query_params.get('bedrooms_min')
+    bedrooms_max = request.query_params.get('bedrooms_max')
+    if bedrooms_min:
+        try:
+            queryset = queryset.filter(bedrooms__gte=float(bedrooms_min))
+        except (ValueError, TypeError):
+            pass
+    if bedrooms_max:
+        try:
+            queryset = queryset.filter(bedrooms__lte=float(bedrooms_max))
+        except (ValueError, TypeError):
+            pass
+
+    # Apply bathroom filter
+    bathrooms_min = request.query_params.get('bathrooms_min')
+    bathrooms_max = request.query_params.get('bathrooms_max')
+    if bathrooms_min:
+        try:
+            queryset = queryset.filter(bathrooms__gte=float(bathrooms_min))
+        except (ValueError, TypeError):
+            pass
+    if bathrooms_max:
+        try:
+            queryset = queryset.filter(bathrooms__lte=float(bathrooms_max))
+        except (ValueError, TypeError):
+            pass
+
+    # Apply location filter (city)
+    city = request.query_params.get('city', '').strip()
+    if city:
+        queryset = queryset.filter(city__iexact=city)
+
+    # Apply location filter (state)
+    state = request.query_params.get('state', '').strip()
+    if state:
+        queryset = queryset.filter(state__iexact=state)
+
+    # Apply property type filter
+    property_type = request.query_params.get('property_type', '').strip()
+    if property_type:
+        queryset = queryset.filter(property_type__iexact=property_type)
+
+    # Apply furnished status filter
+    furnished_status = request.query_params.get('furnished_status', '').strip()
+    if furnished_status:
+        queryset = queryset.filter(furnished_status__iexact=furnished_status)
+
+    # Apply boolean filters
+    utilities_included = request.query_params.get('utilities_included')
+    if utilities_included is not None and utilities_included.lower() in ('true', '1'):
+        queryset = queryset.filter(utilities_included=True)
+
+    pets_allowed = request.query_params.get('pets_allowed')
+    if pets_allowed is not None and pets_allowed.lower() in ('true', '1'):
+        queryset = queryset.filter(pets_allowed=True)
+
+    parking_available = request.query_params.get('parking_available')
+    if parking_available is not None and parking_available.lower() in ('true', '1'):
+        queryset = queryset.filter(parking_available=True)
+
+    # Apply sorting
+    sort_by = request.query_params.get('sort_by', 'availability_start_date')
+    valid_sorts = ['availability_start_date', '-availability_start_date', 'monthly_rent', '-monthly_rent', 'created_at', '-created_at']
+    if sort_by in valid_sorts:
+        queryset = queryset.order_by(sort_by)
+    else:
+        queryset = queryset.order_by('availability_start_date')
+
+    # Apply pagination
+    paginator = PropertyListingPagination()
+    paginated_queryset = paginator.paginate_queryset(queryset, request)
+    serializer = PropertyListingBrowseSerializer(paginated_queryset, many=True)
+    return paginator.get_paginated_response(serializer.data)
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def browse_property_listings(request):

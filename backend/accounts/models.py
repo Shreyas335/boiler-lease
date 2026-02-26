@@ -126,7 +126,7 @@ class PropertyListing(models.Model):
     approval_status = models.CharField(
         max_length=16,
         choices=ApprovalStatus.choices,
-        default=ApprovalStatus.PENDING,
+        default=ApprovalStatus.APPROVED,
     )
     published_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
