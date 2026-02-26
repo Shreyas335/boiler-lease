@@ -132,6 +132,38 @@ export async function createListing(
   return data;
 }
 
+export async function uploadListingMedia(
+  listingId: number,
+  file: File,
+  isPrimary = false,
+  displayOrder?: number,
+): Promise<ListingMedia> {
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("is_primary", String(isPrimary));
+  if (displayOrder !== undefined) {
+    formData.append("display_order", String(displayOrder));
+  }
+  const { data } = await api.post<ListingMedia>(
+    `/listings/${listingId}/media/`,
+    formData,
+    {
+      headers: { "Content-Type": "multipart/form-data" },
+    },
+  );
+  return data;
+}
+
+export async function setPrimaryListingMedia(
+  listingId: number,
+  mediaId: number,
+): Promise<PropertyListing> {
+  const { data } = await api.patch<PropertyListing>(
+    `/listings/${listingId}/media/${mediaId}/primary/`,
+  );
+  return data;
+}
+
 export async function getMyListings(): Promise<PropertyListing[]> {
   const { data } = await api.get<PropertyListing[]>("/listings/mine/");
   return data;

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Box,
@@ -16,9 +16,16 @@ import {
 } from "@mui/material";
 import type { AxiosError } from "axios";
 import { useNavigate } from "react-router-dom";
-import { createListing, getListingAmenities, type CreatePropertyListingPayload, type ListingAmenity } from "../api/listings";
+import {
+  createListing,
+  getListingAmenities,
+  uploadListingMedia,
+  type CreatePropertyListingPayload,
+  type ListingAmenity,
+} from "../api/listings";
 import { useAuth } from "../contexts/AuthContext";
 import AddressAutocomplete, { type AddressComponents } from "../components/AddressAutocomplete";
+import { getListingWarnings, validateListingForm } from "../utils/listingFormValidation";
 
 const PROPERTY_TYPES = ["apartment", "house", "condo", "studio", "other"];
 const FURNISHED_OPTIONS = ["furnished", "unfurnished", "partially_furnished"];
@@ -64,6 +71,10 @@ export default function CreateListingPage() {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [addressInput, setAddressInput] = useState("");
   const [isAddressVerified, setIsAddressVerified] = useState(false);
+  const [pendingImages, setPendingImages] = useState<
+    { id: string; file: File; previewUrl: string; isPrimary: boolean }[]
+  >([]);
+  const pendingImagesRef = useRef(pendingImages);
 
   useEffect(() => {
     async function loadAmenities() {
@@ -81,6 +92,17 @@ export default function CreateListingPage() {
   }, [user]);
 
   const isDirty = useMemo(() => JSON.stringify(form) !== JSON.stringify(INITIAL_FORM), [form]);
+  const warnings = useMemo(() => getListingWarnings(form), [form]);
+
+  useEffect(() => {
+    pendingImagesRef.current = pendingImages;
+  }, [pendingImages]);
+
+  useEffect(() => {
+    return () => {
+      pendingImagesRef.current.forEach((image) => URL.revokeObjectURL(image.previewUrl));
+    };
+  }, []);
 
   if (!user || user.user_type !== "subleaser") {
     return (
@@ -131,30 +153,7 @@ export default function CreateListingPage() {
   }
 
   function validateForm(): boolean {
-    const nextErrors: Record<string, string> = {};
-    if (!form.title.trim()) nextErrors.title = "Title is required.";
-    if (!form.description.trim()) nextErrors.description = "Description is required.";
-    if (!form.monthly_rent.trim()) nextErrors.monthly_rent = "Monthly rent is required.";
-    if (!form.availability_start_date) nextErrors.availability_start_date = "Start date is required.";
-    if (!form.availability_end_date) nextErrors.availability_end_date = "End date is required.";
-
-    // Address must be verified via Google (has lat/lng)
-    if (!isAddressVerified || !form.latitude || !form.longitude) {
-      nextErrors.address = "Please select an address from the Google suggestions.";
-    }
-
-    if (
-      form.availability_start_date &&
-      form.availability_end_date &&
-      form.availability_start_date > form.availability_end_date
-    ) {
-      nextErrors.availability_end_date = "End date must be on or after start date.";
-    }
-
-    if (!form.parking_available && form.parking_details?.trim()) {
-      nextErrors.parking_details = "Parking details should be empty unless parking is available.";
-    }
-
+    const nextErrors = validateListingForm(form, isAddressVerified);
     setFieldErrors(nextErrors);
     return Object.keys(nextErrors).length === 0;
   }
@@ -170,9 +169,29 @@ export default function CreateListingPage() {
 
     setSubmitting(true);
     try {
-      await createListing(form);
-      setPageMessage({ type: "success", text: "Listing created successfully." });
-      navigate("/my-listings");
+      const listing = await createListing(form);
+      let uploadFailures = 0;
+      if (pendingImages.length > 0) {
+        for (let index = 0; index < pendingImages.length; index += 1) {
+          const image = pendingImages[index];
+          try {
+            await uploadListingMedia(listing.id, image.file, image.isPrimary, index);
+          } catch {
+            uploadFailures += 1;
+          }
+        }
+      }
+
+      if (uploadFailures > 0) {
+        setPageMessage({
+          type: "error",
+          text: "Listing created, but some photos failed to upload. You can retry in Edit Listing.",
+        });
+        navigate(`/listings/${listing.id}/edit`, { state: { listing } });
+      } else {
+        setPageMessage({ type: "success", text: "Listing created successfully." });
+        navigate("/my-listings");
+      }
     } catch (error) {
       const axiosError = error as AxiosError<Record<string, unknown>>;
       const data = axiosError.response?.data || {};
@@ -193,6 +212,50 @@ export default function CreateListingPage() {
       return;
     }
     navigate("/my-listings");
+  }
+
+  function handleImageSelect(event: React.ChangeEvent<HTMLInputElement>) {
+    const files = event.target.files ? Array.from(event.target.files) : [];
+    if (!files.length) return;
+
+    setPendingImages((prev) => {
+      const hasPrimary = prev.some((image) => image.isPrimary);
+      let primaryAssigned = hasPrimary;
+      const next = files.map((file, index) => {
+        const isPrimary = !primaryAssigned && index === 0;
+        if (isPrimary) primaryAssigned = true;
+        return {
+          id: `${Date.now()}-${index}`,
+          file,
+          previewUrl: URL.createObjectURL(file),
+          isPrimary,
+        };
+      });
+      return [...prev, ...next];
+    });
+
+    event.target.value = "";
+  }
+
+  function handleRemoveImage(id: string) {
+    setPendingImages((prev) => {
+      const match = prev.find((image) => image.id === id);
+      if (match) URL.revokeObjectURL(match.previewUrl);
+      const next = prev.filter((image) => image.id !== id);
+      if (next.length > 0 && !next.some((image) => image.isPrimary)) {
+        next[0].isPrimary = true;
+      }
+      return [...next];
+    });
+  }
+
+  function handlePrimaryChange(id: string) {
+    setPendingImages((prev) =>
+      prev.map((image) => ({
+        ...image,
+        isPrimary: image.id === id,
+      })),
+    );
   }
 
   return (
@@ -259,6 +322,8 @@ export default function CreateListingPage() {
                     label="Monthly rent"
                     value={form.monthly_rent}
                     onChange={(e) => handleChange("monthly_rent", e.target.value)}
+                    type="number"
+                    inputProps={{ min: 1, step: 1 }}
                     error={Boolean(fieldErrors.monthly_rent)}
                     helperText={fieldErrors.monthly_rent}
                   />
@@ -269,6 +334,19 @@ export default function CreateListingPage() {
                     label="Security deposit"
                     value={form.security_deposit || ""}
                     onChange={(e) => handleChange("security_deposit", e.target.value)}
+                    type="number"
+                    inputProps={{ min: 0, step: 1 }}
+                    error={Boolean(fieldErrors.security_deposit)}
+                    helperText={fieldErrors.security_deposit || warnings.security_deposit}
+                    FormHelperTextProps={{
+                      sx: {
+                        color: fieldErrors.security_deposit
+                          ? "error.main"
+                          : warnings.security_deposit
+                          ? "warning.main"
+                          : "text.secondary",
+                      },
+                    }}
                   />
                 </Grid>
                 <Grid size={{ xs: 6, md: 2 }}>
@@ -277,6 +355,10 @@ export default function CreateListingPage() {
                     label="Beds"
                     value={form.bedrooms}
                     onChange={(e) => handleChange("bedrooms", e.target.value)}
+                    type="number"
+                    inputProps={{ min: 0, step: 1 }}
+                    error={Boolean(fieldErrors.bedrooms)}
+                    helperText={fieldErrors.bedrooms}
                   />
                 </Grid>
                 <Grid size={{ xs: 6, md: 2 }}>
@@ -285,6 +367,10 @@ export default function CreateListingPage() {
                     label="Baths"
                     value={form.bathrooms}
                     onChange={(e) => handleChange("bathrooms", e.target.value)}
+                    type="number"
+                    inputProps={{ min: 0, step: 0.5 }}
+                    error={Boolean(fieldErrors.bathrooms)}
+                    helperText={fieldErrors.bathrooms}
                   />
                 </Grid>
                 <Grid size={{ xs: 12, md: 2 }}>
@@ -293,6 +379,10 @@ export default function CreateListingPage() {
                     label="Sq ft"
                     value={form.square_feet || ""}
                     onChange={(e) => handleChange("square_feet", Number(e.target.value) || undefined)}
+                    type="number"
+                    inputProps={{ min: 1, max: 30000, step: 1 }}
+                    error={Boolean(fieldErrors.square_feet)}
+                    helperText={fieldErrors.square_feet}
                   />
                 </Grid>
                 <Grid size={{ xs: 12, md: 4 }}>
@@ -340,6 +430,10 @@ export default function CreateListingPage() {
                     label="Min lease (months)"
                     value={form.lease_term_min_months || ""}
                     onChange={(e) => handleChange("lease_term_min_months", Number(e.target.value) || undefined)}
+                    type="number"
+                    inputProps={{ min: 1, step: 1 }}
+                    error={Boolean(fieldErrors.lease_term_min_months)}
+                    helperText={fieldErrors.lease_term_min_months}
                   />
                 </Grid>
                 <Grid size={{ xs: 6, md: 3 }}>
@@ -348,6 +442,10 @@ export default function CreateListingPage() {
                     label="Max lease (months)"
                     value={form.lease_term_max_months || ""}
                     onChange={(e) => handleChange("lease_term_max_months", Number(e.target.value) || undefined)}
+                    type="number"
+                    inputProps={{ min: 1, step: 1 }}
+                    error={Boolean(fieldErrors.lease_term_max_months)}
+                    helperText={fieldErrors.lease_term_max_months}
                   />
                 </Grid>
                 <Grid size={{ xs: 12, md: 3 }}>
@@ -454,6 +552,8 @@ export default function CreateListingPage() {
                     label="Contact email"
                     value={form.contact_email || ""}
                     onChange={(e) => handleChange("contact_email", e.target.value)}
+                    error={Boolean(fieldErrors.contact_email)}
+                    helperText={fieldErrors.contact_email}
                   />
                 </Grid>
                 <Grid size={{ xs: 12, md: 4 }}>
@@ -462,6 +562,8 @@ export default function CreateListingPage() {
                     label="Contact phone"
                     value={form.contact_phone || ""}
                     onChange={(e) => handleChange("contact_phone", e.target.value)}
+                    error={Boolean(fieldErrors.contact_phone)}
+                    helperText={fieldErrors.contact_phone}
                   />
                 </Grid>
                 <Grid size={{ xs: 12 }}>
@@ -470,6 +572,8 @@ export default function CreateListingPage() {
                     label="Virtual tour URL (optional)"
                     value={form.virtual_tour_url || ""}
                     onChange={(e) => handleChange("virtual_tour_url", e.target.value)}
+                    error={Boolean(fieldErrors.virtual_tour_url)}
+                    helperText={fieldErrors.virtual_tour_url}
                   />
                 </Grid>
               </Grid>
@@ -548,6 +652,67 @@ export default function CreateListingPage() {
                   </Grid>
                 ))}
               </Grid>
+
+              <Typography variant="h6">Photos</Typography>
+              <Stack spacing={2}>
+                <Button variant="outlined" component="label">
+                  Upload photos
+                  <input
+                    hidden
+                    accept="image/*"
+                    multiple
+                    type="file"
+                    onChange={handleImageSelect}
+                  />
+                </Button>
+                {pendingImages.length === 0 ? (
+                  <Typography variant="body2" color="text.secondary">
+                    Add photos to help your listing stand out. You can set a primary image.
+                  </Typography>
+                ) : (
+                  <Grid container spacing={2}>
+                    {pendingImages.map((image) => (
+                      <Grid key={image.id} size={{ xs: 12, sm: 6, md: 4 }}>
+                        <Card variant="outlined" sx={{ borderRadius: 2 }}>
+                          <CardContent>
+                            <Box
+                              component="img"
+                              src={image.previewUrl}
+                              alt={image.file.name}
+                              sx={{
+                                width: "100%",
+                                height: 160,
+                                objectFit: "cover",
+                                borderRadius: 1,
+                                mb: 1,
+                              }}
+                            />
+                            <Stack spacing={1}>
+                              <FormControlLabel
+                                control={
+                                  <Checkbox
+                                    checked={image.isPrimary}
+                                    onChange={() => handlePrimaryChange(image.id)}
+                                  />
+                                }
+                                label="Primary photo"
+                              />
+                              <Button
+                                size="small"
+                                color="error"
+                                variant="outlined"
+                                onClick={() => handleRemoveImage(image.id)}
+                              >
+                                Remove
+                              </Button>
+                            </Stack>
+                          </CardContent>
+                        </Card>
+                      </Grid>
+                    ))}
+                  </Grid>
+                )}
+              </Stack>
 
               <Stack direction="row" spacing={2}>
                 <Button type="submit" variant="contained" disabled={submitting}>
