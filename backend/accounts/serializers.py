@@ -150,7 +150,7 @@ class LoginSerializer(serializers.Serializer):
         if not login:
             raise serializers.ValidationError({"login": ["Email or username is required."]})
 
-        # Look up by email if input contains '@', otherwise by username
+        # Look up by email if input contains '@' or '.' , otherwise by username
         if "@" and "." in login:
             user = User.objects.filter(email__iexact=login).first()
         else:
