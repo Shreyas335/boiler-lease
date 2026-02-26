@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   Box,
   Container,
@@ -154,6 +154,7 @@ interface PropertyCardProps {
   isHighlighted: boolean;
   onMouseEnter: () => void;
   onMouseLeave: () => void;
+  onClick: () => void;
   cardRef?: (el: HTMLDivElement | null) => void;
 }
 
@@ -162,6 +163,7 @@ function PropertyCard({
   isHighlighted,
   onMouseEnter,
   onMouseLeave,
+  onClick,
   cardRef,
 }: PropertyCardProps) {
   const primaryImage = listing.media?.find((m) => m.is_primary);
@@ -174,11 +176,13 @@ function PropertyCard({
       ref={cardRef}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
+      onClick={onClick}
       sx={{
         height: "100%",
         display: "flex",
         flexDirection: "column",
         transition: "all 0.2s ease",
+        cursor: "pointer",
         border: isHighlighted ? "2px solid" : "1px solid",
         borderColor: isHighlighted ? "primary.main" : "divider",
         transform: isHighlighted ? "scale(1.02)" : "scale(1)",
@@ -600,6 +604,7 @@ function FilterSidebar({
 }
 
 export default function BrowseListingsPage() {
+  const navigate = useNavigate();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("md"));
   const isLargeScreen = useMediaQuery(theme.breakpoints.up("lg"));
@@ -811,6 +816,7 @@ export default function BrowseListingsPage() {
                       isHighlighted={highlightedListingId === listing.id}
                       onMouseEnter={() => setHighlightedListingId(listing.id)}
                       onMouseLeave={() => setHighlightedListingId(null)}
+                      onClick={() => navigate(`/properties/${listing.id}`)}
                       cardRef={setCardRef(listing.id)}
                     />
                   </Grid>
