@@ -15,7 +15,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
 from .email_verification import send_2fa_code_email, send_password_reset_email, send_verification_email
-from .models import ListingAmenity, PasswordResetToken, User
+from .models import ListingAmenity, PasswordResetToken, PropertyListing, User
 from .serializers import (
     AccountUpdateSerializer,
     FeedbackSubmissionSerializer,
@@ -440,5 +440,5 @@ def delete_property_listing(request, listing_id):
 
     return Response(
         {"detail": "Listing deleted successfully."},
-        status=status.HTTP_204_NO_CONTENT,
+        status=status.HTTP_200_OK,
     )
