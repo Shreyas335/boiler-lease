@@ -54,7 +54,39 @@ export interface PropertyListing {
   created_at: string;
   updated_at: string;
   amenities: ListingAmenity[];
-  media?: ListingMedia[];
+  media: ListingMedia[];
+  is_favorited?: boolean;
+}
+
+export interface PropertyListingSummary {
+  id: number;
+  title: string;
+  city: string;
+  state: string;
+  monthly_rent: string;
+  availability_start_date: string;
+  availability_end_date: string;
+  status: string;
+  approval_status: string;
+  created_at: string;
+  primary_photo_url: string;
+  is_favorited: boolean;
+}
+
+export interface BookingRecord {
+  id: number;
+  listing: PropertyListingSummary;
+  start_date: string;
+  end_date: string;
+  booked_at: string;
+  monthly_rent_snapshot: string | null;
+  price: string;
+}
+
+export interface FavoriteRecord {
+  id: number;
+  created_at: string;
+  listing: PropertyListingSummary;
 }
 
 export interface CreatePropertyListingPayload {
@@ -190,3 +222,50 @@ export async function browseListings(
   return data;
 }
 
+export type BookingSortBy = "date_booked" | "price" | "start_date" | "end_date";
+export type FavoriteSortBy = "date_saved" | "price" | "date_listed";
+export type ListingSortBy = "price" | "date_listed" | "availability_start" | "availability_end";
+export type SortOrder = "asc" | "desc";
+
+export async function getCurrentBookings(sortBy: BookingSortBy, order: SortOrder): Promise<BookingRecord[]> {
+  const { data } = await api.get<BookingRecord[]>("/bookings/current/", {
+    params: { sort_by: sortBy, order },
+  });
+  return data;
+}
+
+export async function getPastBookings(sortBy: BookingSortBy, order: SortOrder): Promise<BookingRecord[]> {
+  const { data } = await api.get<BookingRecord[]>("/bookings/past/", {
+    params: { sort_by: sortBy, order },
+  });
+  return data;
+}
+
+export async function getBrowseListings(sortBy: ListingSortBy, order: SortOrder): Promise<PropertyListingSummary[]> {
+  const { data } = await api.get<PropertyListingSummary[]>("/listings/browse/", {
+    params: { sort_by: sortBy, order },
+  });
+  return data;
+}
+
+export async function getPropertyListingDetail(id: number): Promise<PropertyListing> {
+  const { data } = await api.get<PropertyListing>(`/listings/${id}/`);
+  return data;
+}
+
+export async function addFavorite(listingId: number): Promise<{ detail: string }> {
+  const { data } = await api.post<{ detail: string }>(`/favorites/${listingId}/`);
+  return data;
+}
+
+export async function removeFavorite(listingId: number): Promise<{ detail: string }> {
+  const { data } = await api.delete<{ detail: string }>(`/favorites/${listingId}/`);
+  return data;
+}
+
+export async function getFavorites(sortBy: FavoriteSortBy, order: SortOrder): Promise<FavoriteRecord[]> {
+  const { data } = await api.get<FavoriteRecord[]>("/favorites/", {
+    params: { sort_by: sortBy, order },
+  });
+  return data;
+}
