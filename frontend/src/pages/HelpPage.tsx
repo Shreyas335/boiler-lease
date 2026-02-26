@@ -6,6 +6,7 @@ import {
   Card,
   CardContent,
   Container,
+  Rating,
   Stack,
   TextField,
   Typography,
@@ -16,11 +17,13 @@ import { submitFeedback } from "../api/help";
 interface FormState {
   subject: string;
   message: string;
+  rating: number | null;
 }
 
 interface FieldErrors {
   subject?: string;
   message?: string;
+  rating?: string;
 }
 
 function getFieldError(
@@ -37,6 +40,7 @@ export default function HelpPage() {
   const [form, setForm] = useState<FormState>({
     subject: "",
     message: "",
+    rating: 0,
   });
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
@@ -56,6 +60,9 @@ export default function HelpPage() {
     if (!form.message.trim()) {
       nextErrors.message = "Message is required.";
     }
+    if (!form.rating || form.rating < 1) {
+      nextErrors.rating = "Please provide a star rating.";
+    }
     if (Object.keys(nextErrors).length > 0) {
       setFieldErrors(nextErrors);
       setMessage({ type: "error", text: "Please fix the highlighted fields and try again." });
@@ -67,8 +74,9 @@ export default function HelpPage() {
       await submitFeedback({
         subject: form.subject,
         message: form.message,
+        rating: form.rating || 1,
       });
-      setForm({ subject: "", message: "" });
+      setForm({ subject: "", message: "", rating: 0 });
       setFieldErrors({});
       setMessage({ type: "success", text: "Thanks. Your feedback has been submitted." });
     } catch (error) {
@@ -77,6 +85,7 @@ export default function HelpPage() {
       setFieldErrors({
         subject: getFieldError(data, "subject"),
         message: getFieldError(data, "message"),
+        rating: getFieldError(data, "rating"),
       });
       setMessage({ type: "error", text: "Unable to submit feedback right now." });
     } finally {
@@ -88,10 +97,10 @@ export default function HelpPage() {
     <Box sx={{ py: 6, px: 2 }}>
       <Container maxWidth="md">
         <Typography variant="h4" sx={{ fontWeight: 700, mb: 1 }}>
-          Help
+          Feedback
         </Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-          Need support or want to share feedback? Send us a short message below.
+          Share your feedback and rate your experience.
         </Typography>
 
         <Card>
@@ -117,6 +126,25 @@ export default function HelpPage() {
                 minRows={5}
                 fullWidth
               />
+              <Box>
+                <Typography variant="body2" sx={{ mb: 0.5 }}>
+                  Rating
+                </Typography>
+                <Rating
+                  name="feedback-rating"
+                  value={form.rating}
+                  onChange={(_, value) => {
+                    setForm((prev) => ({ ...prev, rating: value }));
+                    setFieldErrors((prev) => ({ ...prev, rating: undefined }));
+                    setMessage(null);
+                  }}
+                />
+                {fieldErrors.rating && (
+                  <Typography color="error" variant="caption" sx={{ display: "block", mt: 0.5 }}>
+                    {fieldErrors.rating}
+                  </Typography>
+                )}
+              </Box>
               <Box>
                 <Button type="submit" variant="contained" disabled={submitting}>
                   {submitting ? "Sending..." : "Send feedback"}

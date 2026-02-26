@@ -16,9 +16,13 @@ import PersonAddRoundedIcon from "@mui/icons-material/PersonAddRounded";
 import LogoutRoundedIcon from "@mui/icons-material/LogoutRounded";
 import SettingsRoundedIcon from "@mui/icons-material/SettingsRounded";
 import AccountCircleRoundedIcon from "@mui/icons-material/AccountCircleRounded";
-import HelpOutlineRoundedIcon from "@mui/icons-material/HelpOutlineRounded";
+import RateReviewRoundedIcon from "@mui/icons-material/RateReviewRounded";
 import AddHomeRoundedIcon from "@mui/icons-material/AddHomeRounded";
 import ApartmentRoundedIcon from "@mui/icons-material/ApartmentRounded";
+import SearchRoundedIcon from "@mui/icons-material/SearchRounded";
+import EventAvailableRoundedIcon from "@mui/icons-material/EventAvailableRounded";
+import HistoryRoundedIcon from "@mui/icons-material/HistoryRounded";
+import FavoriteRoundedIcon from "@mui/icons-material/FavoriteRounded";
 import { useAuth } from "../contexts/AuthContext";
 import AccountSettingsModal from "./AccountSettingsModal";
 
@@ -66,12 +70,12 @@ export default function Layout({ children }: LayoutProps) {
                   </Button>
                   <Button
                     component={RouterLink}
-                    to="/help"
+                    to="/feedback"
                     color="inherit"
-                    startIcon={<HelpOutlineRoundedIcon />}
+                    startIcon={<RateReviewRoundedIcon />}
                     sx={{ color: "text.secondary" }}
                   >
-                    Help
+                    Feedback
                   </Button>
                   {user.user_type === "subleaser" && (
                     <>
@@ -92,6 +96,46 @@ export default function Layout({ children }: LayoutProps) {
                         sx={{ color: "text.secondary" }}
                       >
                         My Listings
+                      </Button>
+                    </>
+                  )}
+                  {user.user_type === "sublessee" && (
+                    <>
+                      <Button
+                        component={RouterLink}
+                        to="/explore-listings"
+                        color="inherit"
+                        startIcon={<SearchRoundedIcon />}
+                        sx={{ color: "text.secondary" }}
+                      >
+                        Explore
+                      </Button>
+                      <Button
+                        component={RouterLink}
+                        to="/bookings/current"
+                        color="inherit"
+                        startIcon={<EventAvailableRoundedIcon />}
+                        sx={{ color: "text.secondary" }}
+                      >
+                        Current Bookings
+                      </Button>
+                      <Button
+                        component={RouterLink}
+                        to="/bookings/past"
+                        color="inherit"
+                        startIcon={<HistoryRoundedIcon />}
+                        sx={{ color: "text.secondary" }}
+                      >
+                        Past Bookings
+                      </Button>
+                      <Button
+                        component={RouterLink}
+                        to="/favorites"
+                        color="inherit"
+                        startIcon={<FavoriteRoundedIcon />}
+                        sx={{ color: "text.secondary" }}
+                      >
+                        Favorites
                       </Button>
                     </>
                   )}

@@ -17,6 +17,7 @@ export default function VerifyEmailPage() {
 
   useEffect(() => {
     if (verifiedParam === "success") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setStatus("success");
       setMessage("Your email has been successfully verified.");
       return;
