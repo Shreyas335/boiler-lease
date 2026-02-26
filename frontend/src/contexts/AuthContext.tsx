@@ -16,7 +16,7 @@ type LoginResult =
 interface AuthContextType {
   user: User | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<LoginResult>;
+  login: (login: string, password: string) => Promise<LoginResult>;
   verify2FA: (tempToken: string, code: string) => Promise<void>;
   register: (params: Parameters<typeof authApi.register>[0]) => Promise<void>;
   logout: () => Promise<void>;
@@ -46,8 +46,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [loadUser]);
 
   const login = useCallback(
-    async (email: string, password: string): Promise<LoginResult> => {
-      const data = await authApi.login(email, password);
+    async (login: string, password: string): Promise<LoginResult> => {
+      const data = await authApi.login(login, password);
       if (data.requires_2fa && data.temp_token) {
         return { requires_2fa: true, temp_token: data.temp_token };
       }

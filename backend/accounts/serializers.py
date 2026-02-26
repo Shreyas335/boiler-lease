@@ -136,22 +136,28 @@ class RegisterSerializer(serializers.ModelSerializer):
 
 
 class LoginSerializer(serializers.Serializer):
-    email = serializers.EmailField()
+    """Accept login as either email or username (optional which one the user provides)."""
+    login = serializers.CharField(required=False, allow_blank=True)
     password = serializers.CharField(write_only=True)
 
     def validate(self, data):
-        email = data.get("email")
+        login = (data.get("login") or "").strip()
         password = data.get("password")
 
-        if not email or not password:
-            raise serializers.ValidationError("Email and password are required.")
+        if not password:
+            raise serializers.ValidationError({"password": ["Password is required."]})
 
-        user = User.objects.filter(email=email).first()
-        if not user:
-            raise serializers.ValidationError("Invalid email or password.")
+        if not login:
+            raise serializers.ValidationError({"login": ["Email or username is required."]})
 
-        if not user.check_password(password):
-            raise serializers.ValidationError("Invalid email or password.")
+        # Look up by email if input contains '@', otherwise by username
+        if "@" and "." in login:
+            user = User.objects.filter(email__iexact=login).first()
+        else:
+            user = User.objects.filter(username__iexact=login).first()
+
+        if not user or not user.check_password(password):
+            raise serializers.ValidationError({"detail": "Invalid email or password."})
 
         data["user"] = user
         return data
