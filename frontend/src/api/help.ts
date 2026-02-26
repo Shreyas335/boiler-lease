@@ -3,6 +3,7 @@ import api from "./axios";
 export interface SubmitFeedbackPayload {
   subject?: string;
   message: string;
+  rating: number;
 }
 
 export async function submitFeedback(payload: SubmitFeedbackPayload): Promise<{ detail: string }> {

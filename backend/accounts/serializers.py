@@ -3,10 +3,12 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
 from .models import (
+    FavoriteListing,
     FeedbackSubmission,
     ListingAmenity,
     ListingAmenityMap,
     ListingMedia,
+    PropertyBooking,
     PropertyListing,
     User,
 )
@@ -184,9 +186,11 @@ class TwoFactorVerifyLoginSerializer(serializers.Serializer):
 
 
 class FeedbackSubmissionSerializer(serializers.ModelSerializer):
+    rating = serializers.IntegerField(min_value=1, max_value=5)
+
     class Meta:
         model = FeedbackSubmission
-        fields = ("id", "subject", "message", "created_at")
+        fields = ("id", "subject", "message", "rating", "created_at")
         read_only_fields = ("id", "created_at")
 
     def validate_subject(self, value):
@@ -262,6 +266,72 @@ class PropertyListingSerializer(serializers.ModelSerializer):
     def get_amenities(self, obj):
         amenities = ListingAmenity.objects.filter(listing_links__listing=obj, is_active=True).distinct()
         return ListingAmenitySerializer(amenities, many=True).data
+
+
+class PropertyListingSummarySerializer(serializers.ModelSerializer):
+    primary_photo_url = serializers.SerializerMethodField()
+    is_favorited = serializers.SerializerMethodField()
+
+    class Meta:
+        model = PropertyListing
+        fields = (
+            "id",
+            "title",
+            "city",
+            "state",
+            "monthly_rent",
+            "availability_start_date",
+            "availability_end_date",
+            "status",
+            "approval_status",
+            "created_at",
+            "primary_photo_url",
+            "is_favorited",
+        )
+
+    def get_primary_photo_url(self, obj):
+        primary = obj.media.filter(is_primary=True).first()
+        if primary:
+            return primary.file_url
+        fallback = obj.media.first()
+        return fallback.file_url if fallback else ""
+
+    def get_is_favorited(self, obj):
+        user = self.context.get("user")
+        favorite_listing_ids = self.context.get("favorite_listing_ids")
+        if not user or not user.is_authenticated:
+            return False
+        if favorite_listing_ids is not None:
+            return obj.id in favorite_listing_ids
+        return FavoriteListing.objects.filter(user=user, listing=obj).exists()
+
+
+class PropertyBookingSerializer(serializers.ModelSerializer):
+    listing = PropertyListingSummarySerializer(read_only=True)
+    price = serializers.SerializerMethodField()
+
+    class Meta:
+        model = PropertyBooking
+        fields = (
+            "id",
+            "listing",
+            "start_date",
+            "end_date",
+            "booked_at",
+            "monthly_rent_snapshot",
+            "price",
+        )
+
+    def get_price(self, obj):
+        return obj.monthly_rent_snapshot or obj.listing.monthly_rent
+
+
+class FavoriteListingSerializer(serializers.ModelSerializer):
+    listing = PropertyListingSummarySerializer(read_only=True)
+
+    class Meta:
+        model = FavoriteListing
+        fields = ("id", "created_at", "listing")
 
 
 class PropertyListingCreateSerializer(serializers.ModelSerializer):
