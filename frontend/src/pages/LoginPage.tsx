@@ -18,13 +18,13 @@ import { useAuth } from "../contexts/AuthContext";
 import type { AxiosError } from "axios";
 
 export default function LoginPage() {
-  const [email, setEmail] = useState("");
+  const [login, setLogin] = useState("");
   const [password, setPassword] = useState("");
   const [twoFactorToken, setTwoFactorToken] = useState<string | null>(null);
   const [twoFactorCode, setTwoFactorCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const { user, login, verify2FA } = useAuth();
+  const { user, login: loginUser, verify2FA } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -37,7 +37,7 @@ export default function LoginPage() {
     setSubmitting(true);
 
     try {
-      const result = await login(email, password);
+      const result = await loginUser(login, password);
       if (result.success) {
         navigate("/dashboard");
         return;
@@ -46,7 +46,7 @@ export default function LoginPage() {
         setTwoFactorToken(result.temp_token);
       }
     } catch (err) {
-      const axiosError = err as AxiosError<{ email?: string[]; password?: string[]; detail?: string | string[] }>;
+      const axiosError = err as AxiosError<{ login?: string[]; password?: string[]; detail?: string | string[] }>;
       if (!axiosError.response) {
         setError("Unable to connect to server. Please check if the backend is running.");
         return;
@@ -54,10 +54,10 @@ export default function LoginPage() {
       const msg = axiosError.response?.data;
       if (typeof msg === "string") {
         setError(msg);
-      } else if (msg?.email) {
-        setError(msg.email[0]);
+      } else if (msg?.login) {
+        setError(Array.isArray(msg.login) ? msg.login[0] : msg.login);
       } else if (msg?.password) {
-        setError(msg.password[0]);
+        setError(Array.isArray(msg.password) ? msg.password[0] : msg.password);
       } else if (msg?.detail) {
         setError(Array.isArray(msg.detail) ? msg.detail[0] : msg.detail);
       } else if (axiosError.response?.status === 500) {
@@ -163,12 +163,13 @@ export default function LoginPage() {
             )}
             <TextField
               fullWidth
-              label="Email"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              label="Email or username"
+              type="text"
+              value={login}
+              onChange={(e) => setLogin(e.target.value)}
               required
-              autoComplete="email"
+              autoComplete="username"
+              placeholder="Enter your email or username"
               disabled={submitting}
               sx={{ mb: 2 }}
               InputProps={{
