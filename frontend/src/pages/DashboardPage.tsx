@@ -80,8 +80,8 @@ export default function DashboardPage() {
         <Box sx={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
           {user.user_type === "sublessee" && (
             <>
-              <Button component={RouterLink} to="/explore-listings" variant="outlined">
-                Explore listings
+              <Button component={RouterLink} to="/browse" variant="outlined">
+                Browse listings
               </Button>
               <Button component={RouterLink} to="/bookings/current" variant="outlined">
                 Current bookings

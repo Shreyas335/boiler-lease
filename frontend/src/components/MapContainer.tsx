@@ -9,6 +9,7 @@ interface MapContainerProps {
   highlightedListingId: number | null;
   onMarkerClick: (listingId: number) => void;
   onMarkerHover: (listingId: number | null) => void;
+  isLoading?: boolean;
 }
 
 const DEFAULT_CENTER = { lat: 40.4237, lng: -86.9212 }; // West Lafayette, IN
@@ -19,6 +20,7 @@ export default function MapContainer({
   highlightedListingId,
   onMarkerClick,
   onMarkerHover,
+  isLoading = false,
 }: MapContainerProps) {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<google.maps.Map | null>(null);
@@ -199,38 +201,45 @@ export default function MapContainer({
     );
   }
 
-  if (listings.length === 0) {
-    return (
-      <Paper
-        sx={{
-          p: 3,
-          height: "100%",
-          minHeight: 400,
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        <MapRounded sx={{ fontSize: 48, color: "text.disabled", mb: 2 }} />
-        <Typography variant="body1" color="text.secondary">
-          No properties to display on map
-        </Typography>
-      </Paper>
-    );
-  }
-
   return (
     <Paper
       sx={{
         height: "100%",
         minHeight: 400,
         overflow: "hidden",
-        position: "sticky",
-        top: 80,
+        position: "relative",
       }}
     >
       <Box ref={mapRef} sx={{ width: "100%", height: "100%", minHeight: 400 }} />
+
+      {/* Show overlay when no listings or loading */}
+      {(listings.length === 0 || isLoading) && (
+        <Box
+          sx={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "rgba(255, 255, 255, 0.8)",
+            zIndex: 10,
+            backdropFilter: "blur(2px)",
+          }}
+        >
+          {isLoading ? (
+            <Skeleton variant="circular" width={50} height={50} sx={{ mb: 2 }} />
+          ) : (
+            <MapRounded sx={{ fontSize: 48, color: "text.disabled", mb: 2 }} />
+          )}
+          <Typography variant="body1" color="text.secondary">
+            {isLoading ? "Loading listings..." : "No properties to display on map"}
+          </Typography>
+        </Box>
+      )}
     </Paper>
   );
 }

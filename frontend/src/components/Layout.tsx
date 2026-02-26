@@ -135,15 +135,6 @@ export default function Layout({ children }: LayoutProps) {
                     <>
                       <Button
                         component={RouterLink}
-                        to="/explore-listings"
-                        color="inherit"
-                        startIcon={<SearchRoundedIcon />}
-                        sx={{ color: "text.secondary" }}
-                      >
-                        Explore
-                      </Button>
-                      <Button
-                        component={RouterLink}
                         to="/bookings/current"
                         color="inherit"
                         startIcon={<EventAvailableRoundedIcon />}
