@@ -24,8 +24,6 @@ urlpatterns = [
     path("listings/<int:listing_id>/", views.property_listing_detail),
     path("listings/mine/", views.my_property_listings),
     path("listings/amenities/", views.listing_amenities),
-    path("listings/<int:listing_id>/delete/", views.delete_property_listing),
-    path("listings/<int:listing_id>/", views.update_property_listing),
     path("bookings/current/", views.my_current_bookings),
     path("bookings/past/", views.my_past_bookings),
     path("favorites/", views.my_favorite_listings),
