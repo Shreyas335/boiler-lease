@@ -29,7 +29,12 @@ export default function PropertySummaryCard({
         <Stack spacing={1.5}>
           <Stack direction="row" justifyContent="space-between" alignItems="flex-start" gap={1.5}>
             <Box>
-              <Typography variant="h6" sx={{ fontWeight: 700 }}>
+              <Typography
+                variant="h6"
+                component={RouterLink}
+                to={`/properties/${listing.id}`}
+                sx={{ fontWeight: 700, textDecoration: "none", color: "inherit" }}
+              >
                 {listing.title}
               </Typography>
               <Typography variant="body2" color="text.secondary">
@@ -54,12 +59,14 @@ export default function PropertySummaryCard({
           </Stack>
 
           {listing.primary_photo_url ? (
-            <Box
-              component="img"
-              src={listing.primary_photo_url}
-              alt={listing.title}
-              sx={{ width: "100%", maxHeight: 220, objectFit: "cover", borderRadius: 2, border: "1px solid", borderColor: "divider" }}
-            />
+            <Box component={RouterLink} to={`/properties/${listing.id}`} sx={{ lineHeight: 0 }}>
+              <Box
+                component="img"
+                src={listing.primary_photo_url}
+                alt={listing.title}
+                sx={{ width: "100%", maxHeight: 220, objectFit: "cover", borderRadius: 2, border: "1px solid", borderColor: "divider" }}
+              />
+            </Box>
           ) : (
             <Box
               sx={{
