@@ -14,6 +14,7 @@ import HelpPage from "./pages/HelpPage";
 import CreateListingPage from "./pages/CreateListingPage";
 import EditListingPage from "./pages/EditListingPage";
 import MyListingsPage from "./pages/MyListingsPage";
+import BrowseListingsPage from "./pages/BrowseListingsPage";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
 
@@ -78,6 +79,7 @@ function App() {
                   </ProtectedRoute>
                 }
               />
+              <Route path="/browse" element={<BrowseListingsPage />} />
               <Route path="/verify-email" element={<VerifyEmailPage />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>

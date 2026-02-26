@@ -18,6 +18,7 @@ import type { AxiosError } from "axios";
 import { useNavigate } from "react-router-dom";
 import { createListing, getListingAmenities, type CreatePropertyListingPayload, type ListingAmenity } from "../api/listings";
 import { useAuth } from "../contexts/AuthContext";
+import AddressAutocomplete, { type AddressComponents } from "../components/AddressAutocomplete";
 
 const PROPERTY_TYPES = ["apartment", "house", "condo", "studio", "other"];
 const FURNISHED_OPTIONS = ["furnished", "unfurnished", "partially_furnished"];
@@ -61,6 +62,8 @@ export default function CreateListingPage() {
   const [submitting, setSubmitting] = useState(false);
   const [pageMessage, setPageMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [addressInput, setAddressInput] = useState("");
+  const [isAddressVerified, setIsAddressVerified] = useState(false);
 
   useEffect(() => {
     async function loadAmenities() {
@@ -105,6 +108,28 @@ export default function CreateListingPage() {
     handleChange("amenity_codes", Array.from(set));
   }
 
+  function handleAddressInputChange(value: string) {
+    setAddressInput(value);
+    // If user manually edits, mark as unverified
+    setIsAddressVerified(false);
+    setFieldErrors((prev) => ({ ...prev, address: "" }));
+  }
+
+  function handleAddressSelect(address: AddressComponents) {
+    setForm((prev) => ({
+      ...prev,
+      street_line_1: address.street_line_1,
+      city: address.city,
+      state: address.state,
+      postal_code: address.postal_code,
+      country_code: address.country_code,
+      latitude: address.latitude,
+      longitude: address.longitude,
+    }));
+    setIsAddressVerified(true);
+    setFieldErrors((prev) => ({ ...prev, address: "", street_line_1: "", city: "", state: "", postal_code: "" }));
+  }
+
   function validateForm(): boolean {
     const nextErrors: Record<string, string> = {};
     if (!form.title.trim()) nextErrors.title = "Title is required.";
@@ -112,10 +137,11 @@ export default function CreateListingPage() {
     if (!form.monthly_rent.trim()) nextErrors.monthly_rent = "Monthly rent is required.";
     if (!form.availability_start_date) nextErrors.availability_start_date = "Start date is required.";
     if (!form.availability_end_date) nextErrors.availability_end_date = "End date is required.";
-    if (!form.street_line_1.trim()) nextErrors.street_line_1 = "Street address is required.";
-    if (!form.city.trim()) nextErrors.city = "City is required.";
-    if (!form.state.trim()) nextErrors.state = "State is required.";
-    if (!form.postal_code.trim()) nextErrors.postal_code = "Postal code is required.";
+
+    // Address must be verified via Google (has lat/lng)
+    if (!isAddressVerified || !form.latitude || !form.longitude) {
+      nextErrors.address = "Please select an address from the Google suggestions.";
+    }
 
     if (
       form.availability_start_date &&
@@ -343,92 +369,83 @@ export default function CreateListingPage() {
 
               <Typography variant="h6">Location and Contact</Typography>
               <Grid container spacing={2}>
-                <Grid size={{ xs: 12, md: 6 }}>
-                  <TextField
-                    fullWidth
-                    label="Street line 1"
-                    value={form.street_line_1}
-                    onChange={(e) => handleChange("street_line_1", e.target.value)}
-                    error={Boolean(fieldErrors.street_line_1)}
-                    helperText={fieldErrors.street_line_1}
+                <Grid size={{ xs: 12 }}>
+                  <AddressAutocomplete
+                    value={addressInput}
+                    onChange={handleAddressInputChange}
+                    onAddressSelect={handleAddressSelect}
+                    error={Boolean(fieldErrors.address)}
+                    helperText={fieldErrors.address}
+                    isAddressVerified={isAddressVerified}
                   />
                 </Grid>
-                <Grid size={{ xs: 12, md: 6 }}>
+
+                {/* Show parsed address fields as read-only when verified */}
+                {isAddressVerified && (
+                  <>
+                    <Grid size={{ xs: 12, md: 6 }}>
+                      <TextField
+                        fullWidth
+                        label="Street"
+                        value={form.street_line_1}
+                        slotProps={{ input: { readOnly: true } }}
+                        variant="filled"
+                      />
+                    </Grid>
+                    <Grid size={{ xs: 12, md: 6 }}>
+                      <TextField
+                        fullWidth
+                        label="Unit/Apt (optional)"
+                        value={form.street_line_2 || ""}
+                        onChange={(e) => handleChange("street_line_2", e.target.value)}
+                        placeholder="Apt 4B, Unit 101, etc."
+                      />
+                    </Grid>
+                    <Grid size={{ xs: 6, md: 3 }}>
+                      <TextField
+                        fullWidth
+                        label="City"
+                        value={form.city}
+                        slotProps={{ input: { readOnly: true } }}
+                        variant="filled"
+                      />
+                    </Grid>
+                    <Grid size={{ xs: 6, md: 3 }}>
+                      <TextField
+                        fullWidth
+                        label="State"
+                        value={form.state}
+                        slotProps={{ input: { readOnly: true } }}
+                        variant="filled"
+                      />
+                    </Grid>
+                    <Grid size={{ xs: 6, md: 3 }}>
+                      <TextField
+                        fullWidth
+                        label="Postal Code"
+                        value={form.postal_code}
+                        slotProps={{ input: { readOnly: true } }}
+                        variant="filled"
+                      />
+                    </Grid>
+                    <Grid size={{ xs: 6, md: 3 }}>
+                      <TextField
+                        fullWidth
+                        label="Country"
+                        value={form.country_code}
+                        slotProps={{ input: { readOnly: true } }}
+                        variant="filled"
+                      />
+                    </Grid>
+                  </>
+                )}
+
+                <Grid size={{ xs: 12, md: 4 }}>
                   <TextField
                     fullWidth
-                    label="Street line 2"
-                    value={form.street_line_2 || ""}
-                    onChange={(e) => handleChange("street_line_2", e.target.value)}
-                  />
-                </Grid>
-                <Grid size={{ xs: 12, md: 3 }}>
-                  <TextField
-                    fullWidth
-                    label="City"
-                    value={form.city}
-                    onChange={(e) => handleChange("city", e.target.value)}
-                    error={Boolean(fieldErrors.city)}
-                    helperText={fieldErrors.city}
-                  />
-                </Grid>
-                <Grid size={{ xs: 12, md: 3 }}>
-                  <TextField
-                    fullWidth
-                    label="State"
-                    value={form.state}
-                    onChange={(e) => handleChange("state", e.target.value)}
-                    error={Boolean(fieldErrors.state)}
-                    helperText={fieldErrors.state}
-                  />
-                </Grid>
-                <Grid size={{ xs: 12, md: 3 }}>
-                  <TextField
-                    fullWidth
-                    label="Postal code"
-                    value={form.postal_code}
-                    onChange={(e) => handleChange("postal_code", e.target.value)}
-                    error={Boolean(fieldErrors.postal_code)}
-                    helperText={fieldErrors.postal_code}
-                  />
-                </Grid>
-                <Grid size={{ xs: 12, md: 3 }}>
-                  <TextField
-                    fullWidth
-                    label="Country code"
-                    value={form.country_code}
-                    onChange={(e) => handleChange("country_code", e.target.value.toUpperCase())}
-                  />
-                </Grid>
-                <Grid size={{ xs: 12, md: 3 }}>
-                  <TextField
-                    fullWidth
-                    label="Unit number"
-                    value={form.unit_number || ""}
-                    onChange={(e) => handleChange("unit_number", e.target.value)}
-                  />
-                </Grid>
-                <Grid size={{ xs: 12, md: 3 }}>
-                  <TextField
-                    fullWidth
-                    label="Building name"
+                    label="Building name (optional)"
                     value={form.building_name || ""}
                     onChange={(e) => handleChange("building_name", e.target.value)}
-                  />
-                </Grid>
-                <Grid size={{ xs: 12, md: 3 }}>
-                  <TextField
-                    fullWidth
-                    label="Latitude"
-                    value={form.latitude || ""}
-                    onChange={(e) => handleChange("latitude", e.target.value)}
-                  />
-                </Grid>
-                <Grid size={{ xs: 12, md: 3 }}>
-                  <TextField
-                    fullWidth
-                    label="Longitude"
-                    value={form.longitude || ""}
-                    onChange={(e) => handleChange("longitude", e.target.value)}
                   />
                 </Grid>
                 <Grid size={{ xs: 12, md: 4 }}>
@@ -447,10 +464,10 @@ export default function CreateListingPage() {
                     onChange={(e) => handleChange("contact_phone", e.target.value)}
                   />
                 </Grid>
-                <Grid size={{ xs: 12, md: 4 }}>
+                <Grid size={{ xs: 12 }}>
                   <TextField
                     fullWidth
-                    label="Virtual tour URL"
+                    label="Virtual tour URL (optional)"
                     value={form.virtual_tour_url || ""}
                     onChange={(e) => handleChange("virtual_tour_url", e.target.value)}
                   />
