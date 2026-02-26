@@ -620,37 +620,6 @@ def browse_property_listings(request):
     paginated_queryset = paginator.paginate_queryset(queryset, request)
     serializer = PropertyListingBrowseSerializer(paginated_queryset, many=True)
     return paginator.get_paginated_response(serializer.data)
-@api_view(["GET"])
-@permission_classes([IsAuthenticated])
-def browse_property_listings(request):
-    if not _is_sublessee(request):
-        return Response(
-            {"detail": "Only sublessees can browse property listings."},
-            status=status.HTTP_403_FORBIDDEN,
-        )
-
-    listings = (
-        PropertyListing.objects.filter(
-            deleted_at__isnull=True,
-            status=PropertyListing.ListingStatus.PUBLISHED,
-            approval_status=PropertyListing.ApprovalStatus.APPROVED,
-        )
-        .select_related("owner")
-        .prefetch_related("media")
-    )
-    sort_by = request.query_params.get("sort_by", "date_listed")
-    order = request.query_params.get("order", "desc")
-    listings = _sort_property_listings(listings, sort_by, order)
-
-    favorite_listing_ids = set(
-        FavoriteListing.objects.filter(user=request.user).values_list("listing_id", flat=True)
-    )
-    serializer = PropertyListingSummarySerializer(
-        listings,
-        many=True,
-        context={"user": request.user, "favorite_listing_ids": favorite_listing_ids},
-    )
-    return Response(serializer.data)
 
 
 @api_view(["GET"])
