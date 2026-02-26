@@ -848,6 +848,7 @@ export default function BrowseListingsPage() {
               highlightedListingId={highlightedListingId}
               onMarkerClick={handleMarkerClick}
               onMarkerHover={handleMarkerHover}
+              isLoading={loading}
             />
           </Box>
         )}
