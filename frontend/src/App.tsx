@@ -15,6 +15,11 @@ import CreateListingPage from "./pages/CreateListingPage";
 import MyListingsPage from "./pages/MyListingsPage";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
+import CurrentBookingsPage from "./pages/CurrentBookingsPage";
+import PastBookingsPage from "./pages/PastBookingsPage";
+import FavoritesPage from "./pages/FavoritesPage";
+import PropertyDetailPage from "./pages/PropertyDetailPage";
+import ExploreListingsPage from "./pages/ExploreListingsPage";
 
 function App() {
   return (
@@ -46,13 +51,14 @@ function App() {
                 }
               />
               <Route
-                path="/help"
+                path="/feedback"
                 element={
                   <ProtectedRoute>
                     <HelpPage />
                   </ProtectedRoute>
                 }
               />
+              <Route path="/help" element={<Navigate to="/feedback" replace />} />
               <Route
                 path="/listings/new"
                 element={
@@ -66,6 +72,46 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <MyListingsPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/explore-listings"
+                element={
+                  <ProtectedRoute>
+                    <ExploreListingsPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/bookings/current"
+                element={
+                  <ProtectedRoute>
+                    <CurrentBookingsPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/bookings/past"
+                element={
+                  <ProtectedRoute>
+                    <PastBookingsPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/favorites"
+                element={
+                  <ProtectedRoute>
+                    <FavoritesPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/properties/:id"
+                element={
+                  <ProtectedRoute>
+                    <PropertyDetailPage />
                   </ProtectedRoute>
                 }
               />

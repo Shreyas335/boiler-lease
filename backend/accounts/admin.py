@@ -2,11 +2,13 @@ from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 
 from .models import (
+    FavoriteListing,
     FeedbackSubmission,
     ListingAmenity,
     ListingAmenityMap,
     ListingMedia,
     PasswordResetToken,
+    PropertyBooking,
     PropertyListing,
     User,
 )
@@ -26,10 +28,10 @@ class UserAdmin(BaseUserAdmin):
 
 @admin.register(FeedbackSubmission)
 class FeedbackSubmissionAdmin(admin.ModelAdmin):
-    list_display = ("id", "user", "subject", "created_at")
+    list_display = ("id", "user", "subject", "rating", "created_at")
     search_fields = ("subject", "message", "user__email", "user__username")
-    list_filter = ("created_at",)
-    readonly_fields = ("user", "subject", "message", "created_at")
+    list_filter = ("rating", "created_at")
+    readonly_fields = ("user", "subject", "message", "rating", "created_at")
 
     def has_add_permission(self, request):
         return False
@@ -64,6 +66,20 @@ class ListingMediaAdmin(admin.ModelAdmin):
     list_display = ("listing", "media_type", "is_primary", "display_order", "created_at")
     list_filter = ("media_type", "is_primary")
     search_fields = ("listing__title", "file_url", "thumbnail_url")
+
+
+@admin.register(PropertyBooking)
+class PropertyBookingAdmin(admin.ModelAdmin):
+    list_display = ("sublessee", "listing", "start_date", "end_date", "monthly_rent_snapshot", "booked_at")
+    list_filter = ("start_date", "end_date", "booked_at")
+    search_fields = ("sublessee__email", "sublessee__username", "listing__title")
+
+
+@admin.register(FavoriteListing)
+class FavoriteListingAdmin(admin.ModelAdmin):
+    list_display = ("user", "listing", "created_at")
+    list_filter = ("created_at",)
+    search_fields = ("user__email", "user__username", "listing__title")
 
 
 @admin.register(PasswordResetToken)
