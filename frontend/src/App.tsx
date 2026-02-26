@@ -12,7 +12,9 @@ import VerifyEmailPage from "./pages/VerifyEmailPage";
 import AccountPage from "./pages/AccountPage";
 import HelpPage from "./pages/HelpPage";
 import CreateListingPage from "./pages/CreateListingPage";
+import EditListingPage from "./pages/EditListingPage";
 import MyListingsPage from "./pages/MyListingsPage";
+import BrowseListingsPage from "./pages/BrowseListingsPage";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
 import CurrentBookingsPage from "./pages/CurrentBookingsPage";
@@ -68,6 +70,14 @@ function App() {
                 }
               />
               <Route
+                path="/listings/:id/edit"
+                element={
+                  <ProtectedRoute>
+                    <EditListingPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
                 path="/my-listings"
                 element={
                   <ProtectedRoute>
@@ -75,6 +85,7 @@ function App() {
                   </ProtectedRoute>
                 }
               />
+              <Route path="/browse" element={<BrowseListingsPage />} />
               <Route
                 path="/explore-listings"
                 element={

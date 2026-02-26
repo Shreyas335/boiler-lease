@@ -42,21 +42,44 @@ export default function Layout({ children }: LayoutProps) {
 
   return (
     <Box sx={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
-      <AppBar position="static" elevation={0} sx={{ bgcolor: "background.paper", color: "text.primary", borderBottom: "1px solid", borderColor: "divider" }}>
+      <AppBar
+        position="static"
+        elevation={0}
+        sx={{
+          bgcolor: "background.paper",
+          color: "text.primary",
+          borderBottom: "1px solid",
+          borderColor: "divider",
+        }}
+      >
         <Container maxWidth="lg">
-          <Toolbar disableGutters sx={{ justifyContent: "space-between", py: 0.5 }}>
+          <Toolbar
+            disableGutters
+            sx={{ justifyContent: "space-between", py: 0.5 }}
+          >
             <Button
               component={RouterLink}
               to={user ? "/dashboard" : "/"}
               startIcon={<HomeRoundedIcon />}
-              sx={{ color: "primary.main", fontWeight: 700, fontSize: "1.1rem" }}
+              sx={{
+                color: "primary.main",
+                fontWeight: 700,
+                fontSize: "1.1rem",
+              }}
             >
               Boiler Lease
             </Button>
             <Box sx={{ display: "flex", gap: 0.5, alignItems: "center" }}>
               {user ? (
                 <>
-                  <Typography variant="body2" sx={{ alignSelf: "center", mr: 0.5, color: "text.secondary" }}>
+                  <Typography
+                    variant="body2"
+                    sx={{
+                      alignSelf: "center",
+                      mr: 0.5,
+                      color: "text.secondary",
+                    }}
+                  >
                     {user.first_name || user.username}
                   </Typography>
                   <Button
@@ -76,6 +99,15 @@ export default function Layout({ children }: LayoutProps) {
                     sx={{ color: "text.secondary" }}
                   >
                     Feedback
+                  </Button>
+                  <Button
+                    component={RouterLink}
+                    to="/browse"
+                    color="inherit"
+                    startIcon={<ApartmentRoundedIcon />}
+                    sx={{ color: "text.secondary" }}
+                  >
+                    Browse
                   </Button>
                   {user.user_type === "subleaser" && (
                     <>
@@ -146,7 +178,10 @@ export default function Layout({ children }: LayoutProps) {
                   >
                     <SettingsRoundedIcon />
                   </IconButton>
-                  <AccountSettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+                  <AccountSettingsModal
+                    open={settingsOpen}
+                    onClose={() => setSettingsOpen(false)}
+                  />
                   <Button
                     color="inherit"
                     startIcon={<LogoutRoundedIcon />}
@@ -158,6 +193,15 @@ export default function Layout({ children }: LayoutProps) {
                 </>
               ) : (
                 <>
+                  <Button
+                    component={RouterLink}
+                    to="/browse"
+                    color="inherit"
+                    startIcon={<ApartmentRoundedIcon />}
+                    sx={{ color: "text.secondary" }}
+                  >
+                    Browse
+                  </Button>
                   <Button
                     component={RouterLink}
                     to="/login"
