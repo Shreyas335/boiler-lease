@@ -20,6 +20,12 @@ urlpatterns = [
     path("account/2fa/disable/", views.two_factor_disable),
     path("help/feedback/", views.submit_help_feedback),
     path("listings/", views.create_property_listing),
+    path("listings/browse/", views.browse_property_listings),
+    path("listings/<int:listing_id>/", views.property_listing_detail),
     path("listings/mine/", views.my_property_listings),
     path("listings/amenities/", views.listing_amenities),
+    path("bookings/current/", views.my_current_bookings),
+    path("bookings/past/", views.my_past_bookings),
+    path("favorites/", views.my_favorite_listings),
+    path("favorites/<int:listing_id>/", views.favorite_listing_toggle),
 ]

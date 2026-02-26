@@ -8,6 +8,7 @@ import {
   Chip,
   Alert,
 } from "@mui/material";
+import { Link as RouterLink } from "react-router-dom";
 import HomeWorkRoundedIcon from "@mui/icons-material/HomeWorkRounded";
 import PersonSearchRoundedIcon from "@mui/icons-material/PersonSearchRounded";
 import BusinessRoundedIcon from "@mui/icons-material/BusinessRounded";
@@ -77,12 +78,32 @@ export default function DashboardPage() {
         </Card>
 
         <Box sx={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
-          <Button variant="outlined" disabled>
-            My listings (coming soon)
-          </Button>
-          <Button variant="outlined" disabled>
-            Applications (coming soon)
-          </Button>
+          {user.user_type === "sublessee" && (
+            <>
+              <Button component={RouterLink} to="/explore-listings" variant="outlined">
+                Explore listings
+              </Button>
+              <Button component={RouterLink} to="/bookings/current" variant="outlined">
+                Current bookings
+              </Button>
+              <Button component={RouterLink} to="/bookings/past" variant="outlined">
+                Past bookings
+              </Button>
+              <Button component={RouterLink} to="/favorites" variant="outlined">
+                Favorites
+              </Button>
+            </>
+          )}
+          {user.user_type === "subleaser" && (
+            <>
+              <Button component={RouterLink} to="/listings/new" variant="outlined">
+                Create listing
+              </Button>
+              <Button component={RouterLink} to="/my-listings" variant="outlined">
+                My listings
+              </Button>
+            </>
+          )}
         </Box>
       </Container>
     </Box>
