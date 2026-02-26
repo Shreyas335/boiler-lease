@@ -19,6 +19,7 @@ urlpatterns = [
     path("account/2fa/enable/", views.two_factor_enable),
     path("account/2fa/disable/", views.two_factor_disable),
     path("help/feedback/", views.submit_help_feedback),
+    path("listings/browse/", views.browse_property_listings),
     path("listings/", views.create_property_listing),
     path("listings/mine/", views.my_property_listings),
     path("listings/amenities/", views.listing_amenities),

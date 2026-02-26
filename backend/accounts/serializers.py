@@ -467,6 +467,46 @@ class PropertyListingUpdateSerializer(serializers.ModelSerializer):
         return instance
 
 
+class PropertyListingBrowseSerializer(serializers.ModelSerializer):
+    """Read-only serializer for browsing properties. Optimized for list view with nested media and amenities."""
+    amenities = serializers.SerializerMethodField()
+    media = ListingMediaSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = PropertyListing
+        fields = (
+            "id",
+            "title",
+            "description",
+            "bedrooms",
+            "bathrooms",
+            "monthly_rent",
+            "property_type",
+            "furnished_status",
+            "utilities_included",
+            "pets_allowed",
+            "parking_available",
+            "street_line_1",
+            "street_line_2",
+            "city",
+            "state",
+            "postal_code",
+            "latitude",
+            "longitude",
+            "availability_start_date",
+            "availability_end_date",
+            "lease_term_min_months",
+            "lease_term_max_months",
+            "amenities",
+            "media",
+        )
+        read_only_fields = fields
+
+    def get_amenities(self, obj):
+        amenities = ListingAmenity.objects.filter(listing_links__listing=obj, is_active=True).distinct()
+        return ListingAmenitySerializer(amenities, many=True).data
+
+
 class PasswordResetRequestSerializer(serializers.Serializer):
     email = serializers.EmailField()
 
