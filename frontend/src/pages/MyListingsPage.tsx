@@ -6,6 +6,7 @@ import {
   Card,
   CardContent,
   Chip,
+  type ChipProps,
   Container,
   Dialog,
   DialogActions,
@@ -16,7 +17,15 @@ import {
   Stack,
   Typography,
 } from "@mui/material";
-import { DeleteOutlined, EditOutlined } from "@mui/icons-material";
+import {
+  CalendarTodayOutlined,
+  DeleteOutlined,
+  EditOutlined,
+  KingBedOutlined,
+  LocationOnOutlined,
+  ShowerOutlined,
+  SquareFootOutlined,
+} from "@mui/icons-material";
 import { Link as RouterLink, useNavigate } from "react-router-dom";
 import {
   getMyListings,
@@ -30,6 +39,29 @@ function formatMoney(value: string | null) {
   const num = Number(value);
   if (Number.isNaN(num)) return value;
   return `$${num.toLocaleString()}`;
+}
+
+function formatRentChip(value: string | null) {
+  const formatted = formatMoney(value);
+  return formatted === "-" ? "Rent -" : `${formatted}/mo`;
+}
+
+function formatDate(value: string) {
+  if (!value) return "-";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleDateString();
+}
+
+function resolveStatusColor(value: string): ChipProps["color"] {
+  const normalized = value.toLowerCase();
+  if (normalized === "published") return "success";
+  if (normalized === "draft") return "warning";
+  if (normalized === "unpublished") return "default";
+  if (normalized === "approved") return "success";
+  if (normalized === "pending") return "warning";
+  if (normalized === "rejected") return "error";
+  return "default";
 }
 
 export default function MyListingsPage() {
@@ -158,9 +190,65 @@ export default function MyListingsPage() {
         ) : (
           <Stack spacing={2}>
             {listings.map((listing) => (
-              <Card key={listing.id}>
-                <CardContent>
-                  <Stack spacing={1.5}>
+              <Card
+                key={listing.id}
+                sx={{
+                  borderRadius: 2,
+                  overflow: "hidden",
+                  boxShadow: "0 16px 40px rgba(15, 23, 42, 0.08)",
+                }}
+              >
+                <CardContent sx={{ p: 0 }}>
+                  <Stack
+                    direction={{ xs: "column", md: "row" }}
+                    sx={{ minHeight: 220 }}
+                  >
+                    <Box
+                      sx={{
+                        width: { xs: "100%", md: 260 },
+                        minHeight: { xs: 180, md: "100%" },
+                        backgroundColor: "grey.100",
+                        borderRight: { md: "1px solid" },
+                        borderColor: { md: "divider" },
+                        position: "relative",
+                        overflow: "hidden",
+                      }}
+                    >
+                      {listing.media?.length ? (
+                        <Box
+                          component="img"
+                          src={
+                            listing.media.find((media) => media.is_primary)
+                              ?.file_url || listing.media[0].file_url
+                          }
+                          alt={listing.title}
+                          sx={{
+                            width: "100%",
+                            height: "100%",
+                            objectFit: "cover",
+                            display: "block",
+                          }}
+                        />
+                      ) : (
+                        <Stack
+                          alignItems="center"
+                          justifyContent="center"
+                          sx={{
+                            height: "100%",
+                            background:
+                              "linear-gradient(135deg, rgba(15, 23, 42, 0.08), rgba(15, 23, 42, 0.02))",
+                          }}
+                        >
+                          <Typography
+                            variant="subtitle2"
+                            color="text.secondary"
+                          >
+                            No photo yet
+                          </Typography>
+                        </Stack>
+                      )}
+                    </Box>
+                    <Stack spacing={2} sx={{ flex: 1, p: 3 }}>
                     <Stack
                       direction="row"
                       justifyContent="space-between"
@@ -171,7 +259,20 @@ export default function MyListingsPage() {
                         <Typography variant="h6" sx={{ fontWeight: 700 }}>
                           {listing.title}
                         </Typography>
-                        <Typography variant="body2" color="text.secondary">
+                        <Stack
+                          direction="row"
+                          spacing={1}
+                          alignItems="center"
+                          sx={{ mt: 0.5 }}
+                        >
+                          <LocationOnOutlined
+                            fontSize="small"
+                            color="action"
+                          />
+                          <Typography
+                            variant="body2"
+                            color="text.secondary"
+                          >
                           {listing.street_line_1}
                           {listing.street_line_2
                             ? `, ${listing.street_line_2}`
@@ -179,11 +280,35 @@ export default function MyListingsPage() {
                           , {listing.city}, {listing.state}{" "}
                           {listing.postal_code}
                         </Typography>
+                        </Stack>
+                        <Typography
+                          variant="body2"
+                          sx={{
+                            mt: 1,
+                            color: "text.secondary",
+                            display: "-webkit-box",
+                            WebkitLineClamp: 2,
+                            WebkitBoxOrient: "vertical",
+                            overflow: "hidden",
+                          }}
+                        >
+                          {listing.description}
+                        </Typography>
                       </Box>
                       <Stack direction="row" spacing={1} alignItems="center">
                         <Stack direction="row" spacing={1}>
-                          <Chip size="small" label={listing.status} />
-                          <Chip size="small" label={listing.approval_status} />
+                          <Chip
+                            size="small"
+                            label={listing.status}
+                            color={resolveStatusColor(listing.status)}
+                            variant="outlined"
+                          />
+                          <Chip
+                            size="small"
+                            label={listing.approval_status}
+                            color={resolveStatusColor(listing.approval_status)}
+                            variant="outlined"
+                          />
                         </Stack>
                         <Stack direction="row" spacing={0}>
                           <IconButton
@@ -206,88 +331,88 @@ export default function MyListingsPage() {
                       </Stack>
                     </Stack>
 
-                    <Typography variant="body2">
-                      {listing.description}
-                    </Typography>
+                    <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                      <Chip
+                        size="small"
+                        label={formatRentChip(listing.monthly_rent)}
+                        color="primary"
+                        variant="outlined"
+                      />
+                      <Chip
+                        size="small"
+                        label={`Deposit ${formatMoney(listing.security_deposit)}`}
+                        variant="outlined"
+                      />
+                      <Chip
+                        size="small"
+                        icon={<KingBedOutlined />}
+                        label={`${listing.bedrooms} beds`}
+                        variant="outlined"
+                      />
+                      <Chip
+                        size="small"
+                        icon={<ShowerOutlined />}
+                        label={`${listing.bathrooms} baths`}
+                        variant="outlined"
+                      />
+                      <Chip
+                        size="small"
+                        icon={<SquareFootOutlined />}
+                        label={`${listing.square_feet || "-"} sq ft`}
+                        variant="outlined"
+                      />
+                      <Chip
+                        size="small"
+                        icon={<CalendarTodayOutlined />}
+                        label={`${formatDate(
+                          listing.availability_start_date,
+                        )} → ${formatDate(listing.availability_end_date)}`}
+                        variant="outlined"
+                      />
+                    </Stack>
 
                     <Stack
                       direction="row"
-                      spacing={3}
+                      spacing={2}
                       flexWrap="wrap"
                       useFlexGap
                     >
                       <Typography variant="body2">
-                        <strong>Rent:</strong>{" "}
-                        {formatMoney(listing.monthly_rent)}/mo
-                      </Typography>
-                      <Typography variant="body2">
-                        <strong>Deposit:</strong>{" "}
-                        {formatMoney(listing.security_deposit)}
-                      </Typography>
-                      <Typography variant="body2">
-                        <strong>Beds/Baths:</strong> {listing.bedrooms}/
-                        {listing.bathrooms}
-                      </Typography>
-                      <Typography variant="body2">
-                        <strong>Sq ft:</strong> {listing.square_feet || "-"}
+                        <strong>Lease term:</strong>{" "}
+                        {listing.lease_term_min_months || "-"} to{" "}
+                        {listing.lease_term_max_months || "-"} months
                       </Typography>
                       <Typography variant="body2">
                         <strong>Furnished:</strong> {listing.furnished_status}
                       </Typography>
                     </Stack>
 
-                    <Stack
-                      direction="row"
-                      spacing={3}
-                      flexWrap="wrap"
-                      useFlexGap
-                    >
-                      <Typography variant="body2">
-                        <strong>Availability:</strong>{" "}
-                        {listing.availability_start_date} to{" "}
-                        {listing.availability_end_date}
-                      </Typography>
-                      <Typography variant="body2">
-                        <strong>Lease term:</strong>{" "}
-                        {listing.lease_term_min_months || "-"} to{" "}
-                        {listing.lease_term_max_months || "-"} months
-                      </Typography>
-                    </Stack>
-
-                    <Stack
-                      direction="row"
-                      spacing={3}
-                      flexWrap="wrap"
-                      useFlexGap
-                    >
-                      <Typography variant="body2">
-                        <strong>Utilities included:</strong>{" "}
-                        {listing.utilities_included ? "Yes" : "No"}
-                      </Typography>
-                      <Typography variant="body2">
-                        <strong>Pets allowed:</strong>{" "}
-                        {listing.pets_allowed ? "Yes" : "No"}
-                      </Typography>
-                      <Typography variant="body2">
-                        <strong>Smoking allowed:</strong>{" "}
-                        {listing.smoking_allowed ? "Yes" : "No"}
-                      </Typography>
-                      <Typography variant="body2">
-                        <strong>Parking:</strong>{" "}
-                        {listing.parking_available
-                          ? `Yes${listing.parking_details ? ` (${listing.parking_details})` : ""}`
-                          : "No"}
-                      </Typography>
+                    <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                      <Chip
+                        size="small"
+                        label={`Utilities ${listing.utilities_included ? "included" : "not included"}`}
+                        variant="outlined"
+                      />
+                      <Chip
+                        size="small"
+                        label={`Pets ${listing.pets_allowed ? "allowed" : "not allowed"}`}
+                        variant="outlined"
+                      />
+                      <Chip
+                        size="small"
+                        label={`Smoking ${listing.smoking_allowed ? "allowed" : "not allowed"}`}
+                        variant="outlined"
+                      />
+                      <Chip
+                        size="small"
+                        label={`Parking ${listing.parking_available ? "available" : "none"}`}
+                        variant="outlined"
+                      />
                     </Stack>
 
                     <Divider />
 
-                    <Stack
-                      direction="row"
-                      spacing={3}
-                      flexWrap="wrap"
-                      useFlexGap
-                    >
+                    <Stack direction="row" spacing={3} flexWrap="wrap" useFlexGap>
                       <Typography variant="body2">
                         <strong>Building:</strong>{" "}
                         {listing.building_name || "-"}
@@ -305,12 +430,7 @@ export default function MyListingsPage() {
                       </Typography>
                     </Stack>
 
-                    <Stack
-                      direction="row"
-                      spacing={3}
-                      flexWrap="wrap"
-                      useFlexGap
-                    >
+                    <Stack direction="row" spacing={3} flexWrap="wrap" useFlexGap>
                       <Typography variant="body2">
                         <strong>Virtual tour:</strong>{" "}
                         {listing.virtual_tour_url || "-"}
@@ -332,6 +452,7 @@ export default function MyListingsPage() {
                         : "None selected"}
                     </Typography>
                   </Stack>
+                </Stack>
                 </CardContent>
               </Card>
             ))}

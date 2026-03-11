@@ -1,4 +1,5 @@
 from django.contrib.auth.password_validation import validate_password
+from django.conf import settings
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
@@ -210,9 +211,42 @@ class FeedbackSubmissionSerializer(serializers.ModelSerializer):
 
 
 class ListingMediaSerializer(serializers.ModelSerializer):
+    file_url = serializers.SerializerMethodField()
+    thumbnail_url = serializers.SerializerMethodField()
+
     class Meta:
         model = ListingMedia
         fields = ("id", "media_type", "file_url", "thumbnail_url", "display_order", "is_primary")
+
+    def _build_url(self, url: str) -> str:
+        if not url:
+            return ""
+        if url.startswith("http://") or url.startswith("https://"):
+            return url
+        base = settings.BACKEND_URL.rstrip("/")
+        return f"{base}{url}"
+
+    def get_file_url(self, obj):
+        if obj.file:
+            return self._build_url(obj.file.url)
+        return self._build_url(obj.file_url or "")
+
+    def get_thumbnail_url(self, obj):
+        if obj.thumbnail_url:
+            return self._build_url(obj.thumbnail_url)
+        return ""
+
+
+class ListingMediaUploadSerializer(serializers.Serializer):
+    file = serializers.FileField(write_only=True)
+    is_primary = serializers.BooleanField(required=False, default=False)
+    display_order = serializers.IntegerField(required=False, min_value=0, default=0)
+
+    def validate_file(self, value):
+        content_type = getattr(value, "content_type", "")
+        if content_type and not content_type.startswith("image/"):
+            raise serializers.ValidationError("Only image files are allowed.")
+        return value
 
 
 class ListingAmenitySerializer(serializers.ModelSerializer):
