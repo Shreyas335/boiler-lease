@@ -330,11 +330,17 @@ class PropertyListingSummarySerializer(serializers.ModelSerializer):
         )
 
     def get_primary_photo_url(self, obj):
-        primary = obj.media.filter(is_primary=True).first()
-        if primary:
-            return primary.file_url
-        fallback = obj.media.first()
-        return fallback.file_url if fallback else ""
+        media = (
+            ListingMedia.objects.filter(listing_id=obj.id)
+            .order_by("-is_primary", "display_order", "id")
+            .first()
+        )
+        if not media:
+            return ""
+
+        if media.file:
+            return ListingMediaSerializer()._build_url(media.file.url)
+        return ListingMediaSerializer()._build_url(media.file_url or "")
 
     def get_is_favorited(self, obj):
         user = self.context.get("user")
