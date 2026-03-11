@@ -6,3 +6,4 @@ redis
 django-redis
 django-cors-headers
 django-storages
+stripe
