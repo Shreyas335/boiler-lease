@@ -18,7 +18,16 @@ from rest_framework.response import Response
 
 from .email_verification import send_2fa_code_email, send_password_reset_email, send_verification_email
 
-from .models import ListingAmenity, ListingAmenityMap, PasswordResetToken, PropertyListing, User, FavoriteListing, ListingAmenity, PasswordResetToken, PropertyBooking, PropertyListing, User
+from .models import (
+    FavoriteListing,
+    ListingAmenity,
+    ListingAmenityMap,
+    ListingMedia,
+    PasswordResetToken,
+    PropertyBooking,
+    PropertyListing,
+    User,
+)
 from .pagination import PropertyListingPagination
 
 from .serializers import (
@@ -36,6 +45,8 @@ from .serializers import (
     PropertyListingSerializer,
     PropertyListingSummarySerializer,
     RegisterSerializer,
+    ListingMediaSerializer,
+    ListingMediaUploadSerializer,
     UserSerializer,
     TwoFactorVerifyLoginSerializer,
 )
@@ -417,6 +428,73 @@ def create_property_listing(request):
 
     listing = serializer.save()
     return Response(PropertyListingSerializer(listing).data, status=status.HTTP_201_CREATED)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def upload_listing_media(request, listing_id):
+    if request.user.user_type != User.UserType.SUBLEASER:
+        return Response(
+            {"detail": "Only subleasers can upload listing media."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    listing = PropertyListing.objects.filter(id=listing_id, deleted_at__isnull=True).first()
+    if not listing:
+        return Response({"detail": "Property listing not found."}, status=status.HTTP_404_NOT_FOUND)
+    if listing.owner != request.user:
+        return Response(
+            {"detail": "You do not have permission to update this listing."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    serializer = ListingMediaUploadSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    file = serializer.validated_data["file"]
+    is_primary = serializer.validated_data.get("is_primary", False)
+    display_order = serializer.validated_data.get("display_order", 0)
+
+    if is_primary:
+        ListingMedia.objects.filter(listing=listing, is_primary=True).update(is_primary=False)
+
+    media = ListingMedia.objects.create(
+        listing=listing,
+        media_type=ListingMedia.MediaType.IMAGE,
+        file=file,
+        display_order=display_order,
+        is_primary=is_primary,
+    )
+    return Response(ListingMediaSerializer(media).data, status=status.HTTP_201_CREATED)
+
+
+@api_view(["PATCH"])
+@permission_classes([IsAuthenticated])
+def set_listing_media_primary(request, listing_id, media_id):
+    if request.user.user_type != User.UserType.SUBLEASER:
+        return Response(
+            {"detail": "Only subleasers can update listing media."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    listing = PropertyListing.objects.filter(id=listing_id, deleted_at__isnull=True).first()
+    if not listing:
+        return Response({"detail": "Property listing not found."}, status=status.HTTP_404_NOT_FOUND)
+    if listing.owner != request.user:
+        return Response(
+            {"detail": "You do not have permission to update this listing."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    media = ListingMedia.objects.filter(id=media_id, listing=listing).first()
+    if not media:
+        return Response({"detail": "Listing media not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    ListingMedia.objects.filter(listing=listing, is_primary=True).update(is_primary=False)
+    media.is_primary = True
+    media.save(update_fields=["is_primary"])
+    return Response(PropertyListingSerializer(listing).data, status=status.HTTP_200_OK)
 
 
 @api_view(["GET"])

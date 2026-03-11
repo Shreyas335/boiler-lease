@@ -10,7 +10,8 @@ cp .env.example .env   # if you haven't already
 docker-compose up --build
 ```
 
-**have 
+** make sure docker is installed **
+** docker compose **
 
 **IMPORTANT:** After containers start, you MUST run migrations in another terminal: Also make sure to delete any existing volumes or change the existing volumnes for existing services
 
@@ -83,5 +84,10 @@ run npm install
 
 
 
+## sidecommands
 
-
+'
+docker compose up --build\
+docker compose exec backend python manage.py migrate
+docker compose exec backend python manage.py createsuperuser
+'

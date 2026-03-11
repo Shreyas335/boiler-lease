@@ -202,7 +202,8 @@ class ListingMedia(models.Model):
 
     listing = models.ForeignKey(PropertyListing, on_delete=models.CASCADE, related_name="media")
     media_type = models.CharField(max_length=16, choices=MediaType.choices, default=MediaType.IMAGE)
-    file_url = models.URLField()
+    file_url = models.URLField(blank=True)
+    file = models.FileField(upload_to="listing_media/", blank=True, null=True)
     thumbnail_url = models.URLField(blank=True)
     display_order = models.IntegerField(default=0)
     is_primary = models.BooleanField(default=False)
