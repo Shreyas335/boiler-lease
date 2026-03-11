@@ -84,5 +84,10 @@ run npm install
 
 
 
+## sidecommands
 
-
+'
+docker compose up --build\
+docker compose exec backend python manage.py migrate
+docker compose exec backend python manage.py createsuperuser
+'
