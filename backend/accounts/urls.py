@@ -29,6 +29,7 @@ urlpatterns = [
     path("bookings/current/", views.my_current_bookings),
     path("bookings/past/", views.my_past_bookings),
     path("payments/history/", views.my_payment_history),
+    path("identity/verification-session/", views.start_identity_verification_session),
     path("payments/checkout/deposit/", views.create_deposit_checkout_session),
     path("payments/webhook/", views.stripe_webhook),
     path("favorites/", views.my_favorite_listings),
