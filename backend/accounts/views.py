@@ -68,7 +68,7 @@ def _make_2fa_temp_token(user):
     return token
 
 def _user_for_identity_verification_session(obj):
-"""Resolve User from Stripe VerificationSession webhook object (metadata or session id)."""
+    """Resolve User from Stripe Verification webhook object"""
     if not obj:
         return None
     meta = obj.get("metadata") or {}
