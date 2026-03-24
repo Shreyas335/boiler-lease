@@ -1,5 +1,11 @@
 export type UserType = "sublessee" | "subleaser" | "management";
 
+export type IdentityVerificationStatus =
+  | "unverified"
+  | "pending"
+  | "verified"
+  | "failed";
+
 export interface User {
   id: number;
   username: string;
@@ -9,4 +15,5 @@ export interface User {
   last_name: string;
   email_verified: boolean;
   two_factor_enabled: boolean;
+  identity_verification_status: IdentityVerificationStatus;
 }
