@@ -877,6 +877,24 @@ def stripe_webhook(request):
         if txn and txn.status == TransactionRecord.Status.PENDING:
             txn.status = TransactionRecord.Status.CANCELED
             txn.save(update_fields=["status"])
+    elif event_type == "identity.verification_session.verified":
+        user = _user_for_identity_verification_session(obj)
+        if user:
+            user.identity_verification_status = User.IdentityVerificationStatus.VERIFIED
+            user.save(update_fields=["identity_verification_status"])
+    elif event_type == "identity.verification_session.canceled":
+        user = _user_for_identity_verification_session(obj)
+        if user:
+            user.identity_verification_status = User.IdentityVerificationStatus.FAILED
+            user.save(update_fields=["identity_verification_status"])
+    elif event_type == "identity.verification_session.requires_input":
+        user = _user_for_identity_verification_session(obj)
+        if user:
+            if obj.get("last_error"):
+                user.identity_verification_status = User.IdentityVerificationStatus.FAILED
+            else:
+                user.identity_verification_status = User.IdentityVerificationStatus.PENDING
+            user.save(update_fields=["identity_verification_status"])
 
     return Response({"received": True}, status=status.HTTP_200_OK)
 
