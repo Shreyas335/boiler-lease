@@ -12,6 +12,12 @@ class User(AbstractUser):
         SUBLEASER = "subleaser", "Subleaser"
         MANAGEMENT = "management", "Management Company"
 
+    class IdentityVerificationStatus(models.TextChoices):
+        UNVERIFIED = "unverified", "Unverified"
+        PENDING = "pending", "Pending"
+        VERIFIED = "verified", "Verified"
+        FAILED = "failed", "Failed"
+
     email = models.EmailField(unique=True)
 
     user_type = models.CharField(
@@ -28,6 +34,14 @@ class User(AbstractUser):
     # Two-factor authentication (TOTP)
     two_factor_enabled = models.BooleanField(default=False)
     totp_secret = models.CharField(max_length=32, null=True, blank=True)
+
+    # Stripe Identity
+    identity_verification_status = models.CharField(
+        max_length=20,
+        choices=IdentityVerificationStatus.choices,
+        default=IdentityVerificationStatus.UNVERIFIED,
+    )
+    stripe_identity_session_id = models.CharField(max_length=255, blank=True)
 
     class Meta:
         db_table = "accounts_user"
