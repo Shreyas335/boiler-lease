@@ -28,6 +28,7 @@ class UserSerializer(serializers.ModelSerializer):
             "last_name",
             "email_verified",
             "two_factor_enabled",
+            "identity_verification_status",
         )
         read_only_fields = (
             "id",
@@ -38,6 +39,7 @@ class UserSerializer(serializers.ModelSerializer):
             "last_name",
             "email_verified",
             "two_factor_enabled",
+            "identity_verification_status",
         )
 
 
