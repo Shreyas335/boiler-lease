@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import * as identityApi from "../api/identity";
 import {
   Box,
@@ -39,8 +39,11 @@ const USER_TYPE_CONFIG: Record<
 };
 
 export default function DashboardPage() {
-  const { user } = useAuth();
+  const { user, refreshUser } = useAuth();
   const [identityBusy, setIdentityBusy] = useState(false);
+  useEffect(() => {
+    void refreshUser();
+  }, [refreshUser]);
   if (!user) return null;
 
   const config = USER_TYPE_CONFIG[user.user_type] || USER_TYPE_CONFIG.sublessee;
