@@ -81,6 +81,13 @@ export interface BookingRecord {
   booked_at: string;
   monthly_rent_snapshot: string | null;
   price: string;
+  booking_status: "upcoming" | "active" | "completed";
+}
+
+export interface CreateBookingPayload {
+  listing: number;
+  start_date: string;
+  end_date: string;
 }
 
 export interface FavoriteRecord {
@@ -263,6 +270,11 @@ export async function getCurrentBookings(sortBy: BookingSortBy, order: SortOrder
   const { data } = await api.get<BookingRecord[]>("/bookings/current/", {
     params: { sort_by: sortBy, order },
   });
+  return data;
+}
+
+export async function createBooking(payload: CreateBookingPayload): Promise<BookingRecord> {
+  const { data } = await api.post<BookingRecord>("/bookings/", payload);
   return data;
 }
 
