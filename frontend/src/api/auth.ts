@@ -92,6 +92,12 @@ export async function twoFactorDisable(): Promise<void> {
   await api.post("/account/2fa/disable/");
 }
 
+export async function createTestCheckoutSession(): Promise<{ checkout_url: string }> {
+  await fetchCsrfToken();
+  const { data } = await api.post<{ checkout_url: string }>("/payments/test-checkout/");
+  return data;
+}
+
 export interface UpdateAccountPayload {
   username?: string;
   first_name?: string;
