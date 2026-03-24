@@ -10,7 +10,7 @@ from django.conf import settings
 from django.db.models.functions import Coalesce
 from django.http import HttpResponseRedirect
 from django.utils import timezone
-from django.views.decorators.csrf import ensure_csrf_cookie
+from django.views.decorators.csrf import csrf_exempt, ensure_csrf_cookie
 from django.db.models import Q, Prefetch
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
@@ -735,8 +735,8 @@ def my_payment_history(request):
 
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
-def create_test_checkout_session(request):
-    """Minimal Stripe sandbox checkout for a deposit payment smoke test."""
+def create_deposit_checkout_session(request):
+    """Create a Stripe Checkout Session for a security deposit (placeholder amount until booking-linked)."""
     if not _is_sublessee(request):
         return Response(
             {"detail": "Only sublessees can start deposit payments."},
@@ -755,12 +755,13 @@ def create_test_checkout_session(request):
 
     stripe.api_key = settings.STRIPE_SECRET_KEY
 
-    amount_cents = 5000  # $50.00 test deposit
+    # TODO: set from booking / listing security_deposit when bookings integrate with checkout.
+    amount_cents = 5000
     txn = TransactionRecord.objects.create(
         user=request.user,
         amount=amount_cents / 100,
         currency="usd",
-        booking_reference="TEST-DEPOSIT",
+        booking_reference="",
         status=TransactionRecord.Status.PENDING,
     )
 
@@ -772,7 +773,7 @@ def create_test_checkout_session(request):
                 "price_data": {
                     "currency": "usd",
                     "unit_amount": amount_cents,
-                    "product_data": {"name": "Test Security Deposit"},
+                    "product_data": {"name": "Security deposit"},
                 },
                 "quantity": 1,
             }
@@ -781,14 +782,15 @@ def create_test_checkout_session(request):
             "transaction_id": str(txn.id),
             "user_id": str(request.user.id),
         },
-        success_url=f"{settings.FRONTEND_URL}/dashboard?payment=success",
-        cancel_url=f"{settings.FRONTEND_URL}/dashboard?payment=cancel",
+        success_url=f"{settings.FRONTEND_URL}/dashboard",
+        cancel_url=f"{settings.FRONTEND_URL}/dashboard",
     )
     txn.stripe_checkout_session_id = session.id
     txn.save(update_fields=["stripe_checkout_session_id"])
     return Response({"checkout_url": session.url}, status=status.HTTP_201_CREATED)
 
 
+@csrf_exempt
 @api_view(["POST"])
 @permission_classes([AllowAny])
 def stripe_webhook(request):
