@@ -67,6 +67,21 @@ def _make_2fa_temp_token(user):
         raise
     return token
 
+def _user_for_identity_verification_session(obj):
+"""Resolve User from Stripe VerificationSession webhook object (metadata or session id)."""
+    if not obj:
+        return None
+    meta = obj.get("metadata") or {}
+    uid = meta.get("user_id")
+    if uid is not None:
+        try:
+            return User.objects.filter(pk=int(uid)).first()
+        except (ValueError, TypeError):
+            return None
+    session_id = obj.get("id")
+    if session_id:
+        return User.objects.filter(stripe_identity_session_id=session_id).first()
+    return None
 
 def _hash_token(token):
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
