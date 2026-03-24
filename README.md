@@ -49,7 +49,7 @@ Optional settings:
 Current setup notes:
 
 - Public S3 storage settings activate only when `AWS_S3_PUBLIC_BUCKET_NAME` is set.
-- Private-bucket env vars are defined now and will be wired to Django storage in the next S3 step.
+- Private S3 storage settings activate only when `AWS_S3_PRIVATE_BUCKET_NAME` is set and generate signed URLs that expire based on `AWS_S3_PRIVATE_URL_EXPIRE_SECONDS`.
 - Prefer separate public and private buckets instead of mixing both access levels in one bucket.
 
 If you change Python dependencies for S3 support, rebuild the backend container:
@@ -110,4 +110,3 @@ Frontend
 run npm install
 
 npm run dev
-

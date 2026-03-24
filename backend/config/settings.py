@@ -160,6 +160,7 @@ AWS_S3_PRIVATE_URL_EXPIRE_SECONDS = int(os.environ.get("AWS_S3_PRIVATE_URL_EXPIR
 
 LISTING_MEDIA_PUBLIC_PREFIX = "listing-media/public"
 LISTING_MEDIA_PUBLIC_BASE_URL = ""
+LISTING_MEDIA_PRIVATE_PREFIX = "listing-media/private"
 
 if AWS_S3_PUBLIC_BUCKET_NAME:
     public_media_storage_options = {
@@ -201,6 +202,27 @@ if AWS_S3_PUBLIC_BUCKET_NAME:
         LISTING_MEDIA_PUBLIC_BASE_URL = (
             f"https://{AWS_S3_PUBLIC_BUCKET_NAME}.s3.amazonaws.com/{LISTING_MEDIA_PUBLIC_PREFIX}"
         )
+
+if AWS_S3_PRIVATE_BUCKET_NAME:
+    private_media_storage_options = {
+        "access_key": AWS_ACCESS_KEY_ID or None,
+        "secret_key": AWS_SECRET_ACCESS_KEY or None,
+        "bucket_name": AWS_S3_PRIVATE_BUCKET_NAME,
+        "region_name": AWS_DEFAULT_REGION or None,
+        "default_acl": None,
+        "querystring_auth": True,
+        "querystring_expire": AWS_S3_PRIVATE_URL_EXPIRE_SECONDS,
+        "file_overwrite": False,
+        "location": LISTING_MEDIA_PRIVATE_PREFIX,
+    }
+
+    if AWS_S3_ENDPOINT_URL:
+        private_media_storage_options["endpoint_url"] = AWS_S3_ENDPOINT_URL
+
+    STORAGES["listing_media_private"] = {
+        "BACKEND": "storages.backends.s3.S3Storage",
+        "OPTIONS": private_media_storage_options,
+    }
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.0/ref/settings/#default-auto-field
