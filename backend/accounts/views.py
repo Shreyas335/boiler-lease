@@ -2,6 +2,7 @@ import random
 import secrets
 import hashlib
 from datetime import timedelta
+import stripe
 from django.contrib.auth import login, logout
 from django.core.mail import send_mail
 from django.core.cache import cache
@@ -9,7 +10,7 @@ from django.conf import settings
 from django.db.models.functions import Coalesce
 from django.http import HttpResponseRedirect
 from django.utils import timezone
-from django.views.decorators.csrf import ensure_csrf_cookie
+from django.views.decorators.csrf import csrf_exempt, ensure_csrf_cookie
 from django.db.models import Q, Prefetch
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
@@ -730,6 +731,106 @@ def my_payment_history(request):
     transactions = TransactionRecord.objects.filter(user=request.user).order_by("-created_at")
     serializer = TransactionRecordSerializer(transactions, many=True)
     return Response(serializer.data)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def create_deposit_checkout_session(request):
+    """Create a Stripe Checkout Session for a security deposit (placeholder amount until booking-linked)."""
+    if not _is_sublessee(request):
+        return Response(
+            {"detail": "Only sublessees can start deposit payments."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    if not request.user.email_verified:
+        return Response(
+            {"detail": "Please verify your email before making a payment."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if not settings.STRIPE_SECRET_KEY:
+        return Response(
+            {"detail": "Stripe is not configured on the server."},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+    stripe.api_key = settings.STRIPE_SECRET_KEY
+
+    # TODO: set from booking / listing security_deposit when bookings integrate with checkout.
+    amount_cents = 5000
+    txn = TransactionRecord.objects.create(
+        user=request.user,
+        amount=amount_cents / 100,
+        currency="usd",
+        booking_reference="",
+        status=TransactionRecord.Status.PENDING,
+    )
+
+    session = stripe.checkout.Session.create(
+        mode="payment",
+        customer_email=request.user.email,
+        line_items=[
+            {
+                "price_data": {
+                    "currency": "usd",
+                    "unit_amount": amount_cents,
+                    "product_data": {"name": "Security deposit"},
+                },
+                "quantity": 1,
+            }
+        ],
+        metadata={
+            "transaction_id": str(txn.id),
+            "user_id": str(request.user.id),
+        },
+        success_url=f"{settings.FRONTEND_URL}/dashboard",
+        cancel_url=f"{settings.FRONTEND_URL}/dashboard",
+    )
+    txn.stripe_checkout_session_id = session.id
+    txn.save(update_fields=["stripe_checkout_session_id"])
+    return Response({"checkout_url": session.url}, status=status.HTTP_201_CREATED)
+
+
+@csrf_exempt
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def stripe_webhook(request):
+    payload = request.body
+    sig_header = request.META.get("HTTP_STRIPE_SIGNATURE")
+    webhook_secret = settings.STRIPE_WEBHOOK_SECRET
+
+    if not webhook_secret:
+        return Response({"detail": "Webhook secret not configured."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    try:
+        event = stripe.Webhook.construct_event(payload, sig_header, webhook_secret)
+    except Exception:
+        return Response({"detail": "Invalid webhook payload/signature."}, status=status.HTTP_400_BAD_REQUEST)
+
+    event_type = event.get("type")
+    obj = event.get("data", {}).get("object", {})
+
+    if event_type == "checkout.session.completed":
+        session_id = obj.get("id")
+        payment_intent_id = obj.get("payment_intent") or ""
+        amount_total = obj.get("amount_total")
+
+        txn = TransactionRecord.objects.filter(stripe_checkout_session_id=session_id).first()
+        if txn:
+            if isinstance(amount_total, int):
+                txn.amount = amount_total / 100
+            txn.status = TransactionRecord.Status.SUCCEEDED
+            txn.paid_at = timezone.now()
+            txn.stripe_payment_intent_id = payment_intent_id
+            txn.save(update_fields=["amount", "status", "paid_at", "stripe_payment_intent_id"])
+
+    elif event_type == "checkout.session.expired":
+        session_id = obj.get("id")
+        txn = TransactionRecord.objects.filter(stripe_checkout_session_id=session_id).first()
+        if txn and txn.status == TransactionRecord.Status.PENDING:
+            txn.status = TransactionRecord.Status.CANCELED
+            txn.save(update_fields=["status"])
+
+    return Response({"received": True}, status=status.HTTP_200_OK)
 
 
 @api_view(["GET", "PATCH", "DELETE"])
