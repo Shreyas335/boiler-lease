@@ -26,6 +26,7 @@ urlpatterns = [
     path("listings/<int:listing_id>/", views.property_listing_detail),
     path("listings/mine/", views.my_property_listings),
     path("listings/amenities/", views.listing_amenities),
+    path("bookings/", views.create_booking),
     path("bookings/current/", views.my_current_bookings),
     path("bookings/past/", views.my_past_bookings),
     path("payments/history/", views.my_payment_history),
