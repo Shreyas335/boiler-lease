@@ -1,6 +1,7 @@
 from django.contrib.auth.password_validation import validate_password
 from django.conf import settings
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.utils import timezone
 from rest_framework import serializers
 
 from .models import (
@@ -356,6 +357,7 @@ class PropertyListingSummarySerializer(serializers.ModelSerializer):
 class PropertyBookingSerializer(serializers.ModelSerializer):
     listing = PropertyListingSummarySerializer(read_only=True)
     price = serializers.SerializerMethodField()
+    booking_status = serializers.SerializerMethodField()
 
     class Meta:
         model = PropertyBooking
@@ -367,10 +369,19 @@ class PropertyBookingSerializer(serializers.ModelSerializer):
             "booked_at",
             "monthly_rent_snapshot",
             "price",
+            "booking_status",
         )
 
     def get_price(self, obj):
         return obj.monthly_rent_snapshot or obj.listing.monthly_rent
+
+    def get_booking_status(self, obj):
+        today = timezone.localdate()
+        if obj.start_date > today:
+            return "upcoming"
+        if obj.end_date < today:
+            return "completed"
+        return "active"
 
 
 class FavoriteListingSerializer(serializers.ModelSerializer):
