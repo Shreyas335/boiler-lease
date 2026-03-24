@@ -245,6 +245,30 @@ class PropertyBooking(models.Model):
         ]
 
 
+class TransactionRecord(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        SUCCEEDED = "succeeded", "Succeeded"
+        FAILED = "failed", "Failed"
+        CANCELED = "canceled", "Canceled"
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="transactions")
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    currency = models.CharField(max_length=8, default="usd")
+    booking_reference = models.CharField(max_length=64, blank=True)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
+    stripe_payment_intent_id = models.CharField(max_length=128, blank=True)
+    stripe_checkout_session_id = models.CharField(max_length=128, blank=True)
+    paid_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["user", "-created_at"], name="txn_user_created_idx"),
+            models.Index(fields=["status", "-created_at"], name="txn_status_created_idx"),
+        ]
+
+
 class FavoriteListing(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="favorite_listings")
     listing = models.ForeignKey(PropertyListing, on_delete=models.CASCADE, related_name="favorited_by")
