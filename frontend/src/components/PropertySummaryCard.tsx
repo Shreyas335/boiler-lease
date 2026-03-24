@@ -1,4 +1,4 @@
-import { Box, Button, Card, CardContent, Chip, Stack, Typography } from "@mui/material";
+import { Box, Button, Card, CardContent, Chip, Stack, Typography, type ChipProps } from "@mui/material";
 import FavoriteBorderRoundedIcon from "@mui/icons-material/FavoriteBorderRounded";
 import FavoriteRoundedIcon from "@mui/icons-material/FavoriteRounded";
 import { Link as RouterLink } from "react-router-dom";
@@ -15,6 +15,8 @@ interface PropertySummaryCardProps {
   onToggleFavorite?: (listing: PropertyListingSummary) => Promise<void> | void;
   favoriteLoading?: boolean;
   footerText?: string;
+  statusLabel?: string;
+  statusColor?: ChipProps["color"];
 }
 
 export default function PropertySummaryCard({
@@ -22,6 +24,8 @@ export default function PropertySummaryCard({
   onToggleFavorite,
   favoriteLoading = false,
   footerText,
+  statusLabel,
+  statusColor = "default",
 }: PropertySummaryCardProps) {
   return (
     <Card>
@@ -86,9 +90,12 @@ export default function PropertySummaryCard({
           )}
 
           <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" useFlexGap>
-            <Typography variant="body2" color="text.secondary">
-              Available {listing.availability_start_date} to {listing.availability_end_date}
-            </Typography>
+            <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+              <Typography variant="body2" color="text.secondary">
+                Available {listing.availability_start_date} to {listing.availability_end_date}
+              </Typography>
+              {statusLabel && <Chip size="small" label={statusLabel} color={statusColor} variant="outlined" />}
+            </Stack>
             <Button component={RouterLink} to={`/properties/${listing.id}`} variant="text" size="small">
               View details
             </Button>
