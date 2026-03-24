@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Alert, Box, Container, FormControl, InputLabel, MenuItem, Select, Stack, Typography } from "@mui/material";
+import { Alert, Box, Container, FormControl, InputLabel, MenuItem, Select, Stack, Typography, type ChipProps } from "@mui/material";
 import {
   addFavorite,
   removeFavorite,
@@ -61,6 +61,19 @@ export default function BookingsPageContent({
     if (sortBy === "end_date") return "End date";
     return "Date booked";
   }, [sortBy]);
+
+  function getBookingStatusMeta(status: BookingRecord["booking_status"]): {
+    label: string;
+    color: ChipProps["color"];
+  } {
+    if (status === "active") {
+      return { label: "Active", color: "success" };
+    }
+    if (status === "completed") {
+      return { label: "Completed", color: "default" };
+    }
+    return { label: "Upcoming", color: "info" };
+  }
 
   async function toggleFavorite(listing: PropertyListingSummary) {
     try {
@@ -150,6 +163,8 @@ export default function BookingsPageContent({
                 listing={booking.listing}
                 onToggleFavorite={toggleFavorite}
                 favoriteLoading={favoriteBusyId === booking.listing.id}
+                statusLabel={getBookingStatusMeta(booking.booking_status).label}
+                statusColor={getBookingStatusMeta(booking.booking_status).color}
                 footerText={`Booked on ${new Date(booking.booked_at).toLocaleDateString()} | Stay ${booking.start_date} to ${booking.end_date} | Sorted by ${sortLabel.toLowerCase()} (${order})`}
               />
             ))}
