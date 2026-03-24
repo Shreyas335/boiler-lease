@@ -739,26 +739,26 @@ def start_identity_verification_session(request):
     """Stripe Identity"""
     user = request.user
     if user.user_type not in (User.UserType.SUBLESSEE, User.UserType.SUBLEASER):
-    return Response(
-        {"detail": "Identity verification is not required for this account type."},
-        status=status.HTTP_403_FORBIDDEN,
-    )
+        return Response(
+            {"detail": "Identity verification is not required for this account type."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
     if user.identity_verification_status == User.IdentityVerificationStatus.VERIFIED:
-    return Response(
-        {"detail": "Your identity is already verified."},
-        status=status.HTTP_400_BAD_REQUEST,
-    )
+        return Response(
+            {"detail": "Your identity is already verified."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
     if not settings.STRIPE_SECRET_KEY:
-    return Response(
-        {"detail": "Stripe is not configured on the server."},
-        status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-    )
+        return Response(
+            {"detail": "Stripe is not configured on the server."},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
     stripe.api_key = settings.STRIPE_SECRET_KEY
     return_url = f"{settings.FRONTEND_URL}/account?identity_return=1"
     session = stripe.identity.VerificationSession.create(
-    type="document",
-    metadata={"user_id": str(user.id)},
-    return_url=return_url,
+        type="document",
+        metadata={"user_id": str(user.id)},
+        return_url=return_url,
     )
     user.stripe_identity_session_id = session.id
     user.identity_verification_status = User.IdentityVerificationStatus.PENDING
