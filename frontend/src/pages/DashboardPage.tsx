@@ -1,3 +1,5 @@
+import { useState } from "react";
+import * as identityApi from "../api/identity";
 import {
   Box,
   Container,
@@ -38,14 +40,54 @@ const USER_TYPE_CONFIG: Record<
 
 export default function DashboardPage() {
   const { user } = useAuth();
-
+  const [identityBusy, setIdentityBusy] = useState(false);
   if (!user) return null;
 
   const config = USER_TYPE_CONFIG[user.user_type] || USER_TYPE_CONFIG.sublessee;
 
+  const showIdentityCta =
+    (user.user_type === "sublessee" || user.user_type === "subleaser") &&
+    user.identity_verification_status !== "verified";
+  const identityActionLabel =
+    user.identity_verification_status === "failed"
+      ? "Retry verification"
+      : user.identity_verification_status === "pending"
+        ? "Continue verification"
+        : "Verify identity";
+
+  const startIdentity = async () => {
+    setIdentityBusy(true);
+    try {
+      const { url } = await identityApi.startIdentityVerificationSession();
+      window.location.assign(url);
+    } catch {
+      setIdentityBusy(false);
+    }
+  };
+
   return (
     <Box sx={{ py: 6, px: 2 }}>
       <Container maxWidth="lg">
+        {showIdentityCta && (
+          <Alert
+            severity="info"
+            sx={{ mb: 3 }}
+            action={
+              <Button
+                color="inherit"
+                size="small"
+                disabled={identityBusy}
+                onClick={() => void startIdentity()}
+              >
+                {identityBusy ? "Starting…" : identityActionLabel}
+              </Button>
+            }
+          >
+            Verify your identity for trust before you list or
+            book. You&apos;ll complete checks on Stripe&apos;s secure page (test mode
+            uses sample documents).
+          </Alert>
+        )}
         {!user.email_verified && (
           <Alert
             severity="warning"
