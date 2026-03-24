@@ -188,12 +188,15 @@ export default function RegisterPage() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
-              minLength={8}
+              //minLength={8}
               autoComplete="new-password"
               disabled={submitting}
               error={!!fieldErrors.password}
               helperText={fieldErrors.password}
               sx={{ mb: 2 }}
+              inputProps={{
+                minLength: 8,
+              }}
               InputProps={{
                 startAdornment: (
                   <InputAdornment position="start">
@@ -209,12 +212,15 @@ export default function RegisterPage() {
               value={passwordConfirm}
               onChange={(e) => setPasswordConfirm(e.target.value)}
               required
-              minLength={8}
+              //minLength={8}
               autoComplete="new-password"
               disabled={submitting}
               error={!!fieldErrors.password_confirm}
               helperText={fieldErrors.password_confirm}
               sx={{ mb: 3 }}
+              inputProps={{
+                minLength: 8,
+              }}
               InputProps={{
                 startAdornment: (
                   <InputAdornment position="start">
