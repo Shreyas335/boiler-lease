@@ -735,8 +735,41 @@ def my_payment_history(request):
 
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
+def start_identity_verification_session(request):
+    """Stripe Identity"""
+    user = request.user
+    if user.user_type not in (User.UserType.SUBLESSEE, User.UserType.SUBLEASER):
+    return Response(
+        {"detail": "Identity verification is not required for this account type."},
+        status=status.HTTP_403_FORBIDDEN,
+    )
+    if user.identity_verification_status == User.IdentityVerificationStatus.VERIFIED:
+    return Response(
+        {"detail": "Your identity is already verified."},
+        status=status.HTTP_400_BAD_REQUEST,
+    )
+    if not settings.STRIPE_SECRET_KEY:
+    return Response(
+        {"detail": "Stripe is not configured on the server."},
+        status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+    )
+    stripe.api_key = settings.STRIPE_SECRET_KEY
+    return_url = f"{settings.FRONTEND_URL}/account?identity_return=1"
+    session = stripe.identity.VerificationSession.create(
+    type="document",
+    metadata={"user_id": str(user.id)},
+    return_url=return_url,
+    )
+    user.stripe_identity_session_id = session.id
+    user.identity_verification_status = User.IdentityVerificationStatus.PENDING
+    user.save(update_fields=["stripe_identity_session_id", "identity_verification_status"])
+    return Response({"url": session.url}, status=status.HTTP_201_CREATED)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
 def create_deposit_checkout_session(request):
-    """Create a Stripe Checkout Session for a security deposit (placeholder amount until booking-linked)."""
+    """Stripe Checkout Session for a security deposit (placeholder amount until bookings)."""
     if not _is_sublessee(request):
         return Response(
             {"detail": "Only sublessees can start deposit payments."},
