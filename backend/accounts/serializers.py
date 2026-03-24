@@ -436,3 +436,45 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
         except DjangoValidationError as exc:
             raise serializers.ValidationError({"new_password": list(exc.messages)})
         return attrs
+
+
+class UploadInitSerializer(serializers.Serializer):
+    """Request schema for presigned upload initiation."""
+
+    ALLOWED_CONTENT_TYPES = [
+        "image/jpeg",
+        "image/png",
+        "image/webp",
+        "image/gif",
+    ]
+    MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
+
+    listing_id = serializers.IntegerField()
+    filename = serializers.CharField(max_length=255)
+    content_type = serializers.CharField(max_length=100)
+    file_size = serializers.IntegerField(min_value=1)
+    is_private = serializers.BooleanField(default=False)
+
+    def validate_content_type(self, value):
+        if value not in self.ALLOWED_CONTENT_TYPES:
+            raise serializers.ValidationError(
+                f"Unsupported file type. Allowed: {', '.join(self.ALLOWED_CONTENT_TYPES)}"
+            )
+        return value
+
+    def validate_file_size(self, value):
+        if value > self.MAX_FILE_SIZE:
+            raise serializers.ValidationError(
+                f"File too large. Maximum size is {self.MAX_FILE_SIZE // (1024 * 1024)} MB."
+            )
+        return value
+
+    def validate_listing_id(self, value):
+        user = self.context["request"].user
+        try:
+            listing = PropertyListing.objects.get(pk=value, deleted_at__isnull=True)
+        except PropertyListing.DoesNotExist:
+            raise serializers.ValidationError("Listing not found.")
+        if listing.owner_id != user.pk:
+            raise serializers.ValidationError("You can only upload media to your own listings.")
+        return value

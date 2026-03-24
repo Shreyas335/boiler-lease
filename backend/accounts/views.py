@@ -1,6 +1,7 @@
 import random
 import secrets
 import hashlib
+import uuid
 from datetime import timedelta
 from django.contrib.auth import login, logout
 from django.core.mail import send_mail
@@ -15,7 +16,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
 from .email_verification import send_2fa_code_email, send_password_reset_email, send_verification_email
-from .models import ListingAmenity, PasswordResetToken, User
+from .models import ListingAmenity, ListingMedia, PasswordResetToken, PropertyListing, User
 from .serializers import (
     AccountUpdateSerializer,
     FeedbackSubmissionSerializer,
@@ -26,6 +27,7 @@ from .serializers import (
     PropertyListingCreateSerializer,
     PropertyListingSerializer,
     RegisterSerializer,
+    UploadInitSerializer,
     UserSerializer,
     TwoFactorVerifyLoginSerializer,
 )
@@ -389,4 +391,90 @@ def listing_amenities(request):
     amenities = ListingAmenity.objects.filter(is_active=True).order_by("label")
     return Response(
         [{"id": amenity.id, "code": amenity.code, "label": amenity.label} for amenity in amenities]
+    )
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def upload_init(request):
+    """Return presigned S3 upload data so the browser can upload directly."""
+    if request.user.user_type != User.UserType.SUBLEASER:
+        return Response(
+            {"detail": "Only subleasers can upload media."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    serializer = UploadInitSerializer(data=request.data, context={"request": request})
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    data = serializer.validated_data
+    listing = PropertyListing.objects.get(pk=data["listing_id"])
+    is_private = data["is_private"]
+    content_type = data["content_type"]
+    filename = data["filename"]
+    file_size = data["file_size"]
+
+    # Build a unique storage key
+    ext = filename.rsplit(".", 1)[-1] if "." in filename else "bin"
+    storage_key = f"{listing.pk}/{uuid.uuid4().hex}.{ext}"
+
+    # Pick the right storage backend and prefix
+    from django.core.files.storage import storages
+
+    if is_private:
+        storage_name = "listing_media_private"
+        prefix = getattr(settings, "LISTING_MEDIA_PRIVATE_PREFIX", "listing-media/private")
+    else:
+        storage_name = "listing_media_public"
+        prefix = getattr(settings, "LISTING_MEDIA_PUBLIC_PREFIX", "listing-media/public")
+
+    try:
+        storage = storages[storage_name]
+    except KeyError:
+        return Response(
+            {"detail": "Storage backend not configured. Check AWS settings."},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+    # Generate presigned POST data via boto3
+    full_key = f"{prefix}/{storage_key}"
+    try:
+        client = storage.connection.meta.client
+        presigned = client.generate_presigned_post(
+            Bucket=storage.bucket_name,
+            Key=full_key,
+            Fields={"Content-Type": content_type},
+            Conditions=[
+                {"Content-Type": content_type},
+                ["content-length-range", 1, file_size],
+            ],
+            ExpiresIn=300,
+        )
+    except Exception as exc:
+        return Response(
+            {"detail": "Failed to generate upload URL."},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+    # Create a pending media record
+    media = ListingMedia.objects.create(
+        listing=listing,
+        media_type=ListingMedia.MediaType.IMAGE,
+        storage_key=storage_key,
+        is_private=is_private,
+        original_filename=filename,
+        content_type=content_type,
+        file_size=file_size,
+        upload_status=ListingMedia.UploadStatus.PENDING,
+    )
+
+    return Response(
+        {
+            "media_id": media.pk,
+            "upload_url": presigned["url"],
+            "upload_fields": presigned["fields"],
+            "storage_key": storage_key,
+        },
+        status=status.HTTP_200_OK,
     )

@@ -22,4 +22,5 @@ urlpatterns = [
     path("listings/", views.create_property_listing),
     path("listings/mine/", views.my_property_listings),
     path("listings/amenities/", views.listing_amenities),
+    path("listings/media/upload-init/", views.upload_init),
 ]
