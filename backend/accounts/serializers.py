@@ -383,6 +383,65 @@ class PropertyBookingSerializer(serializers.ModelSerializer):
             return "completed"
         return "active"
 
+class PropertyBookingCreateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PropertyBooking
+        fields = ("id", "listing", "start_date", "end_date")
+        read_only_fields = ("id",)
+
+    def validate(self, attrs):
+        listing = attrs["listing"]
+        start_date = attrs["start_date"]
+        end_date = attrs["end_date"]
+
+        if listing.deleted_at is not None:
+            raise serializers.ValidationError({"listing": ["Property listing not found."]})
+
+        if (
+            listing.status != PropertyListing.ListingStatus.PUBLISHED
+            or listing.approval_status != PropertyListing.ApprovalStatus.APPROVED
+        ):
+            raise serializers.ValidationError({"listing": ["This property is not available for booking."]})
+
+        if start_date > end_date:
+            raise serializers.ValidationError({"end_date": ["End date must be on or after start date."]})
+
+        if start_date < listing.availability_start_date or end_date > listing.availability_end_date:
+            raise serializers.ValidationError(
+                {
+                    "start_date": [
+                        "Booking dates must fall within the property's listed availability window."
+                    ]
+                }
+            )
+
+        overlapping_booking_exists = PropertyBooking.objects.filter(
+            listing=listing,
+            start_date__lte=end_date,
+            end_date__gte=start_date,
+        ).exists()
+        if overlapping_booking_exists:
+            raise serializers.ValidationError(
+                {"listing": ["These dates are no longer available for this property."]}
+            )
+
+        request = self.context.get("request")
+        if request and listing.owner_id == request.user.id:
+            raise serializers.ValidationError(
+                {"listing": ["You cannot book your own property listing."]}
+            )
+
+        return attrs
+
+    def create(self, validated_data):
+        listing = validated_data["listing"]
+        return PropertyBooking.objects.create(
+            sublessee=self.context["request"].user,
+            listing=listing,
+            start_date=validated_data["start_date"],
+            end_date=validated_data["end_date"],
+            monthly_rent_snapshot=listing.monthly_rent,
+        )
 
 class FavoriteListingSerializer(serializers.ModelSerializer):
     listing = PropertyListingSummarySerializer(read_only=True)
