@@ -754,7 +754,7 @@ def start_identity_verification_session(request):
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
     stripe.api_key = settings.STRIPE_SECRET_KEY
-    return_url = f"{settings.FRONTEND_URL}/account?identity_return=1"
+    return_url = f"{settings.FRONTEND_URL}/dashboard"
     session = stripe.identity.VerificationSession.create(
         type="document",
         metadata={"user_id": str(user.id)},
