@@ -11,6 +11,7 @@ from .models import (
     ListingMedia,
     PropertyBooking,
     PropertyListing,
+    TransactionRecord,
     User,
 )
 
@@ -647,3 +648,20 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
         except DjangoValidationError as exc:
             raise serializers.ValidationError({"new_password": list(exc.messages)})
         return attrs
+
+
+class TransactionRecordSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TransactionRecord
+        fields = (
+            "id",
+            "amount",
+            "currency",
+            "booking_reference",
+            "status",
+            "stripe_payment_intent_id",
+            "stripe_checkout_session_id",
+            "paid_at",
+            "created_at",
+        )
+        read_only_fields = fields

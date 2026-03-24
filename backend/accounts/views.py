@@ -26,6 +26,7 @@ from .models import (
     PasswordResetToken,
     PropertyBooking,
     PropertyListing,
+    TransactionRecord,
     User,
 )
 from .pagination import PropertyListingPagination
@@ -47,6 +48,7 @@ from .serializers import (
     RegisterSerializer,
     ListingMediaSerializer,
     ListingMediaUploadSerializer,
+    TransactionRecordSerializer,
     UserSerializer,
     TwoFactorVerifyLoginSerializer,
 )
@@ -714,6 +716,19 @@ def my_past_bookings(request):
         many=True,
         context={"user": request.user, "favorite_listing_ids": favorite_listing_ids},
     )
+    return Response(serializer.data)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def my_payment_history(request):
+    if not _is_sublessee(request):
+        return Response(
+            {"detail": "Only sublessees can view payment history."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    transactions = TransactionRecord.objects.filter(user=request.user).order_by("-created_at")
+    serializer = TransactionRecordSerializer(transactions, many=True)
     return Response(serializer.data)
 
 
