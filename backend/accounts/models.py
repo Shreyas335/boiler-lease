@@ -195,13 +195,34 @@ class ListingMedia(models.Model):
         IMAGE = "image", "Image"
         VIDEO = "video", "Video"
 
+    class UploadStatus(models.TextChoices):
+        PENDING = "pending", "Pending"
+        UPLOADED = "uploaded", "Uploaded"
+        FAILED = "failed", "Failed"
+
     listing = models.ForeignKey(PropertyListing, on_delete=models.CASCADE, related_name="media")
     media_type = models.CharField(max_length=16, choices=MediaType.choices, default=MediaType.IMAGE)
-    file_url = models.URLField()
+    file_url = models.URLField(blank=True)
     thumbnail_url = models.URLField(blank=True)
     display_order = models.IntegerField(default=0)
     is_primary = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
+
+    # S3 storage location
+    storage_key = models.CharField(max_length=512, blank=True, db_index=True)
+    is_private = models.BooleanField(default=False)
+
+    # File metadata
+    original_filename = models.CharField(max_length=255, blank=True)
+    content_type = models.CharField(max_length=100, blank=True)
+    file_size = models.PositiveBigIntegerField(null=True, blank=True)
+
+    # Upload state
+    upload_status = models.CharField(
+        max_length=16,
+        choices=UploadStatus.choices,
+        default=UploadStatus.PENDING,
+    )
 
     class Meta:
         ordering = ("display_order", "id")
