@@ -262,7 +262,7 @@ class ListingAmenitySerializer(serializers.ModelSerializer):
 
 class PropertyListingSerializer(serializers.ModelSerializer):
     amenities = serializers.SerializerMethodField()
-    media = ListingMediaSerializer(many=True, read_only=True)
+    media = serializers.SerializerMethodField()
 
     class Meta:
         model = PropertyListing
@@ -311,6 +311,10 @@ class PropertyListingSerializer(serializers.ModelSerializer):
     def get_amenities(self, obj):
         amenities = ListingAmenity.objects.filter(listing_links__listing=obj, is_active=True).distinct()
         return ListingAmenitySerializer(amenities, many=True).data
+
+    def get_media(self, obj):
+        finalized = obj.media.filter(upload_status=ListingMedia.UploadStatus.UPLOADED)
+        return ListingMediaSerializer(finalized, many=True).data
 
 
 class PropertyListingCreateSerializer(serializers.ModelSerializer):
