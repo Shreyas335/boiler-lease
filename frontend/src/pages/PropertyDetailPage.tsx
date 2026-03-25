@@ -203,6 +203,79 @@ export default function PropertyDetailPage() {
                 </Stack>
               </CardContent>
             </Card>
+
+            {user?.user_type === "sublessee" && (
+              <Card>
+                <CardContent>
+                  <Stack spacing={2}>
+                    <Box>
+                      <Typography variant="h6" sx={{ mb: 0.5 }}>
+                        Book This Property
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        Choose your dates and secure the sublease in a couple of clicks.
+                      </Typography>
+                    </Box>
+
+                    {bookingMessage && <Alert severity={bookingMessage.type}>{bookingMessage.text}</Alert>}
+
+                    <TextField
+                      label="Start date"
+                      type="date"
+                      value={bookingDates.start_date}
+                      onChange={(e) => setBookingDates((prev) => ({ ...prev, start_date: e.target.value }))}
+                      InputLabelProps={{ shrink: true }}
+                      inputProps={{
+                        min: listing.availability_start_date,
+                        max: listing.availability_end_date,
+                      }}
+                      fullWidth
+                    />
+                    <TextField
+                      label="End date"
+                      type="date"
+                      value={bookingDates.end_date}
+                      onChange={(e) => setBookingDates((prev) => ({ ...prev, end_date: e.target.value }))}
+                      InputLabelProps={{ shrink: true }}
+                      inputProps={{
+                        min: bookingDates.start_date || listing.availability_start_date,
+                        max: listing.availability_end_date,
+                      }}
+                      fullWidth
+                    />
+
+                    <Typography variant="body2" color="text.secondary">
+                      Available window: {listing.availability_start_date} to {listing.availability_end_date}
+                    </Typography>
+
+                    <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
+                      <Button
+                        variant="contained"
+                        onClick={handleBookingSubmit}
+                        disabled={bookingBusy || !bookingDates.start_date || !bookingDates.end_date}
+                      >
+                        {bookingBusy ? "Booking..." : "Book now"}
+                      </Button>
+                      <Button
+                        variant="text"
+                        onClick={() => navigate("/bookings/current")}
+                      >
+                        View my bookings
+                      </Button>
+                    </Stack>
+
+                    <Typography
+                      component={RouterLink}
+                      to="/bookings/current"
+                      variant="body2"
+                      sx={{ color: "primary.main", textDecoration: "none", fontWeight: 600 }}
+                    >
+                      Track booking status in Current Bookings
+                    </Typography>
+                  </Stack>
+                </CardContent>
+              </Card>
+            )}
           </Grid>
         </Grid>
       </Container>
