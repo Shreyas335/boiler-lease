@@ -278,6 +278,11 @@ export async function createBooking(payload: CreateBookingPayload): Promise<Book
   return data;
 }
 
+export async function cancelBooking(bookingId: number): Promise<{ detail: string }> {
+  const { data } = await api.delete<{ detail: string }>(`/bookings/${bookingId}/`);
+  return data;
+}
+
 export async function getPastBookings(sortBy: BookingSortBy, order: SortOrder): Promise<BookingRecord[]> {
   const { data } = await api.get<BookingRecord[]>("/bookings/past/", {
     params: { sort_by: sortBy, order },
