@@ -23,4 +23,6 @@ urlpatterns = [
     path("listings/mine/", views.my_property_listings),
     path("listings/amenities/", views.listing_amenities),
     path("listings/media/upload-init/", views.upload_init),
+    path("listings/media/upload-finalize/", views.upload_finalize),
+    path("listings/media/<int:media_id>/private-access/", views.private_media_access),
 ]

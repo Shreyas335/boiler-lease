@@ -27,6 +27,7 @@ from .serializers import (
     PropertyListingCreateSerializer,
     PropertyListingSerializer,
     RegisterSerializer,
+    UploadFinalizeSerializer,
     UploadInitSerializer,
     UserSerializer,
     TwoFactorVerifyLoginSerializer,
@@ -478,3 +479,73 @@ def upload_init(request):
         },
         status=status.HTTP_200_OK,
     )
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def upload_finalize(request):
+    """Mark a pending media record as uploaded after the browser finishes the S3 upload."""
+    serializer = UploadFinalizeSerializer(data=request.data, context={"request": request})
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    data = serializer.validated_data
+    media = ListingMedia.objects.select_related("listing").get(pk=data["media_id"])
+
+    media.upload_status = ListingMedia.UploadStatus.UPLOADED
+    media.display_order = data["display_order"]
+
+    if data["is_primary"]:
+        # Clear any existing primary flag on this listing
+        ListingMedia.objects.filter(
+            listing=media.listing, is_primary=True
+        ).update(is_primary=False)
+        media.is_primary = True
+
+    media.save(update_fields=["upload_status", "display_order", "is_primary"])
+
+    from .serializers import ListingMediaSerializer
+
+    return Response(ListingMediaSerializer(media).data, status=status.HTTP_200_OK)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def private_media_access(request, media_id):
+    """Return a short-lived signed URL for a private photo."""
+    try:
+        media = ListingMedia.objects.select_related("listing").get(pk=media_id)
+    except ListingMedia.DoesNotExist:
+        return Response({"detail": "Media not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    if not media.is_private:
+        return Response(
+            {"detail": "This media is public. Use the public URL."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    if media.upload_status != ListingMedia.UploadStatus.UPLOADED:
+        return Response({"detail": "Media not available."}, status=status.HTTP_404_NOT_FOUND)
+
+    # Only the listing owner can access private photos for now
+    if media.listing.owner_id != request.user.pk:
+        return Response(
+            {"detail": "You do not have permission to access this media."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    if not media.storage_key:
+        return Response({"detail": "No storage key for this media."}, status=status.HTTP_404_NOT_FOUND)
+
+    from django.core.files.storage import storages
+
+    try:
+        private_storage = storages["listing_media_private"]
+        signed_url = private_storage.url(media.storage_key)
+    except (KeyError, Exception):
+        return Response(
+            {"detail": "Private storage not configured."},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+    return Response({"access_url": signed_url, "expires_in": settings.AWS_S3_PRIVATE_URL_EXPIRE_SECONDS})
