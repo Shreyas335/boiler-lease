@@ -17,6 +17,12 @@ interface PropertySummaryCardProps {
   footerText?: string;
   statusLabel?: string;
   statusColor?: ChipProps["color"];
+  actionButton?: {
+    label: string;
+    onClick: () => Promise<void> | void;
+    disabled?: boolean;
+    color?: "primary" | "error";
+  };
 }
 
 export default function PropertySummaryCard({
@@ -26,6 +32,7 @@ export default function PropertySummaryCard({
   footerText,
   statusLabel,
   statusColor = "default",
+  actionButton,
 }: PropertySummaryCardProps) {
   return (
     <Card>
@@ -96,9 +103,22 @@ export default function PropertySummaryCard({
               </Typography>
               {statusLabel && <Chip size="small" label={statusLabel} color={statusColor} variant="outlined" />}
             </Stack>
-            <Button component={RouterLink} to={`/properties/${listing.id}`} variant="text" size="small">
-              View details
-            </Button>
+            <Stack direction="row" spacing={1}>
+              {actionButton && (
+                <Button
+                  variant="outlined"
+                  size="small"
+                  color={actionButton.color || "primary"}
+                  onClick={actionButton.onClick}
+                  disabled={actionButton.disabled}
+                >
+                  {actionButton.label}
+                </Button>
+              )}
+              <Button component={RouterLink} to={`/properties/${listing.id}`} variant="text" size="small">
+                View details
+              </Button>
+            </Stack>
           </Stack>
 
           {footerText && (
