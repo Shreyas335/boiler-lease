@@ -97,3 +97,65 @@ export async function getListingAmenities(): Promise<ListingAmenity[]> {
   const { data } = await api.get<ListingAmenity[]>("/listings/amenities/");
   return data;
 }
+
+// --- S3 Upload helpers ---
+
+export interface UploadInitRequest {
+  listing_id: number;
+  filename: string;
+  content_type: string;
+  file_size: number;
+  is_private: boolean;
+}
+
+export interface UploadInitResponse {
+  media_id: number;
+  upload_url: string;
+  upload_fields: Record<string, string>;
+  storage_key: string;
+}
+
+export interface UploadFinalizeRequest {
+  media_id: number;
+  display_order?: number;
+  is_primary?: boolean;
+}
+
+export interface ListingMedia {
+  id: number;
+  media_type: string;
+  file_url: string;
+  access_url: string | null;
+  thumbnail_url: string;
+  display_order: number;
+  is_primary: boolean;
+  is_private: boolean;
+  original_filename: string;
+  content_type: string;
+  file_size: number | null;
+  upload_status: string;
+}
+
+export async function requestUploadInit(payload: UploadInitRequest): Promise<UploadInitResponse> {
+  const { data } = await api.post<UploadInitResponse>("/listings/media/upload-init/", payload);
+  return data;
+}
+
+export async function uploadFileToS3(
+  uploadUrl: string,
+  uploadFields: Record<string, string>,
+  file: File,
+): Promise<void> {
+  const formData = new FormData();
+  Object.entries(uploadFields).forEach(([key, value]) => {
+    formData.append(key, value);
+  });
+  formData.append("file", file);
+
+  await fetch(uploadUrl, { method: "POST", body: formData });
+}
+
+export async function finalizeUpload(payload: UploadFinalizeRequest): Promise<ListingMedia> {
+  const { data } = await api.post<ListingMedia>("/listings/media/upload-finalize/", payload);
+  return data;
+}
