@@ -1,6 +1,7 @@
 import random
 import secrets
 import hashlib
+import uuid
 from datetime import timedelta
 import stripe
 from django.contrib.auth import login, logout
@@ -436,28 +437,69 @@ def create_property_listing(request):
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def upload_listing_media(request, listing_id):
+    """Accept a file upload, store it in S3, and create a ListingMedia record."""
+    from django.core.files.storage import storages
+
     if request.user.user_type != User.UserType.SUBLEASER:
         return Response(
-            {"detail": "Only subleasers can upload listing media."},
+            {"detail": "Only subleasers can upload media."},
             status=status.HTTP_403_FORBIDDEN,
         )
 
     listing = PropertyListing.objects.filter(id=listing_id, deleted_at__isnull=True).first()
     if not listing:
-        return Response({"detail": "Property listing not found."}, status=status.HTTP_404_NOT_FOUND)
-    if listing.owner != request.user:
+        return Response({"detail": "Listing not found."}, status=status.HTTP_404_NOT_FOUND)
+    if listing.owner_id != request.user.pk:
         return Response(
-            {"detail": "You do not have permission to update this listing."},
+            {"detail": "You can only upload media to your own listings."},
             status=status.HTTP_403_FORBIDDEN,
         )
 
-    serializer = ListingMediaUploadSerializer(data=request.data)
-    if not serializer.is_valid():
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    file = request.FILES.get("file")
+    display_order = int(request.data.get("display_order", 0))
+    is_primary = str(request.data.get("is_primary", "false")).lower() in ("true", "1")
 
-    file = serializer.validated_data["file"]
-    is_primary = serializer.validated_data.get("is_primary", False)
-    display_order = serializer.validated_data.get("display_order", 0)
+    if not file:
+        return Response(
+            {"detail": "file is required."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Validate file type and size
+    allowed_types = ["image/jpeg", "image/png", "image/webp", "image/gif"]
+    content_type = file.content_type or "application/octet-stream"
+    if content_type not in allowed_types:
+        return Response(
+            {"detail": f"Unsupported file type. Allowed: {', '.join(allowed_types)}"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    max_size = 10 * 1024 * 1024  # 10 MB
+    if file.size > max_size:
+        return Response(
+            {"detail": "File too large. Maximum size is 10 MB."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Build a unique storage key and upload to S3
+    ext = file.name.rsplit(".", 1)[-1] if "." in file.name else "bin"
+    storage_key = f"{listing.pk}/{uuid.uuid4().hex}.{ext}"
+
+    try:
+        storage = storages["listing_media_public"]
+    except KeyError:
+        return Response(
+            {"detail": "Storage backend not configured. Check AWS settings."},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+    saved_name = storage.save(storage_key, file)
+
+    base = getattr(settings, "LISTING_MEDIA_PUBLIC_BASE_URL", "")
+    if base:
+        file_url = f"{base}/{saved_name}"
+    else:
+        file_url = storage.url(saved_name)
 
     if is_primary:
         ListingMedia.objects.filter(listing=listing, is_primary=True).update(is_primary=False)
@@ -465,10 +507,17 @@ def upload_listing_media(request, listing_id):
     media = ListingMedia.objects.create(
         listing=listing,
         media_type=ListingMedia.MediaType.IMAGE,
-        file=file,
+        storage_key=saved_name,
+        is_private=False,
+        original_filename=file.name,
+        content_type=content_type,
+        file_size=file.size,
+        file_url=file_url,
+        upload_status=ListingMedia.UploadStatus.UPLOADED,
         display_order=display_order,
         is_primary=is_primary,
     )
+
     return Response(ListingMediaSerializer(media).data, status=status.HTTP_201_CREATED)
 
 
@@ -525,6 +574,94 @@ def listing_amenities(request):
     return Response(
         [{"id": amenity.id, "code": amenity.code, "label": amenity.label} for amenity in amenities]
     )
+
+
+
+@api_view(["DELETE"])
+@permission_classes([IsAuthenticated])
+def delete_listing_media(request, media_id):
+    """Delete a media record and its S3 object."""
+    from django.core.files.storage import storages
+
+    if request.user.user_type != User.UserType.SUBLEASER:
+        return Response(
+            {"detail": "Only subleasers can delete media."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    try:
+        media = ListingMedia.objects.select_related("listing").get(pk=media_id)
+    except ListingMedia.DoesNotExist:
+        return Response({"detail": "Media not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    if media.listing.owner_id != request.user.pk:
+        return Response(
+            {"detail": "You can only delete media from your own listings."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    # Delete from S3 if storage_key exists
+    if media.storage_key:
+        try:
+            bucket_key = "listing_media_private" if media.is_private else "listing_media_public"
+            storage = storages[bucket_key]
+            storage.delete(media.storage_key)
+        except Exception:
+            pass  # Best-effort S3 cleanup
+
+    media.delete()
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+@api_view(["PATCH"])
+@permission_classes([IsAuthenticated])
+def reorder_listing_media(request):
+    """Bulk-update display_order and is_primary for media items.
+
+    Expects JSON body: { "listing_id": <int>, "order": [ { "id": <media_id>, "display_order": <int>, "is_primary": <bool> }, ... ] }
+    """
+    if request.user.user_type != User.UserType.SUBLEASER:
+        return Response(
+            {"detail": "Only subleasers can reorder media."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    listing_id = request.data.get("listing_id")
+    order = request.data.get("order")
+
+    if not listing_id or not isinstance(order, list):
+        return Response(
+            {"detail": "listing_id and order[] are required."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        listing = PropertyListing.objects.get(pk=listing_id, deleted_at__isnull=True)
+    except PropertyListing.DoesNotExist:
+        return Response({"detail": "Listing not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    if listing.owner_id != request.user.pk:
+        return Response(
+            {"detail": "You can only reorder media on your own listings."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    media_ids = [item["id"] for item in order if "id" in item]
+    media_qs = ListingMedia.objects.filter(pk__in=media_ids, listing=listing)
+    media_map = {m.pk: m for m in media_qs}
+
+    for item in order:
+        media = media_map.get(item.get("id"))
+        if not media:
+            continue
+        media.display_order = int(item.get("display_order", media.display_order))
+        media.is_primary = bool(item.get("is_primary", media.is_primary))
+
+    ListingMedia.objects.bulk_update(media_map.values(), ["display_order", "is_primary"])
+
+    from .serializers import ListingMediaSerializer
+    updated = ListingMedia.objects.filter(listing=listing).order_by("display_order", "id")
+    return Response(ListingMediaSerializer(updated, many=True).data)
 
 
 # ----- Property Listing Browse (Public) -----
@@ -654,6 +791,44 @@ def browse_property_listings(request):
 
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
+def private_media_access(request, media_id):
+    """Return a short-lived signed URL for a private photo."""
+    try:
+        media = ListingMedia.objects.select_related("listing").get(pk=media_id)
+    except ListingMedia.DoesNotExist:
+        return Response({"detail": "Media not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    if not media.is_private:
+        return Response(
+            {"detail": "This media is public. Use the public URL."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    if media.upload_status != ListingMedia.UploadStatus.UPLOADED:
+        return Response({"detail": "Media not available."}, status=status.HTTP_404_NOT_FOUND)
+
+    # Only the listing owner can access private photos for now
+    if media.listing.owner_id != request.user.pk:
+        return Response(
+            {"detail": "You do not have permission to access this media."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    if not media.storage_key:
+        return Response({"detail": "No storage key for this media."}, status=status.HTTP_404_NOT_FOUND)
+
+    from django.core.files.storage import storages
+
+    try:
+        private_storage = storages["listing_media_private"]
+        signed_url = private_storage.url(media.storage_key)
+    except (KeyError, Exception):
+        return Response(
+            {"detail": "Private storage not configured."},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+    return Response({"access_url": signed_url, "expires_in": settings.AWS_S3_PRIVATE_URL_EXPIRE_SECONDS})
 def my_current_bookings(request):
     if not _is_sublessee(request):
         return Response(

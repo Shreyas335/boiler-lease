@@ -19,8 +19,6 @@ import { useNavigate, useLocation } from "react-router-dom";
 import {
   updateListing,
   getListingAmenities,
-  uploadListingMedia,
-  setPrimaryListingMedia,
   type CreatePropertyListingPayload,
   type ListingAmenity,
   type ListingMedia,
@@ -28,6 +26,7 @@ import {
 } from "../api/listings";
 import { useAuth } from "../contexts/AuthContext";
 import AddressAutocomplete, { type AddressComponents } from "../components/AddressAutocomplete";
+import PhotoManager, { type PendingPhoto } from "../components/PhotoManager";
 import { getListingWarnings, validateListingForm } from "../utils/listingFormValidation";
 
 const PROPERTY_TYPES = ["apartment", "house", "condo", "studio", "other"];
@@ -79,9 +78,12 @@ export default function EditListingPage() {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [addressInput, setAddressInput] = useState("");
   const [isAddressVerified, setIsAddressVerified] = useState(false);
-  const [mediaItems, setMediaItems] = useState<ListingMedia[]>([]);
-  const [mediaUploading, setMediaUploading] = useState(false);
   const warnings = useMemo(() => getListingWarnings(form), [form]);
+
+  // Photo state
+  const [existingMedia, setExistingMedia] = useState<ListingMedia[]>([]);
+  const [newPhotos, setNewPhotos] = useState<PendingPhoto[]>([]);
+  const [uploading, setUploading] = useState(false);
 
   useEffect(() => {
     async function loadAmenities() {
@@ -135,7 +137,7 @@ export default function EditListingPage() {
         status: listing.status,
         amenity_codes: listing.amenities.map((a) => a.code),
       });
-      // Set address input and verified status
+      setExistingMedia(listing.media || []);
       const fullAddress = [
         listing.street_line_1,
         listing.city,
@@ -143,11 +145,15 @@ export default function EditListingPage() {
         listing.postal_code,
       ].filter(Boolean).join(", ");
       setAddressInput(fullAddress);
-      // If listing already has lat/lng, consider it verified
       setIsAddressVerified(Boolean(listing.latitude && listing.longitude));
-      setMediaItems(listing.media || []);
     }
   }, [listing]);
+
+  useEffect(() => {
+    return () => {
+      newPhotos.forEach((p) => URL.revokeObjectURL(p.previewUrl));
+    };
+  }, []);
 
   if (!user || user.user_type !== "subleaser") {
     return (
@@ -194,7 +200,6 @@ export default function EditListingPage() {
 
   function handleAddressInputChange(value: string) {
     setAddressInput(value);
-    // If user manually edits, mark as unverified
     setIsAddressVerified(false);
     setFieldErrors((prev) => ({ ...prev, address: "" }));
   }
@@ -260,44 +265,6 @@ export default function EditListingPage() {
 
   function handleCancel() {
     navigate("/my-listings");
-  }
-
-  async function handleMediaSelect(event: React.ChangeEvent<HTMLInputElement>) {
-    if (!listing) return;
-    const files = event.target.files ? Array.from(event.target.files) : [];
-    if (!files.length) return;
-
-    setMediaUploading(true);
-    try {
-      const hasPrimary = mediaItems.some((item) => item.is_primary);
-      let primaryAssigned = hasPrimary;
-      const nextItems: ListingMedia[] = [];
-      for (let index = 0; index < files.length; index += 1) {
-        const isPrimary = !primaryAssigned && index === 0;
-        if (isPrimary) primaryAssigned = true;
-        const media = await uploadListingMedia(listing.id, files[index], isPrimary, mediaItems.length + index);
-        nextItems.push(media);
-      }
-      setMediaItems((prev) => [...prev, ...nextItems]);
-    } catch {
-      setPageMessage({ type: "error", text: "Unable to upload photos. Please try again." });
-    } finally {
-      setMediaUploading(false);
-      event.target.value = "";
-    }
-  }
-
-  async function handleSetPrimary(mediaId: number) {
-    if (!listing) return;
-    setMediaUploading(true);
-    try {
-      const updated = await setPrimaryListingMedia(listing.id, mediaId);
-      setMediaItems(updated.media || []);
-    } catch {
-      setPageMessage({ type: "error", text: "Unable to update primary photo." });
-    } finally {
-      setMediaUploading(false);
-    }
   }
 
   return (
@@ -551,7 +518,6 @@ export default function EditListingPage() {
                   />
                 </Grid>
 
-                {/* Show parsed address fields as read-only when verified */}
                 {isAddressVerified && (
                   <>
                     <Grid size={{ xs: 12, md: 6 }}>
@@ -738,60 +704,20 @@ export default function EditListingPage() {
                 ))}
               </Grid>
 
-              <Typography variant="h6">Photos</Typography>
-              <Stack spacing={2}>
-                <Button variant="outlined" component="label" disabled={mediaUploading}>
-                  {mediaUploading ? "Uploading..." : "Upload photos"}
-                  <input
-                    hidden
-                    accept="image/*"
-                    multiple
-                    type="file"
-                    onChange={handleMediaSelect}
-                  />
-                </Button>
-                {mediaItems.length === 0 ? (
-                  <Typography variant="body2" color="text.secondary">
-                    No photos uploaded yet.
-                  </Typography>
-                ) : (
-                  <Grid container spacing={2}>
-                    {mediaItems.map((media) => (
-                      <Grid key={media.id} size={{ xs: 12, sm: 6, md: 4 }}>
-                        <Card variant="outlined" sx={{ borderRadius: 2 }}>
-                          <CardContent>
-                            <Box
-                              component="img"
-                              src={media.file_url}
-                              alt={listing.title}
-                              sx={{
-                                width: "100%",
-                                height: 160,
-                                objectFit: "cover",
-                                borderRadius: 1,
-                                mb: 1,
-                              }}
-                            />
-                            <Stack spacing={1}>
-                              <Button
-                                size="small"
-                                variant={media.is_primary ? "contained" : "outlined"}
-                                onClick={() => handleSetPrimary(media.id)}
-                                disabled={media.is_primary || mediaUploading}
-                              >
-                                {media.is_primary ? "Primary photo" : "Set primary"}
-                              </Button>
-                            </Stack>
-                          </CardContent>
-                        </Card>
-                      </Grid>
-                    ))}
-                  </Grid>
-                )}
-              </Stack>
+              {/* Photos */}
+              <PhotoManager
+                listingId={listing.id}
+                existingMedia={existingMedia}
+                onExistingMediaChange={setExistingMedia}
+                newPhotos={newPhotos}
+                onNewPhotosChange={setNewPhotos}
+                uploading={uploading}
+                onUploadingChange={setUploading}
+                onError={(msg) => setPageMessage({ type: "error", text: msg })}
+              />
 
               <Stack direction="row" spacing={2}>
-                <Button type="submit" variant="contained" disabled={submitting}>
+                <Button type="submit" variant="contained" disabled={submitting || uploading}>
                   {submitting ? "Saving..." : "Update listing"}
                 </Button>
                 <Button
