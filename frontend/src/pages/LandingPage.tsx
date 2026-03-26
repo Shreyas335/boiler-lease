@@ -84,7 +84,7 @@ export default function LandingPage() {
           Built for everyone in the sublease process
         </Typography>
         <Grid container spacing={4}>
-          <Grid item xs={12} md={4}>
+          <Grid size= {{ xs: 12, md: 4 }}>
             <Card sx={{ height: "100%", transition: "transform 0.2s", "&:hover": { transform: "translateY(-4px)" } }}>
               <CardContent sx={{ p: 3 }}>
                 <Box sx={{ color: "primary.main", mb: 2 }}>
@@ -99,7 +99,7 @@ export default function LandingPage() {
               </CardContent>
             </Card>
           </Grid>
-          <Grid item xs={12} md={4}>
+          <Grid size= {{ xs: 12, md: 4 }}>
             <Card sx={{ height: "100%", transition: "transform 0.2s", "&:hover": { transform: "translateY(-4px)" } }}>
               <CardContent sx={{ p: 3 }}>
                 <Box sx={{ color: "primary.main", mb: 2 }}>
@@ -114,7 +114,7 @@ export default function LandingPage() {
               </CardContent>
             </Card>
           </Grid>
-          <Grid item xs={12} md={4}>
+          <Grid size= {{ xs: 12, md: 4 }}>
             <Card sx={{ height: "100%", transition: "transform 0.2s", "&:hover": { transform: "translateY(-4px)" } }}>
               <CardContent sx={{ p: 3 }}>
                 <Box sx={{ color: "primary.main", mb: 2 }}>

@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
-import { Alert, Box, Button, Card, CardContent, Chip, Container, Grid, Stack, Typography } from "@mui/material";
+import { Alert, Box, Button, Card, CardContent, Chip, Container, Grid, Stack, TextField, Typography } from "@mui/material";
 import FavoriteBorderRoundedIcon from "@mui/icons-material/FavoriteBorderRounded";
 import FavoriteRoundedIcon from "@mui/icons-material/FavoriteRounded";
-import { useParams } from "react-router-dom";
-import { addFavorite, getPropertyListingDetail, removeFavorite, type PropertyListing } from "../api/listings";
+import { Link as RouterLink, useNavigate, useParams } from "react-router-dom";
+import { addFavorite, createBooking, getPropertyListingDetail, removeFavorite, type PropertyListing } from "../api/listings";
 import { useAuth } from "../contexts/AuthContext";
 
 function formatMoney(value: string | null) {
@@ -15,11 +15,15 @@ function formatMoney(value: string | null) {
 
 export default function PropertyDetailPage() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
   const [listing, setListing] = useState<PropertyListing | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [favoriteBusy, setFavoriteBusy] = useState(false);
+  const [bookingBusy, setBookingBusy] = useState(false);
+  const [bookingMessage, setBookingMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [bookingDates, setBookingDates] = useState({ start_date: "", end_date: "" });
 
   useEffect(() => {
     async function loadListing() {
@@ -34,6 +38,10 @@ export default function PropertyDetailPage() {
         setLoading(true);
         const data = await getPropertyListingDetail(Number(id));
         setListing(data);
+        setBookingDates({
+          start_date: data.availability_start_date,
+          end_date: data.availability_end_date,
+        });
       } catch {
         setError("Unable to load property details.");
       } finally {
@@ -58,6 +66,44 @@ export default function PropertyDetailPage() {
       setError("Unable to update favorites.");
     } finally {
       setFavoriteBusy(false);
+    }
+  }
+
+  async function handleBookingSubmit() {
+    if (!listing) return;
+
+    try {
+      setBookingBusy(true);
+      setBookingMessage(null);
+      await createBooking({
+        listing: listing.id,
+        start_date: bookingDates.start_date,
+        end_date: bookingDates.end_date,
+      });
+      setBookingMessage({
+        type: "success",
+        text: "Booking confirmed. You can track it from your current bookings.",
+      });
+    } catch (err) {
+      const fallback = "Unable to complete booking. Please review your dates and try again.";
+      if (
+        typeof err === "object" &&
+        err !== null &&
+        "response" in err &&
+        typeof err.response === "object" &&
+        err.response !== null &&
+        "data" in err.response
+      ) {
+        const data = err.response.data as Record<string, string[] | string> | undefined;
+        const firstMessage = data
+          ? Object.values(data).flatMap((value) => (Array.isArray(value) ? value : [value]))[0]
+          : null;
+        setBookingMessage({ type: "error", text: typeof firstMessage === "string" ? firstMessage : fallback });
+      } else {
+        setBookingMessage({ type: "error", text: fallback });
+      }
+    } finally {
+      setBookingBusy(false);
     }
   }
 
@@ -140,7 +186,7 @@ export default function PropertyDetailPage() {
             </Card>
           </Grid>
           <Grid size={{ xs: 12, md: 4 }}>
-            <Card>
+            <Card sx={{ mb: 2 }}>
               <CardContent>
                 <Typography variant="h6" sx={{ mb: 1 }}>Details</Typography>
                 <Stack spacing={0.5}>
@@ -157,6 +203,79 @@ export default function PropertyDetailPage() {
                 </Stack>
               </CardContent>
             </Card>
+
+            {user?.user_type === "sublessee" && (
+              <Card>
+                <CardContent>
+                  <Stack spacing={2}>
+                    <Box>
+                      <Typography variant="h6" sx={{ mb: 0.5 }}>
+                        Book This Property
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        Choose your dates and secure the sublease in a couple of clicks.
+                      </Typography>
+                    </Box>
+
+                    {bookingMessage && <Alert severity={bookingMessage.type}>{bookingMessage.text}</Alert>}
+
+                    <TextField
+                      label="Start date"
+                      type="date"
+                      value={bookingDates.start_date}
+                      onChange={(e) => setBookingDates((prev) => ({ ...prev, start_date: e.target.value }))}
+                      InputLabelProps={{ shrink: true }}
+                      inputProps={{
+                        min: listing.availability_start_date,
+                        max: listing.availability_end_date,
+                      }}
+                      fullWidth
+                    />
+                    <TextField
+                      label="End date"
+                      type="date"
+                      value={bookingDates.end_date}
+                      onChange={(e) => setBookingDates((prev) => ({ ...prev, end_date: e.target.value }))}
+                      InputLabelProps={{ shrink: true }}
+                      inputProps={{
+                        min: bookingDates.start_date || listing.availability_start_date,
+                        max: listing.availability_end_date,
+                      }}
+                      fullWidth
+                    />
+
+                    <Typography variant="body2" color="text.secondary">
+                      Available window: {listing.availability_start_date} to {listing.availability_end_date}
+                    </Typography>
+
+                    <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
+                      <Button
+                        variant="contained"
+                        onClick={handleBookingSubmit}
+                        disabled={bookingBusy || !bookingDates.start_date || !bookingDates.end_date}
+                      >
+                        {bookingBusy ? "Booking..." : "Book now"}
+                      </Button>
+                      <Button
+                        variant="text"
+                        onClick={() => navigate("/bookings/current")}
+                      >
+                        View my bookings
+                      </Button>
+                    </Stack>
+
+                    <Typography
+                      component={RouterLink}
+                      to="/bookings/current"
+                      variant="body2"
+                      sx={{ color: "primary.main", textDecoration: "none", fontWeight: 600 }}
+                    >
+                      Track booking status in Current Bookings
+                    </Typography>
+                  </Stack>
+                </CardContent>
+              </Card>
+            )}
           </Grid>
         </Grid>
       </Container>

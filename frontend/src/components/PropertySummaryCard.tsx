@@ -1,4 +1,4 @@
-import { Box, Button, Card, CardContent, Chip, Stack, Typography } from "@mui/material";
+import { Box, Button, Card, CardContent, Chip, Stack, Typography, type ChipProps } from "@mui/material";
 import FavoriteBorderRoundedIcon from "@mui/icons-material/FavoriteBorderRounded";
 import FavoriteRoundedIcon from "@mui/icons-material/FavoriteRounded";
 import { Link as RouterLink } from "react-router-dom";
@@ -15,6 +15,14 @@ interface PropertySummaryCardProps {
   onToggleFavorite?: (listing: PropertyListingSummary) => Promise<void> | void;
   favoriteLoading?: boolean;
   footerText?: string;
+  statusLabel?: string;
+  statusColor?: ChipProps["color"];
+  actionButton?: {
+    label: string;
+    onClick: () => Promise<void> | void;
+    disabled?: boolean;
+    color?: "primary" | "error";
+  };
 }
 
 export default function PropertySummaryCard({
@@ -22,6 +30,9 @@ export default function PropertySummaryCard({
   onToggleFavorite,
   favoriteLoading = false,
   footerText,
+  statusLabel,
+  statusColor = "default",
+  actionButton,
 }: PropertySummaryCardProps) {
   return (
     <Card>
@@ -86,12 +97,28 @@ export default function PropertySummaryCard({
           )}
 
           <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" useFlexGap>
-            <Typography variant="body2" color="text.secondary">
-              Available {listing.availability_start_date} to {listing.availability_end_date}
-            </Typography>
-            <Button component={RouterLink} to={`/properties/${listing.id}`} variant="text" size="small">
-              View details
-            </Button>
+            <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+              <Typography variant="body2" color="text.secondary">
+                Available {listing.availability_start_date} to {listing.availability_end_date}
+              </Typography>
+              {statusLabel && <Chip size="small" label={statusLabel} color={statusColor} variant="outlined" />}
+            </Stack>
+            <Stack direction="row" spacing={1}>
+              {actionButton && (
+                <Button
+                  variant="outlined"
+                  size="small"
+                  color={actionButton.color || "primary"}
+                  onClick={actionButton.onClick}
+                  disabled={actionButton.disabled}
+                >
+                  {actionButton.label}
+                </Button>
+              )}
+              <Button component={RouterLink} to={`/properties/${listing.id}`} variant="text" size="small">
+                View details
+              </Button>
+            </Stack>
           </Stack>
 
           {footerText && (

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { Alert, Box, Container, FormControl, InputLabel, MenuItem, Select, Stack, Typography } from "@mui/material";
+import { Alert, Box, Container, FormControl, InputLabel, MenuItem, Select, Stack, Typography, type ChipProps } from "@mui/material";
 import {
   addFavorite,
+  cancelBooking,
   removeFavorite,
   type BookingRecord,
   type BookingSortBy,
@@ -17,6 +18,7 @@ interface BookingsPageContentProps {
   emptyMessage: string;
   fetchBookings: (sortBy: BookingSortBy, order: SortOrder) => Promise<BookingRecord[]>;
   loadingText: string;
+  allowCancelUpcoming?: boolean;
 }
 
 export default function BookingsPageContent({
@@ -25,6 +27,7 @@ export default function BookingsPageContent({
   emptyMessage,
   fetchBookings,
   loadingText,
+  allowCancelUpcoming = false,
 }: BookingsPageContentProps) {
   const { user } = useAuth();
   const [bookings, setBookings] = useState<BookingRecord[]>([]);
@@ -33,6 +36,7 @@ export default function BookingsPageContent({
   const [sortBy, setSortBy] = useState<BookingSortBy>("date_booked");
   const [order, setOrder] = useState<SortOrder>("desc");
   const [favoriteBusyId, setFavoriteBusyId] = useState<number | null>(null);
+  const [cancelBusyId, setCancelBusyId] = useState<number | null>(null);
 
   useEffect(() => {
     async function loadBookings() {
@@ -62,6 +66,19 @@ export default function BookingsPageContent({
     return "Date booked";
   }, [sortBy]);
 
+  function getBookingStatusMeta(status: BookingRecord["booking_status"]): {
+    label: string;
+    color: ChipProps["color"];
+  } {
+    if (status === "active") {
+      return { label: "Active", color: "success" };
+    }
+    if (status === "completed") {
+      return { label: "Completed", color: "default" };
+    }
+    return { label: "Upcoming", color: "info" };
+  }
+
   async function toggleFavorite(listing: PropertyListingSummary) {
     try {
       setFavoriteBusyId(listing.id);
@@ -81,6 +98,19 @@ export default function BookingsPageContent({
       setError("Unable to update favorites. Please try again.");
     } finally {
       setFavoriteBusyId(null);
+    }
+  }
+
+  async function handleCancelBooking(bookingId: number) {
+    try {
+      setCancelBusyId(bookingId);
+      setError(null);
+      await cancelBooking(bookingId);
+      setBookings((prev) => prev.filter((booking) => booking.id !== bookingId));
+    } catch {
+      setError("Unable to cancel booking. Please try again.");
+    } finally {
+      setCancelBusyId(null);
     }
   }
 
@@ -150,6 +180,18 @@ export default function BookingsPageContent({
                 listing={booking.listing}
                 onToggleFavorite={toggleFavorite}
                 favoriteLoading={favoriteBusyId === booking.listing.id}
+                statusLabel={getBookingStatusMeta(booking.booking_status).label}
+                statusColor={getBookingStatusMeta(booking.booking_status).color}
+                actionButton={
+                  allowCancelUpcoming && booking.booking_status === "upcoming"
+                    ? {
+                        label: cancelBusyId === booking.id ? "Canceling..." : "Cancel booking",
+                        onClick: () => handleCancelBooking(booking.id),
+                        disabled: cancelBusyId === booking.id,
+                        color: "error",
+                      }
+                    : undefined
+                }
                 footerText={`Booked on ${new Date(booking.booked_at).toLocaleDateString()} | Stay ${booking.start_date} to ${booking.end_date} | Sorted by ${sortLabel.toLowerCase()} (${order})`}
               />
             ))}

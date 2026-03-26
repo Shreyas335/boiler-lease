@@ -41,6 +41,7 @@ from .serializers import (
     PasswordChangeSerializer,
     PasswordResetConfirmSerializer,
     PasswordResetRequestSerializer,
+    PropertyBookingCreateSerializer,
     PropertyListingBrowseSerializer,
     PropertyListingUpdateSerializer,
     PropertyBookingSerializer,
@@ -859,6 +860,58 @@ def my_current_bookings(request):
         context={"user": request.user, "favorite_listing_ids": favorite_listing_ids},
     )
     return Response(serializer.data)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def create_booking(request):
+    if not _is_sublessee(request):
+        return Response(
+            {"detail": "Only sublessees can book properties."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    serializer = PropertyBookingCreateSerializer(
+        data=request.data,
+        context={"request": request},
+    )
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    booking = serializer.save()
+    response_serializer = PropertyBookingSerializer(
+        booking,
+        context={"user": request.user},
+    )
+    return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+
+
+@api_view(["DELETE"])
+@permission_classes([IsAuthenticated])
+def cancel_booking(request, booking_id):
+    if not _is_sublessee(request):
+        return Response(
+            {"detail": "Only sublessees can cancel bookings."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    booking = PropertyBooking.objects.filter(
+        pk=booking_id,
+        sublessee=request.user,
+        listing__deleted_at__isnull=True,
+    ).first()
+    if not booking:
+        return Response({"detail": "Booking not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    today = timezone.localdate()
+    if booking.start_date <= today:
+        return Response(
+            {"detail": "Only upcoming bookings can be canceled."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    booking.delete()
+    return Response({"detail": "Booking canceled successfully."}, status=status.HTTP_200_OK)
 
 
 @api_view(["GET"])
