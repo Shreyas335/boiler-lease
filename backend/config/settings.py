@@ -155,7 +155,7 @@ AWS_S3_PUBLIC_CUSTOM_DOMAIN = (
     .removeprefix("http://")
     .strip("/")
 )
-AWS_S3_ENDPOINT_URL = os.environ.get("AWS_S3_ENDPOINT_URL", "").strip().rstrip("/")
+AWS_S3_ENDPOINT_URL = os.environ.get("AWS_S3_ENDPOINT_URL", "").strip().rstrip("/") or None
 AWS_S3_PRIVATE_URL_EXPIRE_SECONDS = int(os.environ.get("AWS_S3_PRIVATE_URL_EXPIRE_SECONDS", "300"))
 
 LISTING_MEDIA_PUBLIC_PREFIX = "listing-media/public"
@@ -168,7 +168,7 @@ if AWS_S3_PUBLIC_BUCKET_NAME:
         "secret_key": AWS_SECRET_ACCESS_KEY or None,
         "bucket_name": AWS_S3_PUBLIC_BUCKET_NAME,
         "region_name": AWS_DEFAULT_REGION or None,
-        "default_acl": "public-read",
+        "default_acl": None,
         "querystring_auth": False,
         "file_overwrite": False,
         "location": LISTING_MEDIA_PUBLIC_PREFIX,

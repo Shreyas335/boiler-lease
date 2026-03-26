@@ -177,6 +177,10 @@ export async function uploadListingMedia(
   return data;
 }
 
+export async function deleteListingMedia(mediaId: number): Promise<void> {
+  await api.delete(`/listings/media/${mediaId}/`);
+}
+
 export async function updateListing(
   id: number,
   payload: Partial<CreatePropertyListingPayload>,

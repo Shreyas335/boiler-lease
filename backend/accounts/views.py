@@ -543,6 +543,44 @@ def upload_listing_media(request):
     from .serializers import ListingMediaSerializer
 
     return Response(ListingMediaSerializer(media).data, status=status.HTTP_201_CREATED)
+
+
+@api_view(["DELETE"])
+@permission_classes([IsAuthenticated])
+def delete_listing_media(request, media_id):
+    """Delete a media record and its S3 object."""
+    from django.core.files.storage import storages
+
+    if request.user.user_type != User.UserType.SUBLEASER:
+        return Response(
+            {"detail": "Only subleasers can delete media."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    try:
+        media = ListingMedia.objects.select_related("listing").get(pk=media_id)
+    except ListingMedia.DoesNotExist:
+        return Response({"detail": "Media not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    if media.listing.owner_id != request.user.pk:
+        return Response(
+            {"detail": "You can only delete media from your own listings."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    # Delete from S3 if storage_key exists
+    if media.storage_key:
+        try:
+            bucket_key = "listing_media_private" if media.is_private else "listing_media_public"
+            storage = storages[bucket_key]
+            storage.delete(media.storage_key)
+        except Exception:
+            pass  # Best-effort S3 cleanup
+
+    media.delete()
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+
 # ----- Property Listing Browse (Public) -----
 
 
