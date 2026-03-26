@@ -666,6 +666,42 @@ def my_current_bookings(request):
         PropertyBooking.objects.filter(
             sublessee=request.user,
             end_date__gte=today,
+            status__in=[
+                PropertyBooking.Status.PENDING,
+                PropertyBooking.Status.CONFIRMED,
+            ],
+            listing__deleted_at__isnull=True,
+        )
+        .select_related("listing")
+        .prefetch_related("listing__media")
+    )
+    sort_by = request.query_params.get("sort_by", "date_booked")
+    order = request.query_params.get("order", "desc")
+    bookings = _sort_bookings(bookings, sort_by, order)
+
+    favorite_listing_ids = set(
+        FavoriteListing.objects.filter(user=request.user).values_list("listing_id", flat=True)
+    )
+    serializer = PropertyBookingSerializer(
+        bookings,
+        many=True,
+        context={"user": request.user, "favorite_listing_ids": favorite_listing_ids},
+    )
+    return Response(serializer.data)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def my_booking_history(request):
+    if not _is_sublessee(request):
+        return Response(
+            {"detail": "Only sublessees can view booking history."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    bookings = (
+        PropertyBooking.objects.filter(
+            sublessee=request.user,
             listing__deleted_at__isnull=True,
         )
         .select_related("listing")
@@ -727,15 +763,18 @@ def cancel_booking(request, booking_id):
     if not booking:
         return Response({"detail": "Booking not found."}, status=status.HTTP_404_NOT_FOUND)
 
-    today = timezone.localdate()
-    if booking.start_date <= today:
+    if booking.status not in (
+        PropertyBooking.Status.PENDING,
+        PropertyBooking.Status.CONFIRMED,
+    ):
         return Response(
-            {"detail": "Only upcoming bookings can be canceled."},
+            {"detail": "Only pending or confirmed bookings can be canceled."},
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    booking.delete()
-    return Response({"detail": "Booking canceled successfully."}, status=status.HTTP_200_OK)
+    booking.status = PropertyBooking.Status.CANCELLED
+    booking.save(update_fields=["status"])
+    return Response({"detail": "Booking cancelled successfully."}, status=status.HTTP_200_OK)
 
 
 @api_view(["GET"])
@@ -751,11 +790,14 @@ def my_past_bookings(request):
     bookings = (
         PropertyBooking.objects.filter(
             sublessee=request.user,
-            end_date__lt=today,
             listing__deleted_at__isnull=True,
         )
         .select_related("listing")
         .prefetch_related("listing__media")
+    )
+    bookings = bookings.filter(
+        Q(end_date__lt=today)
+        | Q(status__in=[PropertyBooking.Status.DECLINED, PropertyBooking.Status.CANCELLED])
     )
     sort_by = request.query_params.get("sort_by", "date_booked")
     order = request.query_params.get("order", "desc")

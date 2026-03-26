@@ -80,8 +80,10 @@ export interface BookingRecord {
   end_date: string;
   booked_at: string;
   monthly_rent_snapshot: string | null;
+  status: "pending" | "confirmed" | "declined" | "cancelled";
+  status_label: string;
   price: string;
-  booking_status: "upcoming" | "active" | "completed";
+  is_cancelable: boolean;
 }
 
 export interface CreateBookingPayload {
@@ -280,6 +282,13 @@ export async function createBooking(payload: CreateBookingPayload): Promise<Book
 
 export async function cancelBooking(bookingId: number): Promise<{ detail: string }> {
   const { data } = await api.delete<{ detail: string }>(`/bookings/${bookingId}/`);
+  return data;
+}
+
+export async function getBookingHistory(sortBy: BookingSortBy, order: SortOrder): Promise<BookingRecord[]> {
+  const { data } = await api.get<BookingRecord[]>("/bookings/history/", {
+    params: { sort_by: sortBy, order },
+  });
   return data;
 }
 
