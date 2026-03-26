@@ -581,6 +581,57 @@ def delete_listing_media(request, media_id):
     return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+@api_view(["PATCH"])
+@permission_classes([IsAuthenticated])
+def reorder_listing_media(request):
+    """Bulk-update display_order and is_primary for media items.
+
+    Expects JSON body: { "listing_id": <int>, "order": [ { "id": <media_id>, "display_order": <int>, "is_primary": <bool> }, ... ] }
+    """
+    if request.user.user_type != User.UserType.SUBLEASER:
+        return Response(
+            {"detail": "Only subleasers can reorder media."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    listing_id = request.data.get("listing_id")
+    order = request.data.get("order")
+
+    if not listing_id or not isinstance(order, list):
+        return Response(
+            {"detail": "listing_id and order[] are required."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        listing = PropertyListing.objects.get(pk=listing_id, deleted_at__isnull=True)
+    except PropertyListing.DoesNotExist:
+        return Response({"detail": "Listing not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    if listing.owner_id != request.user.pk:
+        return Response(
+            {"detail": "You can only reorder media on your own listings."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    media_ids = [item["id"] for item in order if "id" in item]
+    media_qs = ListingMedia.objects.filter(pk__in=media_ids, listing=listing)
+    media_map = {m.pk: m for m in media_qs}
+
+    for item in order:
+        media = media_map.get(item.get("id"))
+        if not media:
+            continue
+        media.display_order = int(item.get("display_order", media.display_order))
+        media.is_primary = bool(item.get("is_primary", media.is_primary))
+
+    ListingMedia.objects.bulk_update(media_map.values(), ["display_order", "is_primary"])
+
+    from .serializers import ListingMediaSerializer
+    updated = ListingMedia.objects.filter(listing=listing).order_by("display_order", "id")
+    return Response(ListingMediaSerializer(updated, many=True).data)
+
+
 # ----- Property Listing Browse (Public) -----
 
 

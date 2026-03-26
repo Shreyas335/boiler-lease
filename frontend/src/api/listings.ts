@@ -181,6 +181,23 @@ export async function deleteListingMedia(mediaId: number): Promise<void> {
   await api.delete(`/listings/media/${mediaId}/`);
 }
 
+export interface ReorderMediaItem {
+  id: number;
+  display_order: number;
+  is_primary: boolean;
+}
+
+export async function reorderListingMedia(
+  listingId: number,
+  order: ReorderMediaItem[],
+): Promise<ListingMedia[]> {
+  const { data } = await api.patch<ListingMedia[]>("/listings/media/reorder/", {
+    listing_id: listingId,
+    order,
+  });
+  return data;
+}
+
 export async function updateListing(
   id: number,
   payload: Partial<CreatePropertyListingPayload>,

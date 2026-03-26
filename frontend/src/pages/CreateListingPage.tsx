@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Box,
@@ -6,30 +6,28 @@ import {
   Card,
   CardContent,
   Checkbox,
-  Chip,
   Container,
   FormControlLabel,
   Grid,
-  IconButton,
-  LinearProgress,
   MenuItem,
   Stack,
   TextField,
   Typography,
 } from "@mui/material";
-import DeleteIcon from "@mui/icons-material/Delete";
-import ReplayIcon from "@mui/icons-material/Replay";
 import type { AxiosError } from "axios";
 import { useNavigate } from "react-router-dom";
 import {
   createListing,
   getListingAmenities,
   uploadListingMedia,
+  reorderListingMedia,
   type CreatePropertyListingPayload,
   type ListingAmenity,
+  type ListingMedia,
 } from "../api/listings";
 import { useAuth } from "../contexts/AuthContext";
 import AddressAutocomplete, { type AddressComponents } from "../components/AddressAutocomplete";
+import PhotoManager, { type PendingPhoto } from "../components/PhotoManager";
 
 const PROPERTY_TYPES = ["apartment", "house", "condo", "studio", "other"];
 const FURNISHED_OPTIONS = ["furnished", "unfurnished", "partially_furnished"];
@@ -58,38 +56,28 @@ const INITIAL_FORM: CreatePropertyListingPayload = {
   amenity_codes: [],
 };
 
-interface PendingPhoto {
-  id: string;
-  file: File;
-  previewUrl: string;
-  status: "queued" | "uploading" | "done" | "error";
-  progress: number;
-  error?: string;
-  mediaId?: number;
-}
-
 function extractFirstError(value: unknown): string | undefined {
   if (Array.isArray(value) && value[0]) return String(value[0]);
   if (typeof value === "string") return value;
   return undefined;
 }
 
-let nextPhotoId = 0;
-
 export default function CreateListingPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [form, setForm] = useState<CreatePropertyListingPayload>(INITIAL_FORM);
   const [amenities, setAmenities] = useState<ListingAmenity[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [pageMessage, setPageMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
-  const [photos, setPhotos] = useState<PendingPhoto[]>([]);
-  const [uploading, setUploading] = useState(false);
   const [addressInput, setAddressInput] = useState("");
   const [isAddressVerified, setIsAddressVerified] = useState(false);
+
+  // Photo state — for create, there's no listingId yet and no existing media
+  const [existingMedia, setExistingMedia] = useState<ListingMedia[]>([]);
+  const [newPhotos, setNewPhotos] = useState<PendingPhoto[]>([]);
+  const [uploading, setUploading] = useState(false);
 
   useEffect(() => {
     async function loadAmenities() {
@@ -106,16 +94,15 @@ export default function CreateListingPage() {
     }
   }, [user]);
 
-  // Cleanup preview URLs on unmount
   useEffect(() => {
     return () => {
-      photos.forEach((p) => URL.revokeObjectURL(p.previewUrl));
+      newPhotos.forEach((p) => URL.revokeObjectURL(p.previewUrl));
     };
   }, []);
 
   const isDirty = useMemo(
-    () => JSON.stringify(form) !== JSON.stringify(INITIAL_FORM) || photos.length > 0,
-    [form, photos],
+    () => JSON.stringify(form) !== JSON.stringify(INITIAL_FORM) || newPhotos.length > 0,
+    [form, newPhotos],
   );
 
   if (!user || user.user_type !== "subleaser") {
@@ -144,73 +131,8 @@ export default function CreateListingPage() {
     handleChange("amenity_codes", Array.from(set));
   }
 
-  function handleFilesSelected(e: React.ChangeEvent<HTMLInputElement>) {
-    const files = e.target.files;
-    if (!files) return;
-    const newPhotos: PendingPhoto[] = Array.from(files).map((file) => ({
-      id: String(++nextPhotoId),
-      file,
-      previewUrl: URL.createObjectURL(file),
-      status: "queued" as const,
-      progress: 0,
-    }));
-    setPhotos((prev) => [...prev, ...newPhotos]);
-    // Reset file input so the same file can be selected again
-    e.target.value = "";
-  }
-
-  function removePhoto(photoId: string) {
-    setPhotos((prev) => {
-      const photo = prev.find((p) => p.id === photoId);
-      if (photo) URL.revokeObjectURL(photo.previewUrl);
-      return prev.filter((p) => p.id !== photoId);
-    });
-  }
-
-  async function uploadPhotosForListing(listingId: number) {
-    const toUpload = photos.filter((p) => p.status === "queued" || p.status === "error");
-    if (toUpload.length === 0) return;
-
-    setUploading(true);
-
-    for (let i = 0; i < toUpload.length; i++) {
-      const photo = toUpload[i];
-
-      setPhotos((prev) =>
-        prev.map((p) => (p.id === photo.id ? { ...p, status: "uploading" as const, progress: 50, error: undefined } : p)),
-      );
-
-      try {
-        const media = await uploadListingMedia(listingId, photo.file, i, i === 0);
-
-        setPhotos((prev) =>
-          prev.map((p) =>
-            p.id === photo.id
-              ? { ...p, status: "done" as const, progress: 100, mediaId: media.id }
-              : p,
-          ),
-        );
-      } catch (err) {
-        const message = err instanceof Error ? err.message : "Upload failed";
-        setPhotos((prev) =>
-          prev.map((p) =>
-            p.id === photo.id ? { ...p, status: "error" as const, progress: 0, error: message } : p,
-          ),
-        );
-      }
-    }
-
-    setUploading(false);
-  }
-
-  function retryPhoto(photoId: string) {
-    setPhotos((prev) =>
-      prev.map((p) => (p.id === photoId ? { ...p, status: "queued" as const, progress: 0, error: undefined } : p)),
-    );
-  }
   function handleAddressInputChange(value: string) {
     setAddressInput(value);
-    // If user manually edits, mark as unverified
     setIsAddressVerified(false);
     setFieldErrors((prev) => ({ ...prev, address: "" }));
   }
@@ -238,7 +160,6 @@ export default function CreateListingPage() {
     if (!form.availability_start_date) nextErrors.availability_start_date = "Start date is required.";
     if (!form.availability_end_date) nextErrors.availability_end_date = "End date is required.";
 
-    // Address must be verified via Google (has lat/lng)
     if (!isAddressVerified || !form.latitude || !form.longitude) {
       nextErrors.address = "Please select an address from the Google suggestions.";
     }
@@ -273,11 +194,63 @@ export default function CreateListingPage() {
       const listing = await createListing(form);
 
       // Upload photos if any were selected
-      if (photos.length > 0) {
-        await uploadPhotosForListing(listing.id);
+      const toUpload = newPhotos.filter((p) => p.status === "queued" || p.status === "error");
+      if (toUpload.length > 0) {
+        setUploading(true);
+        const uploadedMedia: ListingMedia[] = [];
+
+        for (let i = 0; i < toUpload.length; i++) {
+          const photo = toUpload[i];
+          setNewPhotos((prev) =>
+            prev.map((p) =>
+              p.id === photo.id ? { ...p, status: "uploading" as const, progress: 50, error: undefined } : p,
+            ),
+          );
+
+          try {
+            const media = await uploadListingMedia(listing.id, photo.file, i, i === 0);
+            uploadedMedia.push(media);
+            setNewPhotos((prev) =>
+              prev.map((p) =>
+                p.id === photo.id ? { ...p, status: "done" as const, progress: 100, mediaId: media.id } : p,
+              ),
+            );
+          } catch (err) {
+            const message = err instanceof Error ? err.message : "Upload failed";
+            setNewPhotos((prev) =>
+              prev.map((p) =>
+                p.id === photo.id ? { ...p, status: "error" as const, progress: 0, error: message } : p,
+              ),
+            );
+          }
+        }
+
+        // If all uploaded successfully, apply the user's chosen primary/order
+        if (uploadedMedia.length === toUpload.length && uploadedMedia.length > 0) {
+          // Map the newPhotos order to uploaded media IDs
+          const donePhotos = newPhotos.filter((p) => p.status === "done" || uploadedMedia.some((m) => m.id === p.mediaId));
+          if (donePhotos.length > 1) {
+            const order = donePhotos
+              .map((p, idx) => {
+                const media = uploadedMedia.find((m) => m.id === p.mediaId);
+                if (!media) return null;
+                return { id: media.id, display_order: idx, is_primary: idx === 0 };
+              })
+              .filter(Boolean) as { id: number; display_order: number; is_primary: boolean }[];
+            if (order.length > 0) {
+              try {
+                await reorderListingMedia(listing.id, order);
+              } catch {
+                // Non-critical, photos still uploaded
+              }
+            }
+          }
+        }
+
+        setUploading(false);
       }
 
-      const failedCount = photos.filter((p) => p.status === "error").length;
+      const failedCount = newPhotos.filter((p) => p.status === "error").length;
       if (failedCount > 0) {
         setPageMessage({
           type: "error",
@@ -300,7 +273,7 @@ export default function CreateListingPage() {
       setFieldErrors(nextErrors);
       setPageMessage({ type: "error", text: nextErrors.detail || "Unable to create listing." });
     } finally {
-      if (photos.filter((p) => p.status === "error").length === 0) {
+      if (newPhotos.filter((p) => p.status === "error").length === 0) {
         setSubmitting(false);
       }
     }
@@ -312,8 +285,6 @@ export default function CreateListingPage() {
     }
     navigate("/my-listings");
   }
-
-  const hasFailedPhotos = photos.some((p) => p.status === "error");
 
   return (
     <Box sx={{ py: 6, px: 2 }}>
@@ -500,7 +471,6 @@ export default function CreateListingPage() {
                   />
                 </Grid>
 
-                {/* Show parsed address fields as read-only when verified */}
                 {isAddressVerified && (
                   <>
                     <Grid size={{ xs: 12, md: 6 }}>
@@ -669,96 +639,22 @@ export default function CreateListingPage() {
                 ))}
               </Grid>
 
-              {/* Photo Upload Section */}
-              <Typography variant="h6">Photos</Typography>
-              <Typography variant="body2" color="text.secondary">
-                Select images to upload. Toggle private for photos only visible to you.
-              </Typography>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/jpeg,image/png,image/webp,image/gif"
-                multiple
-                hidden
-                onChange={handleFilesSelected}
+              {/* Photos */}
+              <PhotoManager
+                listingId={null}
+                existingMedia={existingMedia}
+                onExistingMediaChange={setExistingMedia}
+                newPhotos={newPhotos}
+                onNewPhotosChange={setNewPhotos}
+                uploading={uploading}
+                onUploadingChange={setUploading}
+                onError={(msg) => setPageMessage({ type: "error", text: msg })}
               />
-              <Button
-                variant="outlined"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={uploading}
-                sx={{ alignSelf: "flex-start" }}
-              >
-                Select photos
-              </Button>
-
-              {photos.length > 0 && (
-                <Grid container spacing={2}>
-                  {photos.map((photo) => (
-                    <Grid key={photo.id} size={{ xs: 6, sm: 4, md: 3 }}>
-                      <Card variant="outlined" sx={{ position: "relative" }}>
-                        <Box
-                          component="img"
-                          src={photo.previewUrl}
-                          alt={photo.file.name}
-                          sx={{ width: "100%", height: 140, objectFit: "cover", display: "block" }}
-                        />
-                        <Box sx={{ px: 1, py: 0.5 }}>
-                          <Typography variant="caption" noWrap>
-                            {photo.file.name}
-                          </Typography>
-
-                          <Stack direction="row" alignItems="center" justifyContent="flex-end">
-                            {photo.status === "error" && (
-                              <IconButton size="small" onClick={() => retryPhoto(photo.id)} title="Retry">
-                                <ReplayIcon fontSize="small" />
-                              </IconButton>
-                            )}
-                            <IconButton
-                              size="small"
-                              onClick={() => removePhoto(photo.id)}
-                              disabled={photo.status === "uploading"}
-                              title="Remove"
-                            >
-                              <DeleteIcon fontSize="small" />
-                            </IconButton>
-                          </Stack>
-
-                          {photo.status === "uploading" && (
-                            <LinearProgress variant="determinate" value={photo.progress} sx={{ mt: 0.5 }} />
-                          )}
-                          {photo.status === "done" && (
-                            <Chip label="Uploaded" color="success" size="small" sx={{ mt: 0.5 }} />
-                          )}
-                          {photo.status === "error" && (
-                            <Chip label={photo.error || "Failed"} color="error" size="small" sx={{ mt: 0.5 }} />
-                          )}
-                        </Box>
-                      </Card>
-                    </Grid>
-                  ))}
-                </Grid>
-              )}
 
               <Stack direction="row" spacing={2}>
                 <Button type="submit" variant="contained" disabled={submitting || uploading}>
                   {submitting ? "Saving..." : "Create listing"}
                 </Button>
-                {hasFailedPhotos && (
-                  <Button
-                    variant="outlined"
-                    color="warning"
-                    onClick={() => {
-                      // Re-mark failed as queued, then the next submit will retry
-                      setPhotos((prev) =>
-                        prev.map((p) =>
-                          p.status === "error" ? { ...p, status: "queued" as const, progress: 0, error: undefined } : p,
-                        ),
-                      );
-                    }}
-                  >
-                    Retry failed uploads
-                  </Button>
-                )}
                 <Button type="button" variant="outlined" color="inherit" onClick={handleCancel}>
                   Cancel
                 </Button>
