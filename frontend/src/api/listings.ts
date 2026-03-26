@@ -6,15 +6,6 @@ export interface ListingAmenity {
   label: string;
 }
 
-/*export interface ListingMedia {
-  id: number;
-  media_type: string;
-  file_url: string;
-  thumbnail_url: string | null;
-  display_order: number;
-  is_primary: boolean;
-}*/
-
 export interface PropertyListing {
   id: number;
   title: string;
@@ -132,6 +123,37 @@ export async function createListing(
   return data;
 }
 
+export async function uploadListingMedia(
+  listingId: number,
+  file: File,
+  displayOrder: number,
+  isPrimary: boolean,
+): Promise<ListingMedia> {
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("display_order", String(displayOrder));
+  formData.append("is_primary", String(isPrimary));
+
+  const { data } = await api.post<ListingMedia>(
+    `/listings/${listingId}/media/`,
+    formData,
+    {
+      headers: { "Content-Type": "multipart/form-data" },
+    },
+  );
+  return data;
+}
+
+export async function setPrimaryListingMedia(
+  listingId: number,
+  mediaId: number,
+): Promise<PropertyListing> {
+  const { data } = await api.patch<PropertyListing>(
+    `/listings/${listingId}/media/${mediaId}/primary/`,
+  );
+  return data;
+}
+
 export async function getMyListings(): Promise<PropertyListing[]> {
   const { data } = await api.get<PropertyListing[]>("/listings/mine/");
   return data;
@@ -142,7 +164,7 @@ export async function getListingAmenities(): Promise<ListingAmenity[]> {
   return data;
 }
 
-// --- Media Upload helpers ---
+// --- Media types & helpers ---
 
 export interface ListingMedia {
   id: number;
@@ -157,24 +179,6 @@ export interface ListingMedia {
   content_type: string;
   file_size: number | null;
   upload_status: string;
-}
-
-export async function uploadListingMedia(
-  listingId: number,
-  file: File,
-  displayOrder: number,
-  isPrimary: boolean,
-): Promise<ListingMedia> {
-  const formData = new FormData();
-  formData.append("listing_id", String(listingId));
-  formData.append("file", file);
-  formData.append("display_order", String(displayOrder));
-  formData.append("is_primary", String(isPrimary));
-
-  const { data } = await api.post<ListingMedia>("/listings/media/upload/", formData, {
-    headers: { "Content-Type": "multipart/form-data" },
-  });
-  return data;
 }
 
 export async function deleteListingMedia(mediaId: number): Promise<void> {

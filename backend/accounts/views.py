@@ -3,6 +3,7 @@ import secrets
 import hashlib
 import uuid
 from datetime import timedelta
+import stripe
 from django.contrib.auth import login, logout
 from django.core.mail import send_mail
 from django.core.cache import cache
@@ -10,7 +11,7 @@ from django.conf import settings
 from django.db.models.functions import Coalesce
 from django.http import HttpResponseRedirect
 from django.utils import timezone
-from django.views.decorators.csrf import ensure_csrf_cookie
+from django.views.decorators.csrf import csrf_exempt, ensure_csrf_cookie
 from django.db.models import Q, Prefetch
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
@@ -18,7 +19,18 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
 from .email_verification import send_2fa_code_email, send_password_reset_email, send_verification_email
-from .models import ListingAmenity, ListingMedia, ListingAmenityMap, PasswordResetToken, PropertyListing, User, FavoriteListing, ListingAmenity, PasswordResetToken, PropertyBooking, PropertyListing, User
+
+from .models import (
+    FavoriteListing,
+    ListingAmenity,
+    ListingAmenityMap,
+    ListingMedia,
+    PasswordResetToken,
+    PropertyBooking,
+    PropertyListing,
+    TransactionRecord,
+    User,
+)
 from .pagination import PropertyListingPagination
 
 from .serializers import (
@@ -36,8 +48,9 @@ from .serializers import (
     PropertyListingSerializer,
     PropertyListingSummarySerializer,
     RegisterSerializer,
-    UploadFinalizeSerializer,
-    UploadInitSerializer,
+    ListingMediaSerializer,
+    ListingMediaUploadSerializer,
+    TransactionRecordSerializer,
     UserSerializer,
     TwoFactorVerifyLoginSerializer,
 )
@@ -421,36 +434,9 @@ def create_property_listing(request):
     return Response(PropertyListingSerializer(listing).data, status=status.HTTP_201_CREATED)
 
 
-@api_view(["GET"])
-@permission_classes([IsAuthenticated])
-def my_property_listings(request):
-    if request.user.user_type != User.UserType.SUBLEASER:
-        return Response(
-            {"detail": "Only subleasers can view property listings."},
-            status=status.HTTP_403_FORBIDDEN,
-        )
-
-    listings = request.user.property_listings.filter(deleted_at__isnull=True).order_by("-created_at")
-    return Response(PropertyListingSerializer(listings, many=True).data)
-
-
-@api_view(["GET"])
-@permission_classes([IsAuthenticated])
-def listing_amenities(request):
-    if request.user.user_type != User.UserType.SUBLEASER:
-        return Response(
-            {"detail": "Only subleasers can access listing amenities."},
-            status=status.HTTP_403_FORBIDDEN,
-        )
-    amenities = ListingAmenity.objects.filter(is_active=True).order_by("label")
-    return Response(
-        [{"id": amenity.id, "code": amenity.code, "label": amenity.label} for amenity in amenities]
-    )
-
-
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
-def upload_listing_media(request):
+def upload_listing_media(request, listing_id):
     """Accept a file upload, store it in S3, and create a ListingMedia record."""
     from django.core.files.storage import storages
 
@@ -460,27 +446,23 @@ def upload_listing_media(request):
             status=status.HTTP_403_FORBIDDEN,
         )
 
-    listing_id = request.data.get("listing_id")
-    file = request.FILES.get("file")
-    display_order = int(request.data.get("display_order", 0))
-    is_primary = request.data.get("is_primary", "false").lower() in ("true", "1")
-
-    if not listing_id or not file:
-        return Response(
-            {"detail": "listing_id and file are required."},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
-
-    # Validate listing ownership
-    try:
-        listing = PropertyListing.objects.get(pk=listing_id, deleted_at__isnull=True)
-    except PropertyListing.DoesNotExist:
+    listing = PropertyListing.objects.filter(id=listing_id, deleted_at__isnull=True).first()
+    if not listing:
         return Response({"detail": "Listing not found."}, status=status.HTTP_404_NOT_FOUND)
-
     if listing.owner_id != request.user.pk:
         return Response(
             {"detail": "You can only upload media to your own listings."},
             status=status.HTTP_403_FORBIDDEN,
+        )
+
+    file = request.FILES.get("file")
+    display_order = int(request.data.get("display_order", 0))
+    is_primary = str(request.data.get("is_primary", "false")).lower() in ("true", "1")
+
+    if not file:
+        return Response(
+            {"detail": "file is required."},
+            status=status.HTTP_400_BAD_REQUEST,
         )
 
     # Validate file type and size
@@ -511,21 +493,17 @@ def upload_listing_media(request):
             status=status.HTTP_503_SERVICE_UNAVAILABLE,
         )
 
-    # Upload the file to S3
     saved_name = storage.save(storage_key, file)
 
-    # Build the public URL
     base = getattr(settings, "LISTING_MEDIA_PUBLIC_BASE_URL", "")
     if base:
         file_url = f"{base}/{saved_name}"
     else:
         file_url = storage.url(saved_name)
 
-    # Clear existing primary if this one is primary
     if is_primary:
         ListingMedia.objects.filter(listing=listing, is_primary=True).update(is_primary=False)
 
-    # Create the media record
     media = ListingMedia.objects.create(
         listing=listing,
         media_type=ListingMedia.MediaType.IMAGE,
@@ -540,9 +518,63 @@ def upload_listing_media(request):
         is_primary=is_primary,
     )
 
-    from .serializers import ListingMediaSerializer
-
     return Response(ListingMediaSerializer(media).data, status=status.HTTP_201_CREATED)
+
+
+@api_view(["PATCH"])
+@permission_classes([IsAuthenticated])
+def set_listing_media_primary(request, listing_id, media_id):
+    if request.user.user_type != User.UserType.SUBLEASER:
+        return Response(
+            {"detail": "Only subleasers can update listing media."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    listing = PropertyListing.objects.filter(id=listing_id, deleted_at__isnull=True).first()
+    if not listing:
+        return Response({"detail": "Property listing not found."}, status=status.HTTP_404_NOT_FOUND)
+    if listing.owner != request.user:
+        return Response(
+            {"detail": "You do not have permission to update this listing."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    media = ListingMedia.objects.filter(id=media_id, listing=listing).first()
+    if not media:
+        return Response({"detail": "Listing media not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    ListingMedia.objects.filter(listing=listing, is_primary=True).update(is_primary=False)
+    media.is_primary = True
+    media.save(update_fields=["is_primary"])
+    return Response(PropertyListingSerializer(listing).data, status=status.HTTP_200_OK)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def my_property_listings(request):
+    if request.user.user_type != User.UserType.SUBLEASER:
+        return Response(
+            {"detail": "Only subleasers can view property listings."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    listings = request.user.property_listings.filter(deleted_at__isnull=True).order_by("-created_at")
+    return Response(PropertyListingSerializer(listings, many=True).data)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def listing_amenities(request):
+    if request.user.user_type != User.UserType.SUBLEASER:
+        return Response(
+            {"detail": "Only subleasers can access listing amenities."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    amenities = ListingAmenity.objects.filter(is_active=True).order_by("label")
+    return Response(
+        [{"id": amenity.id, "code": amenity.code, "label": amenity.label} for amenity in amenities]
+    )
+
 
 
 @api_view(["DELETE"])
@@ -861,6 +893,119 @@ def my_past_bookings(request):
         context={"user": request.user, "favorite_listing_ids": favorite_listing_ids},
     )
     return Response(serializer.data)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def my_payment_history(request):
+    if not _is_sublessee(request):
+        return Response(
+            {"detail": "Only sublessees can view payment history."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    transactions = TransactionRecord.objects.filter(user=request.user).order_by("-created_at")
+    serializer = TransactionRecordSerializer(transactions, many=True)
+    return Response(serializer.data)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def create_deposit_checkout_session(request):
+    """Create a Stripe Checkout Session for a security deposit (placeholder amount until booking-linked)."""
+    if not _is_sublessee(request):
+        return Response(
+            {"detail": "Only sublessees can start deposit payments."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    if not request.user.email_verified:
+        return Response(
+            {"detail": "Please verify your email before making a payment."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if not settings.STRIPE_SECRET_KEY:
+        return Response(
+            {"detail": "Stripe is not configured on the server."},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+    stripe.api_key = settings.STRIPE_SECRET_KEY
+
+    # TODO: set from booking / listing security_deposit when bookings integrate with checkout.
+    amount_cents = 5000
+    txn = TransactionRecord.objects.create(
+        user=request.user,
+        amount=amount_cents / 100,
+        currency="usd",
+        booking_reference="",
+        status=TransactionRecord.Status.PENDING,
+    )
+
+    session = stripe.checkout.Session.create(
+        mode="payment",
+        customer_email=request.user.email,
+        line_items=[
+            {
+                "price_data": {
+                    "currency": "usd",
+                    "unit_amount": amount_cents,
+                    "product_data": {"name": "Security deposit"},
+                },
+                "quantity": 1,
+            }
+        ],
+        metadata={
+            "transaction_id": str(txn.id),
+            "user_id": str(request.user.id),
+        },
+        success_url=f"{settings.FRONTEND_URL}/dashboard",
+        cancel_url=f"{settings.FRONTEND_URL}/dashboard",
+    )
+    txn.stripe_checkout_session_id = session.id
+    txn.save(update_fields=["stripe_checkout_session_id"])
+    return Response({"checkout_url": session.url}, status=status.HTTP_201_CREATED)
+
+
+@csrf_exempt
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def stripe_webhook(request):
+    payload = request.body
+    sig_header = request.META.get("HTTP_STRIPE_SIGNATURE")
+    webhook_secret = settings.STRIPE_WEBHOOK_SECRET
+
+    if not webhook_secret:
+        return Response({"detail": "Webhook secret not configured."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    try:
+        event = stripe.Webhook.construct_event(payload, sig_header, webhook_secret)
+    except Exception:
+        return Response({"detail": "Invalid webhook payload/signature."}, status=status.HTTP_400_BAD_REQUEST)
+
+    event_type = event.get("type")
+    obj = event.get("data", {}).get("object", {})
+
+    if event_type == "checkout.session.completed":
+        session_id = obj.get("id")
+        payment_intent_id = obj.get("payment_intent") or ""
+        amount_total = obj.get("amount_total")
+
+        txn = TransactionRecord.objects.filter(stripe_checkout_session_id=session_id).first()
+        if txn:
+            if isinstance(amount_total, int):
+                txn.amount = amount_total / 100
+            txn.status = TransactionRecord.Status.SUCCEEDED
+            txn.paid_at = timezone.now()
+            txn.stripe_payment_intent_id = payment_intent_id
+            txn.save(update_fields=["amount", "status", "paid_at", "stripe_payment_intent_id"])
+
+    elif event_type == "checkout.session.expired":
+        session_id = obj.get("id")
+        txn = TransactionRecord.objects.filter(stripe_checkout_session_id=session_id).first()
+        if txn and txn.status == TransactionRecord.Status.PENDING:
+            txn.status = TransactionRecord.Status.CANCELED
+            txn.save(update_fields=["status"])
+
+    return Response({"received": True}, status=status.HTTP_200_OK)
 
 
 @api_view(["GET", "PATCH", "DELETE"])

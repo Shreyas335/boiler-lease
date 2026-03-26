@@ -208,6 +208,7 @@ class ListingMedia(models.Model):
     listing = models.ForeignKey(PropertyListing, on_delete=models.CASCADE, related_name="media")
     media_type = models.CharField(max_length=16, choices=MediaType.choices, default=MediaType.IMAGE)
     file_url = models.URLField(blank=True)
+    file = models.FileField(upload_to="listing_media/", blank=True, null=True)
     thumbnail_url = models.URLField(blank=True)
     display_order = models.IntegerField(default=0)
     is_primary = models.BooleanField(default=False)
@@ -262,6 +263,30 @@ class PropertyBooking(models.Model):
         indexes = [
             models.Index(fields=["sublessee", "end_date"], name="booking_user_end_date_idx"),
             models.Index(fields=["sublessee", "-booked_at"], name="booking_user_booked_at_idx"),
+        ]
+
+
+class TransactionRecord(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        SUCCEEDED = "succeeded", "Succeeded"
+        FAILED = "failed", "Failed"
+        CANCELED = "canceled", "Canceled"
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="transactions")
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    currency = models.CharField(max_length=8, default="usd")
+    booking_reference = models.CharField(max_length=64, blank=True)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
+    stripe_payment_intent_id = models.CharField(max_length=128, blank=True)
+    stripe_checkout_session_id = models.CharField(max_length=128, blank=True)
+    paid_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["user", "-created_at"], name="txn_user_created_idx"),
+            models.Index(fields=["status", "-created_at"], name="txn_status_created_idx"),
         ]
 
 

@@ -7,3 +7,4 @@ django-redis
 django-cors-headers
 django-storages
 boto3
+stripe
