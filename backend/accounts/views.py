@@ -7,25 +7,34 @@ from django.contrib.auth import login, logout
 from django.core.mail import send_mail
 from django.core.cache import cache
 from django.conf import settings
+from django.db.models.functions import Coalesce
 from django.http import HttpResponseRedirect
 from django.utils import timezone
 from django.views.decorators.csrf import ensure_csrf_cookie
+from django.db.models import Q, Prefetch
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
 from .email_verification import send_2fa_code_email, send_password_reset_email, send_verification_email
-from .models import ListingAmenity, ListingMedia, PasswordResetToken, PropertyListing, User
+from .models import ListingAmenity, ListingMedia, ListingAmenityMap, PasswordResetToken, PropertyListing, User, FavoriteListing, ListingAmenity, PasswordResetToken, PropertyBooking, PropertyListing, User
+from .pagination import PropertyListingPagination
+
 from .serializers import (
     AccountUpdateSerializer,
+    FavoriteListingSerializer,
     FeedbackSubmissionSerializer,
     LoginSerializer,
     PasswordChangeSerializer,
     PasswordResetConfirmSerializer,
     PasswordResetRequestSerializer,
+    PropertyListingBrowseSerializer,
+    PropertyListingUpdateSerializer,
+    PropertyBookingSerializer,
     PropertyListingCreateSerializer,
     PropertyListingSerializer,
+    PropertyListingSummarySerializer,
     RegisterSerializer,
     UploadFinalizeSerializer,
     UploadInitSerializer,
@@ -49,6 +58,49 @@ def _make_2fa_temp_token(user):
 
 def _hash_token(token):
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _is_sublessee(request):
+    return request.user.user_type == User.UserType.SUBLESSEE
+
+
+def _sort_order_prefix(order):
+    return "" if str(order).lower() == "asc" else "-"
+
+
+def _sort_bookings(queryset, sort_by, order):
+    sort_map = {
+        "date_booked": "booked_at",
+        "price": "monthly_rent_snapshot",
+        "start_date": "start_date",
+        "end_date": "end_date",
+    }
+    selected = sort_map.get(sort_by, "booked_at")
+    if selected == "monthly_rent_snapshot":
+        queryset = queryset.annotate(effective_price=Coalesce("monthly_rent_snapshot", "listing__monthly_rent"))
+        return queryset.order_by(f"{_sort_order_prefix(order)}effective_price", "-booked_at")
+    return queryset.order_by(f"{_sort_order_prefix(order)}{selected}")
+
+
+def _sort_favorites(queryset, sort_by, order):
+    sort_map = {
+        "date_saved": "created_at",
+        "price": "listing__monthly_rent",
+        "date_listed": "listing__created_at",
+    }
+    selected = sort_map.get(sort_by, "created_at")
+    return queryset.order_by(f"{_sort_order_prefix(order)}{selected}")
+
+
+def _sort_property_listings(queryset, sort_by, order):
+    sort_map = {
+        "price": "monthly_rent",
+        "date_listed": "created_at",
+        "availability_start": "availability_start_date",
+        "availability_end": "availability_end_date",
+    }
+    selected = sort_map.get(sort_by, "created_at")
+    return queryset.order_by(f"{_sort_order_prefix(order)}{selected}")
 
 
 @api_view(["POST"])
@@ -335,6 +387,7 @@ def submit_help_feedback(request):
             subject=f"[Boiler Lease Feedback] {feedback.subject or 'No subject'}",
             message=(
                 f"From: {request.user.email} ({request.user.username})\n\n"
+                f"Rating: {feedback.rating}/5\n\n"
                 f"{feedback.message}\n\n"
                 f"Submission ID: {feedback.id}"
             ),
@@ -507,6 +560,129 @@ def upload_finalize(request):
     from .serializers import ListingMediaSerializer
 
     return Response(ListingMediaSerializer(media).data, status=status.HTTP_200_OK)
+# ----- Property Listing Browse (Public) -----
+
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def browse_property_listings(request):
+    """
+    Browse available sublease properties with filtering, sorting, and pagination.
+    Query parameters: search, price_min, price_max, bedrooms_min, bedrooms_max,
+    bathrooms_min, bathrooms_max, city, state, sort_by, page, page_size
+    """
+    # Base queryset: only published and approved listings
+    queryset = PropertyListing.objects.filter(
+        status=PropertyListing.ListingStatus.PUBLISHED,
+        approval_status=PropertyListing.ApprovalStatus.APPROVED,
+        deleted_at__isnull=True,
+    )
+
+    # Optimization: select_related and prefetch_related
+    queryset = queryset.select_related('owner').prefetch_related(
+        Prefetch('media'),
+        Prefetch('amenity_links__amenity', queryset=ListingAmenity.objects.filter(is_active=True))
+    )
+
+    # Apply search filter (search across title, description, city, state, postal_code)
+    search_query = request.query_params.get('search', '').strip()
+    if search_query:
+        queryset = queryset.filter(
+            Q(title__icontains=search_query) |
+            Q(description__icontains=search_query) |
+            Q(city__icontains=search_query) |
+            Q(state__icontains=search_query) |
+            Q(postal_code__icontains=search_query)
+        )
+
+    # Apply price range filter
+    price_min = request.query_params.get('price_min')
+    price_max = request.query_params.get('price_max')
+    if price_min:
+        try:
+            queryset = queryset.filter(monthly_rent__gte=int(price_min))
+        except (ValueError, TypeError):
+            pass
+    if price_max:
+        try:
+            queryset = queryset.filter(monthly_rent__lte=int(price_max))
+        except (ValueError, TypeError):
+            pass
+
+    # Apply bedroom filter
+    bedrooms_min = request.query_params.get('bedrooms_min')
+    bedrooms_max = request.query_params.get('bedrooms_max')
+    if bedrooms_min:
+        try:
+            queryset = queryset.filter(bedrooms__gte=float(bedrooms_min))
+        except (ValueError, TypeError):
+            pass
+    if bedrooms_max:
+        try:
+            queryset = queryset.filter(bedrooms__lte=float(bedrooms_max))
+        except (ValueError, TypeError):
+            pass
+
+    # Apply bathroom filter
+    bathrooms_min = request.query_params.get('bathrooms_min')
+    bathrooms_max = request.query_params.get('bathrooms_max')
+    if bathrooms_min:
+        try:
+            queryset = queryset.filter(bathrooms__gte=float(bathrooms_min))
+        except (ValueError, TypeError):
+            pass
+    if bathrooms_max:
+        try:
+            queryset = queryset.filter(bathrooms__lte=float(bathrooms_max))
+        except (ValueError, TypeError):
+            pass
+
+    # Apply location filter (city)
+    city = request.query_params.get('city', '').strip()
+    if city:
+        queryset = queryset.filter(city__iexact=city)
+
+    # Apply location filter (state)
+    state = request.query_params.get('state', '').strip()
+    if state:
+        queryset = queryset.filter(state__iexact=state)
+
+    # Apply property type filter
+    property_type = request.query_params.get('property_type', '').strip()
+    if property_type:
+        queryset = queryset.filter(property_type__iexact=property_type)
+
+    # Apply furnished status filter
+    furnished_status = request.query_params.get('furnished_status', '').strip()
+    if furnished_status:
+        queryset = queryset.filter(furnished_status__iexact=furnished_status)
+
+    # Apply boolean filters
+    utilities_included = request.query_params.get('utilities_included')
+    if utilities_included is not None and utilities_included.lower() in ('true', '1'):
+        queryset = queryset.filter(utilities_included=True)
+
+    pets_allowed = request.query_params.get('pets_allowed')
+    if pets_allowed is not None and pets_allowed.lower() in ('true', '1'):
+        queryset = queryset.filter(pets_allowed=True)
+
+    parking_available = request.query_params.get('parking_available')
+    if parking_available is not None and parking_available.lower() in ('true', '1'):
+        queryset = queryset.filter(parking_available=True)
+
+    # Apply sorting
+    sort_by = request.query_params.get('sort_by', 'availability_start_date')
+    valid_sorts = ['availability_start_date', '-availability_start_date', 'monthly_rent', '-monthly_rent', 'created_at', '-created_at']
+    if sort_by in valid_sorts:
+        queryset = queryset.order_by(sort_by)
+    else:
+        queryset = queryset.order_by('availability_start_date')
+
+    # Apply pagination
+    paginator = PropertyListingPagination()
+    paginated_queryset = paginator.paginate_queryset(queryset, request)
+    serializer = PropertyListingBrowseSerializer(paginated_queryset, many=True)
+    return paginator.get_paginated_response(serializer.data)
 
 
 @api_view(["GET"])
@@ -549,3 +725,213 @@ def private_media_access(request, media_id):
         )
 
     return Response({"access_url": signed_url, "expires_in": settings.AWS_S3_PRIVATE_URL_EXPIRE_SECONDS})
+def my_current_bookings(request):
+    if not _is_sublessee(request):
+        return Response(
+            {"detail": "Only sublessees can view current bookings."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    today = timezone.localdate()
+    bookings = (
+        PropertyBooking.objects.filter(
+            sublessee=request.user,
+            end_date__gte=today,
+            listing__deleted_at__isnull=True,
+        )
+        .select_related("listing")
+        .prefetch_related("listing__media")
+    )
+    sort_by = request.query_params.get("sort_by", "date_booked")
+    order = request.query_params.get("order", "desc")
+    bookings = _sort_bookings(bookings, sort_by, order)
+
+    favorite_listing_ids = set(
+        FavoriteListing.objects.filter(user=request.user).values_list("listing_id", flat=True)
+    )
+    serializer = PropertyBookingSerializer(
+        bookings,
+        many=True,
+        context={"user": request.user, "favorite_listing_ids": favorite_listing_ids},
+    )
+    return Response(serializer.data)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def my_past_bookings(request):
+    if not _is_sublessee(request):
+        return Response(
+            {"detail": "Only sublessees can view past bookings."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    today = timezone.localdate()
+    bookings = (
+        PropertyBooking.objects.filter(
+            sublessee=request.user,
+            end_date__lt=today,
+            listing__deleted_at__isnull=True,
+        )
+        .select_related("listing")
+        .prefetch_related("listing__media")
+    )
+    sort_by = request.query_params.get("sort_by", "date_booked")
+    order = request.query_params.get("order", "desc")
+    bookings = _sort_bookings(bookings, sort_by, order)
+
+    favorite_listing_ids = set(
+        FavoriteListing.objects.filter(user=request.user).values_list("listing_id", flat=True)
+    )
+    serializer = PropertyBookingSerializer(
+        bookings,
+        many=True,
+        context={"user": request.user, "favorite_listing_ids": favorite_listing_ids},
+    )
+    return Response(serializer.data)
+
+
+@api_view(["GET", "PATCH", "DELETE"])
+@permission_classes([AllowAny])
+def property_listing_detail(request, listing_id):
+    """
+    GET: Retrieve listing details (public or owner access)
+    PATCH: Update listing (owner only)
+    DELETE: Delete listing (owner only)
+    """
+    try:
+        listing = PropertyListing.objects.get(id=listing_id, deleted_at__isnull=True)
+    except PropertyListing.DoesNotExist:
+        return Response(
+            {"detail": "Property listing not found."}, status=status.HTTP_404_NOT_FOUND
+        )
+
+    # GET: Retrieve listing
+    if request.method == "GET":
+        # Check if sublessee can access this listing
+        if _is_sublessee(request):
+            if (
+                listing.status != PropertyListing.ListingStatus.PUBLISHED
+                or listing.approval_status != PropertyListing.ApprovalStatus.APPROVED
+            ):
+                return Response(
+                    {"detail": "Property listing not found."}, status=status.HTTP_404_NOT_FOUND
+                )
+
+        data = PropertyListingSerializer(listing).data
+        data["is_favorited"] = FavoriteListing.objects.filter(
+            user=request.user, listing=listing
+        ).exists()
+        return Response(data)
+
+    # PATCH: Update listing (owner only)
+    elif request.method == "PATCH":
+        if not request.user.is_authenticated:
+            return Response(
+                {"detail": "Authentication required."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+        if request.user.user_type != User.UserType.SUBLEASER:
+            return Response(
+                {"detail": "Only subleasers can update property listings."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if listing.owner != request.user:
+            return Response(
+                {"detail": "You do not have permission to update this listing."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        serializer = PropertyListingUpdateSerializer(
+            listing, data=request.data, partial=True
+        )
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        serializer.save()
+        return Response(PropertyListingSerializer(listing).data, status=status.HTTP_200_OK)
+
+    # DELETE: Delete listing (owner only)
+    elif request.method == "DELETE":
+        if not request.user.is_authenticated:
+            return Response(
+                {"detail": "Authentication required."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+        if request.user.user_type != User.UserType.SUBLEASER:
+            return Response(
+                {"detail": "Only subleasers can delete property listings."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if listing.owner != request.user:
+            return Response(
+                {"detail": "You do not have permission to delete this listing."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        listing.deleted_at = timezone.now()
+        listing.save(update_fields=["deleted_at"])
+
+        return Response(
+            {"detail": "Listing deleted successfully."},
+            status=status.HTTP_200_OK,
+        )
+
+
+@api_view(["POST", "DELETE"])
+@permission_classes([IsAuthenticated])
+def favorite_listing_toggle(request, listing_id):
+    if not _is_sublessee(request):
+        return Response(
+            {"detail": "Only sublessees can manage favorites."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    listing = PropertyListing.objects.filter(pk=listing_id, deleted_at__isnull=True).first()
+    if not listing:
+        return Response({"detail": "Property listing not found."}, status=status.HTTP_404_NOT_FOUND)
+    if (
+        listing.status != PropertyListing.ListingStatus.PUBLISHED
+        or listing.approval_status != PropertyListing.ApprovalStatus.APPROVED
+    ):
+        return Response({"detail": "Property listing not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    favorite = FavoriteListing.objects.filter(user=request.user, listing=listing).first()
+
+    if request.method == "POST":
+        if favorite:
+            return Response({"detail": "Property already in favorites."}, status=status.HTTP_200_OK)
+        FavoriteListing.objects.create(user=request.user, listing=listing)
+        return Response({"detail": "Property added to favorites."}, status=status.HTTP_201_CREATED)
+
+    if not favorite:
+        return Response({"detail": "Property is not in favorites."}, status=status.HTTP_200_OK)
+    favorite.delete()
+    return Response({"detail": "Property removed from favorites."}, status=status.HTTP_200_OK)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def my_favorite_listings(request):
+    if not _is_sublessee(request):
+        return Response(
+            {"detail": "Only sublessees can view favorites."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    favorites = (
+        FavoriteListing.objects.filter(user=request.user, listing__deleted_at__isnull=True)
+        .select_related("listing")
+        .prefetch_related("listing__media")
+    )
+    sort_by = request.query_params.get("sort_by", "date_saved")
+    order = request.query_params.get("order", "desc")
+    favorites = _sort_favorites(favorites, sort_by, order)
+
+    favorite_listing_ids = set(favorites.values_list("listing_id", flat=True))
+    serializer = FavoriteListingSerializer(
+        favorites,
+        many=True,
+        context={"user": request.user, "favorite_listing_ids": favorite_listing_ids},
+    )
+    return Response(serializer.data)

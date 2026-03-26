@@ -12,9 +12,15 @@ import VerifyEmailPage from "./pages/VerifyEmailPage";
 import AccountPage from "./pages/AccountPage";
 import HelpPage from "./pages/HelpPage";
 import CreateListingPage from "./pages/CreateListingPage";
+import EditListingPage from "./pages/EditListingPage";
 import MyListingsPage from "./pages/MyListingsPage";
+import BrowseListingsPage from "./pages/BrowseListingsPage";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
+import CurrentBookingsPage from "./pages/CurrentBookingsPage";
+import PastBookingsPage from "./pages/PastBookingsPage";
+import FavoritesPage from "./pages/FavoritesPage";
+import PropertyDetailPage from "./pages/PropertyDetailPage";
 
 function App() {
   return (
@@ -46,13 +52,14 @@ function App() {
                 }
               />
               <Route
-                path="/help"
+                path="/feedback"
                 element={
                   <ProtectedRoute>
                     <HelpPage />
                   </ProtectedRoute>
                 }
               />
+              <Route path="/help" element={<Navigate to="/feedback" replace />} />
               <Route
                 path="/listings/new"
                 element={
@@ -62,10 +69,51 @@ function App() {
                 }
               />
               <Route
+                path="/listings/:id/edit"
+                element={
+                  <ProtectedRoute>
+                    <EditListingPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
                 path="/my-listings"
                 element={
                   <ProtectedRoute>
                     <MyListingsPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route path="/browse" element={<BrowseListingsPage />} />
+              <Route
+                path="/bookings/current"
+                element={
+                  <ProtectedRoute>
+                    <CurrentBookingsPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/bookings/past"
+                element={
+                  <ProtectedRoute>
+                    <PastBookingsPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/favorites"
+                element={
+                  <ProtectedRoute>
+                    <FavoritesPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/properties/:id"
+                element={
+                  <ProtectedRoute>
+                    <PropertyDetailPage />
                   </ProtectedRoute>
                 }
               />

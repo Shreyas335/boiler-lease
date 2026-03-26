@@ -16,9 +16,13 @@ import PersonAddRoundedIcon from "@mui/icons-material/PersonAddRounded";
 import LogoutRoundedIcon from "@mui/icons-material/LogoutRounded";
 import SettingsRoundedIcon from "@mui/icons-material/SettingsRounded";
 import AccountCircleRoundedIcon from "@mui/icons-material/AccountCircleRounded";
-import HelpOutlineRoundedIcon from "@mui/icons-material/HelpOutlineRounded";
+import RateReviewRoundedIcon from "@mui/icons-material/RateReviewRounded";
 import AddHomeRoundedIcon from "@mui/icons-material/AddHomeRounded";
 import ApartmentRoundedIcon from "@mui/icons-material/ApartmentRounded";
+import SearchRoundedIcon from "@mui/icons-material/SearchRounded";
+import EventAvailableRoundedIcon from "@mui/icons-material/EventAvailableRounded";
+import HistoryRoundedIcon from "@mui/icons-material/HistoryRounded";
+import FavoriteRoundedIcon from "@mui/icons-material/FavoriteRounded";
 import { useAuth } from "../contexts/AuthContext";
 import AccountSettingsModal from "./AccountSettingsModal";
 
@@ -38,21 +42,44 @@ export default function Layout({ children }: LayoutProps) {
 
   return (
     <Box sx={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
-      <AppBar position="static" elevation={0} sx={{ bgcolor: "background.paper", color: "text.primary", borderBottom: "1px solid", borderColor: "divider" }}>
+      <AppBar
+        position="static"
+        elevation={0}
+        sx={{
+          bgcolor: "background.paper",
+          color: "text.primary",
+          borderBottom: "1px solid",
+          borderColor: "divider",
+        }}
+      >
         <Container maxWidth="lg">
-          <Toolbar disableGutters sx={{ justifyContent: "space-between", py: 0.5 }}>
+          <Toolbar
+            disableGutters
+            sx={{ justifyContent: "space-between", py: 0.5 }}
+          >
             <Button
               component={RouterLink}
               to={user ? "/dashboard" : "/"}
               startIcon={<HomeRoundedIcon />}
-              sx={{ color: "primary.main", fontWeight: 700, fontSize: "1.1rem" }}
+              sx={{
+                color: "primary.main",
+                fontWeight: 700,
+                fontSize: "1.1rem",
+              }}
             >
               Boiler Lease
             </Button>
             <Box sx={{ display: "flex", gap: 0.5, alignItems: "center" }}>
               {user ? (
                 <>
-                  <Typography variant="body2" sx={{ alignSelf: "center", mr: 0.5, color: "text.secondary" }}>
+                  <Typography
+                    variant="body2"
+                    sx={{
+                      alignSelf: "center",
+                      mr: 0.5,
+                      color: "text.secondary",
+                    }}
+                  >
                     {user.first_name || user.username}
                   </Typography>
                   <Button
@@ -66,12 +93,21 @@ export default function Layout({ children }: LayoutProps) {
                   </Button>
                   <Button
                     component={RouterLink}
-                    to="/help"
+                    to="/feedback"
                     color="inherit"
-                    startIcon={<HelpOutlineRoundedIcon />}
+                    startIcon={<RateReviewRoundedIcon />}
                     sx={{ color: "text.secondary" }}
                   >
-                    Help
+                    Feedback
+                  </Button>
+                  <Button
+                    component={RouterLink}
+                    to="/browse"
+                    color="inherit"
+                    startIcon={<ApartmentRoundedIcon />}
+                    sx={{ color: "text.secondary" }}
+                  >
+                    Browse
                   </Button>
                   {user.user_type === "subleaser" && (
                     <>
@@ -95,6 +131,37 @@ export default function Layout({ children }: LayoutProps) {
                       </Button>
                     </>
                   )}
+                  {user.user_type === "sublessee" && (
+                    <>
+                      <Button
+                        component={RouterLink}
+                        to="/bookings/current"
+                        color="inherit"
+                        startIcon={<EventAvailableRoundedIcon />}
+                        sx={{ color: "text.secondary" }}
+                      >
+                        Current Bookings
+                      </Button>
+                      <Button
+                        component={RouterLink}
+                        to="/bookings/past"
+                        color="inherit"
+                        startIcon={<HistoryRoundedIcon />}
+                        sx={{ color: "text.secondary" }}
+                      >
+                        Past Bookings
+                      </Button>
+                      <Button
+                        component={RouterLink}
+                        to="/favorites"
+                        color="inherit"
+                        startIcon={<FavoriteRoundedIcon />}
+                        sx={{ color: "text.secondary" }}
+                      >
+                        Favorites
+                      </Button>
+                    </>
+                  )}
                   <IconButton
                     aria-label="Account settings"
                     onClick={() => setSettingsOpen(true)}
@@ -102,7 +169,10 @@ export default function Layout({ children }: LayoutProps) {
                   >
                     <SettingsRoundedIcon />
                   </IconButton>
-                  <AccountSettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+                  <AccountSettingsModal
+                    open={settingsOpen}
+                    onClose={() => setSettingsOpen(false)}
+                  />
                   <Button
                     color="inherit"
                     startIcon={<LogoutRoundedIcon />}
@@ -114,6 +184,15 @@ export default function Layout({ children }: LayoutProps) {
                 </>
               ) : (
                 <>
+                  <Button
+                    component={RouterLink}
+                    to="/browse"
+                    color="inherit"
+                    startIcon={<ApartmentRoundedIcon />}
+                    sx={{ color: "text.secondary" }}
+                  >
+                    Browse
+                  </Button>
                   <Button
                     component={RouterLink}
                     to="/login"

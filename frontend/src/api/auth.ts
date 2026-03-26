@@ -62,9 +62,9 @@ export interface LoginResponse {
   two_factor_enabled?: boolean;
 }
 
-export async function login(email: string, password: string): Promise<LoginResponse> {
+export async function login(login: string, password: string): Promise<LoginResponse> {
   await fetchCsrfToken();
-  const { data } = await api.post<LoginResponse>("/auth/login/", { email, password });
+  const { data } = await api.post<LoginResponse>("/auth/login/", { login, password });
   return data;
 }
 
