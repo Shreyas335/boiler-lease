@@ -1,7 +1,6 @@
 from django.contrib.auth.password_validation import validate_password
 from django.conf import settings
 from django.core.exceptions import ValidationError as DjangoValidationError
-from django.utils import timezone
 from rest_framework import serializers
 
 from .models import (
@@ -357,7 +356,8 @@ class PropertyListingSummarySerializer(serializers.ModelSerializer):
 class PropertyBookingSerializer(serializers.ModelSerializer):
     listing = PropertyListingSummarySerializer(read_only=True)
     price = serializers.SerializerMethodField()
-    booking_status = serializers.SerializerMethodField()
+    status_label = serializers.SerializerMethodField()
+    is_cancelable = serializers.SerializerMethodField()
 
     class Meta:
         model = PropertyBooking
@@ -368,20 +368,24 @@ class PropertyBookingSerializer(serializers.ModelSerializer):
             "end_date",
             "booked_at",
             "monthly_rent_snapshot",
+            "status",
+            "status_label",
             "price",
-            "booking_status",
+            "is_cancelable",
         )
 
     def get_price(self, obj):
         return obj.monthly_rent_snapshot or obj.listing.monthly_rent
 
-    def get_booking_status(self, obj):
-        today = timezone.localdate()
-        if obj.start_date > today:
-            return "upcoming"
-        if obj.end_date < today:
-            return "completed"
-        return "active"
+    def get_status_label(self, obj):
+        return obj.get_status_display()
+
+    def get_is_cancelable(self, obj):
+        return obj.status in (
+            PropertyBooking.Status.PENDING,
+            PropertyBooking.Status.CONFIRMED,
+        )
+
 
 class PropertyBookingCreateSerializer(serializers.ModelSerializer):
     class Meta:
@@ -419,6 +423,11 @@ class PropertyBookingCreateSerializer(serializers.ModelSerializer):
             listing=listing,
             start_date__lte=end_date,
             end_date__gte=start_date,
+        ).exclude(
+            status__in=[
+                PropertyBooking.Status.DECLINED,
+                PropertyBooking.Status.CANCELLED,
+            ],
         ).exists()
         if overlapping_booking_exists:
             raise serializers.ValidationError(
@@ -441,7 +450,9 @@ class PropertyBookingCreateSerializer(serializers.ModelSerializer):
             start_date=validated_data["start_date"],
             end_date=validated_data["end_date"],
             monthly_rent_snapshot=listing.monthly_rent,
+            status=PropertyBooking.Status.PENDING,
         )
+
 
 class FavoriteListingSerializer(serializers.ModelSerializer):
     listing = PropertyListingSummarySerializer(read_only=True)

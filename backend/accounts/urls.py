@@ -28,6 +28,7 @@ urlpatterns = [
     path("listings/amenities/", views.listing_amenities),
     path("bookings/", views.create_booking),
     path("bookings/<int:booking_id>/", views.cancel_booking),
+    path("bookings/history/", views.my_booking_history),
     path("bookings/current/", views.my_current_bookings),
     path("bookings/past/", views.my_past_bookings),
     path("payments/history/", views.my_payment_history),
