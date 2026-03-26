@@ -450,116 +450,99 @@ def listing_amenities(request):
 
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
-def upload_init(request):
-    """Return presigned S3 upload data so the browser can upload directly."""
+def upload_listing_media(request):
+    """Accept a file upload, store it in S3, and create a ListingMedia record."""
+    from django.core.files.storage import storages
+
     if request.user.user_type != User.UserType.SUBLEASER:
         return Response(
             {"detail": "Only subleasers can upload media."},
             status=status.HTTP_403_FORBIDDEN,
         )
 
-    serializer = UploadInitSerializer(data=request.data, context={"request": request})
-    if not serializer.is_valid():
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    listing_id = request.data.get("listing_id")
+    file = request.FILES.get("file")
+    display_order = int(request.data.get("display_order", 0))
+    is_primary = request.data.get("is_primary", "false").lower() in ("true", "1")
 
-    data = serializer.validated_data
-    listing = PropertyListing.objects.get(pk=data["listing_id"])
-    is_private = data["is_private"]
-    content_type = data["content_type"]
-    filename = data["filename"]
-    file_size = data["file_size"]
+    if not listing_id or not file:
+        return Response(
+            {"detail": "listing_id and file are required."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
-    # Build a unique storage key
-    ext = filename.rsplit(".", 1)[-1] if "." in filename else "bin"
+    # Validate listing ownership
+    try:
+        listing = PropertyListing.objects.get(pk=listing_id, deleted_at__isnull=True)
+    except PropertyListing.DoesNotExist:
+        return Response({"detail": "Listing not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    if listing.owner_id != request.user.pk:
+        return Response(
+            {"detail": "You can only upload media to your own listings."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    # Validate file type and size
+    allowed_types = ["image/jpeg", "image/png", "image/webp", "image/gif"]
+    content_type = file.content_type or "application/octet-stream"
+    if content_type not in allowed_types:
+        return Response(
+            {"detail": f"Unsupported file type. Allowed: {', '.join(allowed_types)}"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    max_size = 10 * 1024 * 1024  # 10 MB
+    if file.size > max_size:
+        return Response(
+            {"detail": "File too large. Maximum size is 10 MB."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Build a unique storage key and upload to S3
+    ext = file.name.rsplit(".", 1)[-1] if "." in file.name else "bin"
     storage_key = f"{listing.pk}/{uuid.uuid4().hex}.{ext}"
 
-    # Pick the right storage backend and prefix
-    from django.core.files.storage import storages
-
-    if is_private:
-        storage_name = "listing_media_private"
-        prefix = getattr(settings, "LISTING_MEDIA_PRIVATE_PREFIX", "listing-media/private")
-    else:
-        storage_name = "listing_media_public"
-        prefix = getattr(settings, "LISTING_MEDIA_PUBLIC_PREFIX", "listing-media/public")
-
     try:
-        storage = storages[storage_name]
+        storage = storages["listing_media_public"]
     except KeyError:
         return Response(
             {"detail": "Storage backend not configured. Check AWS settings."},
             status=status.HTTP_503_SERVICE_UNAVAILABLE,
         )
 
-    # Generate presigned POST data via boto3
-    full_key = f"{prefix}/{storage_key}"
-    try:
-        client = storage.connection.meta.client
-        presigned = client.generate_presigned_post(
-            Bucket=storage.bucket_name,
-            Key=full_key,
-            Fields={"Content-Type": content_type},
-            Conditions=[
-                {"Content-Type": content_type},
-                ["content-length-range", 1, file_size],
-            ],
-            ExpiresIn=300,
-        )
-    except Exception as exc:
-        return Response(
-            {"detail": "Failed to generate upload URL."},
-            status=status.HTTP_503_SERVICE_UNAVAILABLE,
-        )
+    # Upload the file to S3
+    saved_name = storage.save(storage_key, file)
 
-    # Create a pending media record
+    # Build the public URL
+    base = getattr(settings, "LISTING_MEDIA_PUBLIC_BASE_URL", "")
+    if base:
+        file_url = f"{base}/{saved_name}"
+    else:
+        file_url = storage.url(saved_name)
+
+    # Clear existing primary if this one is primary
+    if is_primary:
+        ListingMedia.objects.filter(listing=listing, is_primary=True).update(is_primary=False)
+
+    # Create the media record
     media = ListingMedia.objects.create(
         listing=listing,
         media_type=ListingMedia.MediaType.IMAGE,
-        storage_key=storage_key,
-        is_private=is_private,
-        original_filename=filename,
+        storage_key=saved_name,
+        is_private=False,
+        original_filename=file.name,
         content_type=content_type,
-        file_size=file_size,
-        upload_status=ListingMedia.UploadStatus.PENDING,
+        file_size=file.size,
+        file_url=file_url,
+        upload_status=ListingMedia.UploadStatus.UPLOADED,
+        display_order=display_order,
+        is_primary=is_primary,
     )
-
-    return Response(
-        {
-            "media_id": media.pk,
-            "upload_url": presigned["url"],
-            "upload_fields": presigned["fields"],
-            "storage_key": storage_key,
-        },
-        status=status.HTTP_200_OK,
-    )
-
-
-@api_view(["POST"])
-@permission_classes([IsAuthenticated])
-def upload_finalize(request):
-    """Mark a pending media record as uploaded after the browser finishes the S3 upload."""
-    serializer = UploadFinalizeSerializer(data=request.data, context={"request": request})
-    if not serializer.is_valid():
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-    data = serializer.validated_data
-    media = ListingMedia.objects.select_related("listing").get(pk=data["media_id"])
-
-    media.upload_status = ListingMedia.UploadStatus.UPLOADED
-    media.display_order = data["display_order"]
-
-    if data["is_primary"]:
-        # Clear any existing primary flag on this listing
-        ListingMedia.objects.filter(
-            listing=media.listing, is_primary=True
-        ).update(is_primary=False)
-        media.is_primary = True
-
-    media.save(update_fields=["upload_status", "display_order", "is_primary"])
 
     from .serializers import ListingMediaSerializer
 
-    return Response(ListingMediaSerializer(media).data, status=status.HTTP_200_OK)
+    return Response(ListingMediaSerializer(media).data, status=status.HTTP_201_CREATED)
 # ----- Property Listing Browse (Public) -----
 
 
