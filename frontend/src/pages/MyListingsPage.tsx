@@ -8,9 +8,12 @@ import {
   Chip,
   Container,
   Divider,
+  Grid,
   Stack,
   Typography,
 } from "@mui/material";
+import LockIcon from "@mui/icons-material/Lock";
+import PublicIcon from "@mui/icons-material/Public";
 import { Link as RouterLink } from "react-router-dom";
 import { getMyListings, type PropertyListing } from "../api/listings";
 import { useAuth } from "../contexts/AuthContext";
@@ -157,6 +160,62 @@ export default function MyListingsPage() {
                         ? listing.amenities.map((amenity) => amenity.label).join(", ")
                         : "None selected"}
                     </Typography>
+
+                    {listing.media && listing.media.length > 0 && (
+                      <>
+                        <Divider />
+                        <Typography variant="body2"><strong>Photos ({listing.media.length})</strong></Typography>
+                        <Grid container spacing={1}>
+                          {listing.media.map((m) => (
+                            <Grid key={m.id} size={{ xs: 4, sm: 3, md: 2 }}>
+                              <Box sx={{ position: "relative" }}>
+                                <Box
+                                  component="img"
+                                  src={m.access_url || m.file_url || ""}
+                                  alt={m.original_filename || "Photo"}
+                                  sx={{
+                                    width: "100%",
+                                    height: 80,
+                                    objectFit: "cover",
+                                    borderRadius: 1,
+                                    display: "block",
+                                  }}
+                                />
+                                <Chip
+                                  size="small"
+                                  icon={m.is_private ? <LockIcon /> : <PublicIcon />}
+                                  label={m.is_private ? "Private" : "Public"}
+                                  sx={{
+                                    position: "absolute",
+                                    top: 4,
+                                    left: 4,
+                                    height: 20,
+                                    fontSize: "0.65rem",
+                                    opacity: 0.9,
+                                  }}
+                                  color={m.is_private ? "warning" : "default"}
+                                />
+                                {m.is_primary && (
+                                  <Chip
+                                    size="small"
+                                    label="Primary"
+                                    color="primary"
+                                    sx={{
+                                      position: "absolute",
+                                      bottom: 4,
+                                      left: 4,
+                                      height: 20,
+                                      fontSize: "0.65rem",
+                                      opacity: 0.9,
+                                    }}
+                                  />
+                                )}
+                              </Box>
+                            </Grid>
+                          ))}
+                        </Grid>
+                      </>
+                    )}
                   </Stack>
                 </CardContent>
               </Card>

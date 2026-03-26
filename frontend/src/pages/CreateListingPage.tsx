@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Box,
@@ -6,17 +6,31 @@ import {
   Card,
   CardContent,
   Checkbox,
+  Chip,
   Container,
   FormControlLabel,
   Grid,
+  IconButton,
+  LinearProgress,
   MenuItem,
   Stack,
+  Switch,
   TextField,
   Typography,
 } from "@mui/material";
+import DeleteIcon from "@mui/icons-material/Delete";
+import ReplayIcon from "@mui/icons-material/Replay";
 import type { AxiosError } from "axios";
 import { useNavigate } from "react-router-dom";
-import { createListing, getListingAmenities, type CreatePropertyListingPayload, type ListingAmenity } from "../api/listings";
+import {
+  createListing,
+  finalizeUpload,
+  getListingAmenities,
+  requestUploadInit,
+  uploadFileToS3,
+  type CreatePropertyListingPayload,
+  type ListingAmenity,
+} from "../api/listings";
 import { useAuth } from "../contexts/AuthContext";
 
 const PROPERTY_TYPES = ["apartment", "house", "condo", "studio", "other"];
@@ -46,21 +60,37 @@ const INITIAL_FORM: CreatePropertyListingPayload = {
   amenity_codes: [],
 };
 
+interface PendingPhoto {
+  id: string;
+  file: File;
+  previewUrl: string;
+  isPrivate: boolean;
+  status: "queued" | "uploading" | "done" | "error";
+  progress: number;
+  error?: string;
+  mediaId?: number;
+}
+
 function extractFirstError(value: unknown): string | undefined {
   if (Array.isArray(value) && value[0]) return String(value[0]);
   if (typeof value === "string") return value;
   return undefined;
 }
 
+let nextPhotoId = 0;
+
 export default function CreateListingPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [form, setForm] = useState<CreatePropertyListingPayload>(INITIAL_FORM);
   const [amenities, setAmenities] = useState<ListingAmenity[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [pageMessage, setPageMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [photos, setPhotos] = useState<PendingPhoto[]>([]);
+  const [uploading, setUploading] = useState(false);
 
   useEffect(() => {
     async function loadAmenities() {
@@ -77,7 +107,17 @@ export default function CreateListingPage() {
     }
   }, [user]);
 
-  const isDirty = useMemo(() => JSON.stringify(form) !== JSON.stringify(INITIAL_FORM), [form]);
+  // Cleanup preview URLs on unmount
+  useEffect(() => {
+    return () => {
+      photos.forEach((p) => URL.revokeObjectURL(p.previewUrl));
+    };
+  }, []);
+
+  const isDirty = useMemo(
+    () => JSON.stringify(form) !== JSON.stringify(INITIAL_FORM) || photos.length > 0,
+    [form, photos],
+  );
 
   if (!user || user.user_type !== "subleaser") {
     return (
@@ -103,6 +143,104 @@ export default function CreateListingPage() {
       set.add(code);
     }
     handleChange("amenity_codes", Array.from(set));
+  }
+
+  function handleFilesSelected(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = e.target.files;
+    if (!files) return;
+    const newPhotos: PendingPhoto[] = Array.from(files).map((file) => ({
+      id: String(++nextPhotoId),
+      file,
+      previewUrl: URL.createObjectURL(file),
+      isPrivate: false,
+      status: "queued" as const,
+      progress: 0,
+    }));
+    setPhotos((prev) => [...prev, ...newPhotos]);
+    // Reset file input so the same file can be selected again
+    e.target.value = "";
+  }
+
+  function removePhoto(photoId: string) {
+    setPhotos((prev) => {
+      const photo = prev.find((p) => p.id === photoId);
+      if (photo) URL.revokeObjectURL(photo.previewUrl);
+      return prev.filter((p) => p.id !== photoId);
+    });
+  }
+
+  function togglePhotoPrivacy(photoId: string) {
+    setPhotos((prev) =>
+      prev.map((p) => (p.id === photoId ? { ...p, isPrivate: !p.isPrivate } : p)),
+    );
+  }
+
+  async function uploadPhotosForListing(listingId: number) {
+    const toUpload = photos.filter((p) => p.status === "queued" || p.status === "error");
+    if (toUpload.length === 0) return;
+
+    setUploading(true);
+
+    for (let i = 0; i < toUpload.length; i++) {
+      const photo = toUpload[i];
+
+      // Mark uploading
+      setPhotos((prev) =>
+        prev.map((p) => (p.id === photo.id ? { ...p, status: "uploading" as const, progress: 30, error: undefined } : p)),
+      );
+
+      try {
+        // Step 1: Get presigned URL
+        const initResp = await requestUploadInit({
+          listing_id: listingId,
+          filename: photo.file.name,
+          content_type: photo.file.type || "image/jpeg",
+          file_size: photo.file.size,
+          is_private: photo.isPrivate,
+        });
+
+        setPhotos((prev) =>
+          prev.map((p) => (p.id === photo.id ? { ...p, progress: 60 } : p)),
+        );
+
+        // Step 2: Upload to S3
+        await uploadFileToS3(initResp.upload_url, initResp.upload_fields, photo.file);
+
+        setPhotos((prev) =>
+          prev.map((p) => (p.id === photo.id ? { ...p, progress: 85 } : p)),
+        );
+
+        // Step 3: Finalize
+        await finalizeUpload({
+          media_id: initResp.media_id,
+          display_order: i,
+          is_primary: i === 0,
+        });
+
+        setPhotos((prev) =>
+          prev.map((p) =>
+            p.id === photo.id
+              ? { ...p, status: "done" as const, progress: 100, mediaId: initResp.media_id }
+              : p,
+          ),
+        );
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Upload failed";
+        setPhotos((prev) =>
+          prev.map((p) =>
+            p.id === photo.id ? { ...p, status: "error" as const, progress: 0, error: message } : p,
+          ),
+        );
+      }
+    }
+
+    setUploading(false);
+  }
+
+  function retryPhoto(photoId: string) {
+    setPhotos((prev) =>
+      prev.map((p) => (p.id === photoId ? { ...p, status: "queued" as const, progress: 0, error: undefined } : p)),
+    );
   }
 
   function validateForm(): boolean {
@@ -144,7 +282,23 @@ export default function CreateListingPage() {
 
     setSubmitting(true);
     try {
-      await createListing(form);
+      const listing = await createListing(form);
+
+      // Upload photos if any were selected
+      if (photos.length > 0) {
+        await uploadPhotosForListing(listing.id);
+      }
+
+      const failedCount = photos.filter((p) => p.status === "error").length;
+      if (failedCount > 0) {
+        setPageMessage({
+          type: "error",
+          text: `Listing created, but ${failedCount} photo(s) failed to upload. You can retry them.`,
+        });
+        setSubmitting(false);
+        return;
+      }
+
       setPageMessage({ type: "success", text: "Listing created successfully." });
       navigate("/my-listings");
     } catch (error) {
@@ -158,7 +312,9 @@ export default function CreateListingPage() {
       setFieldErrors(nextErrors);
       setPageMessage({ type: "error", text: nextErrors.detail || "Unable to create listing." });
     } finally {
-      setSubmitting(false);
+      if (photos.filter((p) => p.status === "error").length === 0) {
+        setSubmitting(false);
+      }
     }
   }
 
@@ -168,6 +324,8 @@ export default function CreateListingPage() {
     }
     navigate("/my-listings");
   }
+
+  const hasFailedPhotos = photos.some((p) => p.status === "error");
 
   return (
     <Box sx={{ py: 6, px: 2 }}>
@@ -532,10 +690,110 @@ export default function CreateListingPage() {
                 ))}
               </Grid>
 
+              {/* Photo Upload Section */}
+              <Typography variant="h6">Photos</Typography>
+              <Typography variant="body2" color="text.secondary">
+                Select images to upload. Toggle private for photos only visible to you.
+              </Typography>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp,image/gif"
+                multiple
+                hidden
+                onChange={handleFilesSelected}
+              />
+              <Button
+                variant="outlined"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading}
+                sx={{ alignSelf: "flex-start" }}
+              >
+                Select photos
+              </Button>
+
+              {photos.length > 0 && (
+                <Grid container spacing={2}>
+                  {photos.map((photo) => (
+                    <Grid key={photo.id} size={{ xs: 6, sm: 4, md: 3 }}>
+                      <Card variant="outlined" sx={{ position: "relative" }}>
+                        <Box
+                          component="img"
+                          src={photo.previewUrl}
+                          alt={photo.file.name}
+                          sx={{ width: "100%", height: 140, objectFit: "cover", display: "block" }}
+                        />
+                        <Box sx={{ px: 1, py: 0.5 }}>
+                          <Typography variant="caption" noWrap>
+                            {photo.file.name}
+                          </Typography>
+
+                          <Stack direction="row" alignItems="center" justifyContent="space-between">
+                            <FormControlLabel
+                              control={
+                                <Switch
+                                  size="small"
+                                  checked={photo.isPrivate}
+                                  onChange={() => togglePhotoPrivacy(photo.id)}
+                                  disabled={photo.status === "uploading" || photo.status === "done"}
+                                />
+                              }
+                              label={<Typography variant="caption">Private</Typography>}
+                              sx={{ mr: 0 }}
+                            />
+                            <Stack direction="row" spacing={0}>
+                              {photo.status === "error" && (
+                                <IconButton size="small" onClick={() => retryPhoto(photo.id)} title="Retry">
+                                  <ReplayIcon fontSize="small" />
+                                </IconButton>
+                              )}
+                              <IconButton
+                                size="small"
+                                onClick={() => removePhoto(photo.id)}
+                                disabled={photo.status === "uploading"}
+                                title="Remove"
+                              >
+                                <DeleteIcon fontSize="small" />
+                              </IconButton>
+                            </Stack>
+                          </Stack>
+
+                          {photo.status === "uploading" && (
+                            <LinearProgress variant="determinate" value={photo.progress} sx={{ mt: 0.5 }} />
+                          )}
+                          {photo.status === "done" && (
+                            <Chip label="Uploaded" color="success" size="small" sx={{ mt: 0.5 }} />
+                          )}
+                          {photo.status === "error" && (
+                            <Chip label={photo.error || "Failed"} color="error" size="small" sx={{ mt: 0.5 }} />
+                          )}
+                        </Box>
+                      </Card>
+                    </Grid>
+                  ))}
+                </Grid>
+              )}
+
               <Stack direction="row" spacing={2}>
-                <Button type="submit" variant="contained" disabled={submitting}>
+                <Button type="submit" variant="contained" disabled={submitting || uploading}>
                   {submitting ? "Saving..." : "Create listing"}
                 </Button>
+                {hasFailedPhotos && (
+                  <Button
+                    variant="outlined"
+                    color="warning"
+                    onClick={() => {
+                      // Re-mark failed as queued, then the next submit will retry
+                      setPhotos((prev) =>
+                        prev.map((p) =>
+                          p.status === "error" ? { ...p, status: "queued" as const, progress: 0, error: undefined } : p,
+                        ),
+                      );
+                    }}
+                  >
+                    Retry failed uploads
+                  </Button>
+                )}
                 <Button type="button" variant="outlined" color="inherit" onClick={handleCancel}>
                   Cancel
                 </Button>

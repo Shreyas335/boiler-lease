@@ -45,6 +45,7 @@ export interface PropertyListing {
   created_at: string;
   updated_at: string;
   amenities: ListingAmenity[];
+  media: ListingMedia[];
 }
 
 export interface CreatePropertyListingPayload {
