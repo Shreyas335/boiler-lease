@@ -29,6 +29,8 @@ urlpatterns = [
     path("listings/media/reorder/", views.reorder_listing_media),
     path("listings/media/<int:media_id>/", views.delete_listing_media),
     path("listings/media/<int:media_id>/private-access/", views.private_media_access),
+    path("bookings/", views.create_booking),
+    path("bookings/<int:booking_id>/", views.cancel_booking),
     path("bookings/current/", views.my_current_bookings),
     path("bookings/past/", views.my_past_bookings),
     path("payments/history/", views.my_payment_history),
