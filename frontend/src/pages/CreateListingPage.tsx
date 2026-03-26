@@ -14,7 +14,6 @@ import {
   LinearProgress,
   MenuItem,
   Stack,
-  Switch,
   TextField,
   Typography,
 } from "@mui/material";
@@ -24,10 +23,8 @@ import type { AxiosError } from "axios";
 import { useNavigate } from "react-router-dom";
 import {
   createListing,
-  finalizeUpload,
   getListingAmenities,
-  requestUploadInit,
-  uploadFileToS3,
+  uploadListingMedia,
   type CreatePropertyListingPayload,
   type ListingAmenity,
 } from "../api/listings";
@@ -65,7 +62,6 @@ interface PendingPhoto {
   id: string;
   file: File;
   previewUrl: string;
-  isPrivate: boolean;
   status: "queued" | "uploading" | "done" | "error";
   progress: number;
   error?: string;
@@ -155,7 +151,6 @@ export default function CreateListingPage() {
       id: String(++nextPhotoId),
       file,
       previewUrl: URL.createObjectURL(file),
-      isPrivate: false,
       status: "queued" as const,
       progress: 0,
     }));
@@ -172,12 +167,6 @@ export default function CreateListingPage() {
     });
   }
 
-  function togglePhotoPrivacy(photoId: string) {
-    setPhotos((prev) =>
-      prev.map((p) => (p.id === photoId ? { ...p, isPrivate: !p.isPrivate } : p)),
-    );
-  }
-
   async function uploadPhotosForListing(listingId: number) {
     const toUpload = photos.filter((p) => p.status === "queued" || p.status === "error");
     if (toUpload.length === 0) return;
@@ -187,43 +176,17 @@ export default function CreateListingPage() {
     for (let i = 0; i < toUpload.length; i++) {
       const photo = toUpload[i];
 
-      // Mark uploading
       setPhotos((prev) =>
-        prev.map((p) => (p.id === photo.id ? { ...p, status: "uploading" as const, progress: 30, error: undefined } : p)),
+        prev.map((p) => (p.id === photo.id ? { ...p, status: "uploading" as const, progress: 50, error: undefined } : p)),
       );
 
       try {
-        // Step 1: Get presigned URL
-        const initResp = await requestUploadInit({
-          listing_id: listingId,
-          filename: photo.file.name,
-          content_type: photo.file.type || "image/jpeg",
-          file_size: photo.file.size,
-          is_private: photo.isPrivate,
-        });
-
-        setPhotos((prev) =>
-          prev.map((p) => (p.id === photo.id ? { ...p, progress: 60 } : p)),
-        );
-
-        // Step 2: Upload to S3
-        await uploadFileToS3(initResp.upload_url, initResp.upload_fields, photo.file);
-
-        setPhotos((prev) =>
-          prev.map((p) => (p.id === photo.id ? { ...p, progress: 85 } : p)),
-        );
-
-        // Step 3: Finalize
-        await finalizeUpload({
-          media_id: initResp.media_id,
-          display_order: i,
-          is_primary: i === 0,
-        });
+        const media = await uploadListingMedia(listingId, photo.file, i, i === 0);
 
         setPhotos((prev) =>
           prev.map((p) =>
             p.id === photo.id
-              ? { ...p, status: "done" as const, progress: 100, mediaId: initResp.media_id }
+              ? { ...p, status: "done" as const, progress: 100, mediaId: media.id }
               : p,
           ),
         );
@@ -744,34 +707,20 @@ export default function CreateListingPage() {
                             {photo.file.name}
                           </Typography>
 
-                          <Stack direction="row" alignItems="center" justifyContent="space-between">
-                            <FormControlLabel
-                              control={
-                                <Switch
-                                  size="small"
-                                  checked={photo.isPrivate}
-                                  onChange={() => togglePhotoPrivacy(photo.id)}
-                                  disabled={photo.status === "uploading" || photo.status === "done"}
-                                />
-                              }
-                              label={<Typography variant="caption">Private</Typography>}
-                              sx={{ mr: 0 }}
-                            />
-                            <Stack direction="row" spacing={0}>
-                              {photo.status === "error" && (
-                                <IconButton size="small" onClick={() => retryPhoto(photo.id)} title="Retry">
-                                  <ReplayIcon fontSize="small" />
-                                </IconButton>
-                              )}
-                              <IconButton
-                                size="small"
-                                onClick={() => removePhoto(photo.id)}
-                                disabled={photo.status === "uploading"}
-                                title="Remove"
-                              >
-                                <DeleteIcon fontSize="small" />
+                          <Stack direction="row" alignItems="center" justifyContent="flex-end">
+                            {photo.status === "error" && (
+                              <IconButton size="small" onClick={() => retryPhoto(photo.id)} title="Retry">
+                                <ReplayIcon fontSize="small" />
                               </IconButton>
-                            </Stack>
+                            )}
+                            <IconButton
+                              size="small"
+                              onClick={() => removePhoto(photo.id)}
+                              disabled={photo.status === "uploading"}
+                              title="Remove"
+                            >
+                              <DeleteIcon fontSize="small" />
+                            </IconButton>
                           </Stack>
 
                           {photo.status === "uploading" && (

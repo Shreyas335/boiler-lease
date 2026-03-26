@@ -110,3 +110,11 @@ Frontend
 run npm install
 
 npm run dev
+
+## sidecommands
+
+'
+docker compose up --build\
+docker compose exec backend python manage.py migrate
+docker compose exec backend python manage.py createsuperuser
+'
