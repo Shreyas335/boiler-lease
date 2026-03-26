@@ -1,4 +1,5 @@
 from django.contrib.auth.models import AbstractUser
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.utils import timezone
 
@@ -42,6 +43,10 @@ class FeedbackSubmission(models.Model):
     )
     subject = models.CharField(max_length=120, blank=True)
     message = models.TextField()
+    rating = models.PositiveSmallIntegerField(
+        default=5,
+        validators=[MinValueValidator(1), MaxValueValidator(5)],
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -121,7 +126,7 @@ class PropertyListing(models.Model):
     approval_status = models.CharField(
         max_length=16,
         choices=ApprovalStatus.choices,
-        default=ApprovalStatus.PENDING,
+        default=ApprovalStatus.APPROVED,
     )
     published_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -232,6 +237,48 @@ class ListingMedia(models.Model):
                 condition=models.Q(is_primary=True),
                 name="listing_one_primary_media",
             )
+        ]
+
+
+class PropertyBooking(models.Model):
+    sublessee = models.ForeignKey(User, on_delete=models.CASCADE, related_name="property_bookings")
+    listing = models.ForeignKey(PropertyListing, on_delete=models.CASCADE, related_name="bookings")
+    start_date = models.DateField()
+    end_date = models.DateField()
+    monthly_rent_snapshot = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    booked_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                check=models.Q(start_date__lte=models.F("end_date")),
+                name="booking_dates_valid",
+            ),
+            models.UniqueConstraint(
+                fields=["sublessee", "listing", "start_date", "end_date"],
+                name="booking_unique_window",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["sublessee", "end_date"], name="booking_user_end_date_idx"),
+            models.Index(fields=["sublessee", "-booked_at"], name="booking_user_booked_at_idx"),
+        ]
+
+
+class FavoriteListing(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="favorite_listings")
+    listing = models.ForeignKey(PropertyListing, on_delete=models.CASCADE, related_name="favorited_by")
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "listing"],
+                name="favorite_listing_unique",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["user", "-created_at"], name="favorite_user_created_idx"),
         ]
 
 

@@ -3,10 +3,12 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
 from .models import (
+    FavoriteListing,
     FeedbackSubmission,
     ListingAmenity,
     ListingAmenityMap,
     ListingMedia,
+    PropertyBooking,
     PropertyListing,
     User,
 )
@@ -134,22 +136,28 @@ class RegisterSerializer(serializers.ModelSerializer):
 
 
 class LoginSerializer(serializers.Serializer):
-    email = serializers.EmailField()
+    """Accept login as either email or username (optional which one the user provides)."""
+    login = serializers.CharField(required=False, allow_blank=True)
     password = serializers.CharField(write_only=True)
 
     def validate(self, data):
-        email = data.get("email")
+        login = (data.get("login") or "").strip()
         password = data.get("password")
 
-        if not email or not password:
-            raise serializers.ValidationError("Email and password are required.")
+        if not password:
+            raise serializers.ValidationError({"password": ["Password is required."]})
 
-        user = User.objects.filter(email=email).first()
-        if not user:
-            raise serializers.ValidationError("Invalid email or password.")
+        if not login:
+            raise serializers.ValidationError({"login": ["Email or username is required."]})
 
-        if not user.check_password(password):
-            raise serializers.ValidationError("Invalid email or password.")
+        # Look up by email if input contains '@' or '.' , otherwise by username
+        if "@" and "." in login:
+            user = User.objects.filter(email__iexact=login).first()
+        else:
+            user = User.objects.filter(username__iexact=login).first()
+
+        if not user or not user.check_password(password):
+            raise serializers.ValidationError({"detail": "Invalid email or password."})
 
         data["user"] = user
         return data
@@ -184,9 +192,11 @@ class TwoFactorVerifyLoginSerializer(serializers.Serializer):
 
 
 class FeedbackSubmissionSerializer(serializers.ModelSerializer):
+    rating = serializers.IntegerField(min_value=1, max_value=5)
+
     class Meta:
         model = FeedbackSubmission
-        fields = ("id", "subject", "message", "created_at")
+        fields = ("id", "subject", "message", "rating", "created_at")
         read_only_fields = ("id", "created_at")
 
     def validate_subject(self, value):
@@ -317,6 +327,72 @@ class PropertyListingSerializer(serializers.ModelSerializer):
         return ListingMediaSerializer(finalized, many=True).data
 
 
+class PropertyListingSummarySerializer(serializers.ModelSerializer):
+    primary_photo_url = serializers.SerializerMethodField()
+    is_favorited = serializers.SerializerMethodField()
+
+    class Meta:
+        model = PropertyListing
+        fields = (
+            "id",
+            "title",
+            "city",
+            "state",
+            "monthly_rent",
+            "availability_start_date",
+            "availability_end_date",
+            "status",
+            "approval_status",
+            "created_at",
+            "primary_photo_url",
+            "is_favorited",
+        )
+
+    def get_primary_photo_url(self, obj):
+        primary = obj.media.filter(is_primary=True).first()
+        if primary:
+            return primary.file_url
+        fallback = obj.media.first()
+        return fallback.file_url if fallback else ""
+
+    def get_is_favorited(self, obj):
+        user = self.context.get("user")
+        favorite_listing_ids = self.context.get("favorite_listing_ids")
+        if not user or not user.is_authenticated:
+            return False
+        if favorite_listing_ids is not None:
+            return obj.id in favorite_listing_ids
+        return FavoriteListing.objects.filter(user=user, listing=obj).exists()
+
+
+class PropertyBookingSerializer(serializers.ModelSerializer):
+    listing = PropertyListingSummarySerializer(read_only=True)
+    price = serializers.SerializerMethodField()
+
+    class Meta:
+        model = PropertyBooking
+        fields = (
+            "id",
+            "listing",
+            "start_date",
+            "end_date",
+            "booked_at",
+            "monthly_rent_snapshot",
+            "price",
+        )
+
+    def get_price(self, obj):
+        return obj.monthly_rent_snapshot or obj.listing.monthly_rent
+
+
+class FavoriteListingSerializer(serializers.ModelSerializer):
+    listing = PropertyListingSummarySerializer(read_only=True)
+
+    class Meta:
+        model = FavoriteListing
+        fields = ("id", "created_at", "listing")
+
+
 class PropertyListingCreateSerializer(serializers.ModelSerializer):
     amenity_codes = serializers.ListField(
         child=serializers.CharField(max_length=60),
@@ -414,6 +490,150 @@ class PropertyListingCreateSerializer(serializers.ModelSerializer):
                 ignore_conflicts=True,
             )
         return listing
+
+
+class PropertyListingUpdateSerializer(serializers.ModelSerializer):
+    amenity_codes = serializers.ListField(
+        child=serializers.CharField(max_length=60),
+        required=False,
+        allow_empty=True,
+        write_only=True,
+    )
+
+    class Meta:
+        model = PropertyListing
+        fields = (
+            "title",
+            "description",
+            "property_type",
+            "bedrooms",
+            "bathrooms",
+            "square_feet",
+            "furnished_status",
+            "monthly_rent",
+            "security_deposit",
+            "utilities_included",
+            "availability_start_date",
+            "availability_end_date",
+            "lease_term_min_months",
+            "lease_term_max_months",
+            "pets_allowed",
+            "smoking_allowed",
+            "street_line_1",
+            "street_line_2",
+            "city",
+            "state",
+            "postal_code",
+            "country_code",
+            "latitude",
+            "longitude",
+            "unit_number",
+            "building_name",
+            "parking_available",
+            "parking_details",
+            "contact_email",
+            "contact_phone",
+            "virtual_tour_url",
+            "status",
+            "amenity_codes",
+        )
+        extra_kwargs = {
+            "title": {"required": False},
+            "description": {"required": False},
+            "monthly_rent": {"required": False},
+            "availability_start_date": {"required": False},
+            "availability_end_date": {"required": False},
+            "street_line_1": {"required": False},
+            "city": {"required": False},
+            "state": {"required": False},
+            "postal_code": {"required": False},
+        }
+
+    def validate(self, attrs):
+        start_date = attrs.get("availability_start_date") or self.instance.availability_start_date
+        end_date = attrs.get("availability_end_date") or self.instance.availability_end_date
+        if start_date and end_date and start_date > end_date:
+            raise serializers.ValidationError(
+                {"availability_end_date": ["End date must be on or after start date."]}
+            )
+
+        lease_term_min = attrs.get("lease_term_min_months") or self.instance.lease_term_min_months
+        lease_term_max = attrs.get("lease_term_max_months") or self.instance.lease_term_max_months
+        if (
+            lease_term_min is not None
+            and lease_term_max is not None
+            and lease_term_min > lease_term_max
+        ):
+            raise serializers.ValidationError(
+                {"lease_term_max_months": ["Max lease term must be greater than or equal to min lease term."]}
+            )
+
+        parking_available = attrs.get("parking_available", self.instance.parking_available)
+        parking_details = attrs.get("parking_details", self.instance.parking_details)
+        if parking_available is False and parking_details:
+            raise serializers.ValidationError(
+                {"parking_details": ["Parking details are only allowed when parking is available."]}
+            )
+
+        return attrs
+
+    def update(self, instance, validated_data):
+        amenity_codes = validated_data.pop("amenity_codes", None)
+
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+
+        if amenity_codes is not None:
+            instance.amenity_links.all().delete()
+            if amenity_codes:
+                amenities = ListingAmenity.objects.filter(code__in=amenity_codes, is_active=True)
+                ListingAmenityMap.objects.bulk_create(
+                    [ListingAmenityMap(listing=instance, amenity=amenity) for amenity in amenities],
+                    ignore_conflicts=True,
+                )
+
+        return instance
+
+
+class PropertyListingBrowseSerializer(serializers.ModelSerializer):
+    """Read-only serializer for browsing properties. Optimized for list view with nested media and amenities."""
+    amenities = serializers.SerializerMethodField()
+    media = ListingMediaSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = PropertyListing
+        fields = (
+            "id",
+            "title",
+            "description",
+            "bedrooms",
+            "bathrooms",
+            "monthly_rent",
+            "property_type",
+            "furnished_status",
+            "utilities_included",
+            "pets_allowed",
+            "parking_available",
+            "street_line_1",
+            "street_line_2",
+            "city",
+            "state",
+            "postal_code",
+            "latitude",
+            "longitude",
+            "availability_start_date",
+            "availability_end_date",
+            "lease_term_min_months",
+            "lease_term_max_months",
+            "amenities",
+            "media",
+        )
+        read_only_fields = fields
+
+    def get_amenities(self, obj):
+        amenities = ListingAmenity.objects.filter(listing_links__listing=obj, is_active=True).distinct()
+        return ListingAmenitySerializer(amenities, many=True).data
 
 
 class PasswordResetRequestSerializer(serializers.Serializer):
