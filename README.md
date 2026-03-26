@@ -10,6 +10,9 @@ cp .env.example .env   # if you haven't already
 docker-compose up --build
 ```
 
+** make sure docker is installed **
+** docker compose **
+
 **IMPORTANT:** After containers start, you MUST run migrations in another terminal: Also make sure to delete any existing volumes or change the existing volumnes for existing services
 
 ```bash
@@ -110,6 +113,8 @@ Frontend
 run npm install
 
 npm run dev
+
+## sidecommands
 
 ## sidecommands
 

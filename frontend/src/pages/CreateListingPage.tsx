@@ -20,7 +20,6 @@ import {
   createListing,
   getListingAmenities,
   uploadListingMedia,
-  reorderListingMedia,
   type CreatePropertyListingPayload,
   type ListingAmenity,
   type ListingMedia,
@@ -28,6 +27,8 @@ import {
 import { useAuth } from "../contexts/AuthContext";
 import AddressAutocomplete, { type AddressComponents } from "../components/AddressAutocomplete";
 import PhotoManager, { type PendingPhoto } from "../components/PhotoManager";
+import { getListingWarnings, validateListingForm } from "../utils/listingFormValidation";
+
 
 const PROPERTY_TYPES = ["apartment", "house", "condo", "studio", "other"];
 const FURNISHED_OPTIONS = ["furnished", "unfurnished", "partially_furnished"];
@@ -73,7 +74,6 @@ export default function CreateListingPage() {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [addressInput, setAddressInput] = useState("");
   const [isAddressVerified, setIsAddressVerified] = useState(false);
-
   // Photo state — for create, there's no listingId yet and no existing media
   const [existingMedia, setExistingMedia] = useState<ListingMedia[]>([]);
   const [newPhotos, setNewPhotos] = useState<PendingPhoto[]>([]);
@@ -104,6 +104,7 @@ export default function CreateListingPage() {
     () => JSON.stringify(form) !== JSON.stringify(INITIAL_FORM) || newPhotos.length > 0,
     [form, newPhotos],
   );
+  const warnings = useMemo(() => getListingWarnings(form), [form]);
 
   if (!user || user.user_type !== "subleaser") {
     return (
@@ -153,29 +154,7 @@ export default function CreateListingPage() {
   }
 
   function validateForm(): boolean {
-    const nextErrors: Record<string, string> = {};
-    if (!form.title.trim()) nextErrors.title = "Title is required.";
-    if (!form.description.trim()) nextErrors.description = "Description is required.";
-    if (!form.monthly_rent.trim()) nextErrors.monthly_rent = "Monthly rent is required.";
-    if (!form.availability_start_date) nextErrors.availability_start_date = "Start date is required.";
-    if (!form.availability_end_date) nextErrors.availability_end_date = "End date is required.";
-
-    if (!isAddressVerified || !form.latitude || !form.longitude) {
-      nextErrors.address = "Please select an address from the Google suggestions.";
-    }
-
-    if (
-      form.availability_start_date &&
-      form.availability_end_date &&
-      form.availability_start_date > form.availability_end_date
-    ) {
-      nextErrors.availability_end_date = "End date must be on or after start date.";
-    }
-
-    if (!form.parking_available && form.parking_details?.trim()) {
-      nextErrors.parking_details = "Parking details should be empty unless parking is available.";
-    }
-
+    const nextErrors = validateListingForm(form, isAddressVerified);
     setFieldErrors(nextErrors);
     return Object.keys(nextErrors).length === 0;
   }
@@ -197,67 +176,27 @@ export default function CreateListingPage() {
       const toUpload = newPhotos.filter((p) => p.status === "queued" || p.status === "error");
       if (toUpload.length > 0) {
         setUploading(true);
-        const uploadedMedia: ListingMedia[] = [];
+        let uploadFailures = 0;
 
         for (let i = 0; i < toUpload.length; i++) {
           const photo = toUpload[i];
-          setNewPhotos((prev) =>
-            prev.map((p) =>
-              p.id === photo.id ? { ...p, status: "uploading" as const, progress: 50, error: undefined } : p,
-            ),
-          );
-
           try {
-            const media = await uploadListingMedia(listing.id, photo.file, i, i === 0);
-            uploadedMedia.push(media);
-            setNewPhotos((prev) =>
-              prev.map((p) =>
-                p.id === photo.id ? { ...p, status: "done" as const, progress: 100, mediaId: media.id } : p,
-              ),
-            );
-          } catch (err) {
-            const message = err instanceof Error ? err.message : "Upload failed";
-            setNewPhotos((prev) =>
-              prev.map((p) =>
-                p.id === photo.id ? { ...p, status: "error" as const, progress: 0, error: message } : p,
-              ),
-            );
-          }
-        }
-
-        // If all uploaded successfully, apply the user's chosen primary/order
-        if (uploadedMedia.length === toUpload.length && uploadedMedia.length > 0) {
-          // Map the newPhotos order to uploaded media IDs
-          const donePhotos = newPhotos.filter((p) => p.status === "done" || uploadedMedia.some((m) => m.id === p.mediaId));
-          if (donePhotos.length > 1) {
-            const order = donePhotos
-              .map((p, idx) => {
-                const media = uploadedMedia.find((m) => m.id === p.mediaId);
-                if (!media) return null;
-                return { id: media.id, display_order: idx, is_primary: idx === 0 };
-              })
-              .filter(Boolean) as { id: number; display_order: number; is_primary: boolean }[];
-            if (order.length > 0) {
-              try {
-                await reorderListingMedia(listing.id, order);
-              } catch {
-                // Non-critical, photos still uploaded
-              }
-            }
+            await uploadListingMedia(listing.id, photo.file, i, i === 0);
+          } catch {
+            uploadFailures += 1;
           }
         }
 
         setUploading(false);
-      }
 
-      const failedCount = newPhotos.filter((p) => p.status === "error").length;
-      if (failedCount > 0) {
-        setPageMessage({
-          type: "error",
-          text: `Listing created, but ${failedCount} photo(s) failed to upload. You can retry them.`,
-        });
-        setSubmitting(false);
-        return;
+        if (uploadFailures > 0) {
+          setPageMessage({
+            type: "error",
+            text: "Listing created, but some photos failed to upload. You can retry in Edit Listing.",
+          });
+          navigate(`/listings/${listing.id}/edit`, { state: { listing } });
+          return;
+        }
       }
 
       setPageMessage({ type: "success", text: "Listing created successfully." });
@@ -273,9 +212,7 @@ export default function CreateListingPage() {
       setFieldErrors(nextErrors);
       setPageMessage({ type: "error", text: nextErrors.detail || "Unable to create listing." });
     } finally {
-      if (newPhotos.filter((p) => p.status === "error").length === 0) {
-        setSubmitting(false);
-      }
+      setSubmitting(false);
     }
   }
 
@@ -350,6 +287,8 @@ export default function CreateListingPage() {
                     label="Monthly rent"
                     value={form.monthly_rent}
                     onChange={(e) => handleChange("monthly_rent", e.target.value)}
+                    type="number"
+                    inputProps={{ min: 1, step: 1 }}
                     error={Boolean(fieldErrors.monthly_rent)}
                     helperText={fieldErrors.monthly_rent}
                   />
@@ -360,6 +299,19 @@ export default function CreateListingPage() {
                     label="Security deposit"
                     value={form.security_deposit || ""}
                     onChange={(e) => handleChange("security_deposit", e.target.value)}
+                    type="number"
+                    inputProps={{ min: 0, step: 1 }}
+                    error={Boolean(fieldErrors.security_deposit)}
+                    helperText={fieldErrors.security_deposit || warnings.security_deposit}
+                    FormHelperTextProps={{
+                      sx: {
+                        color: fieldErrors.security_deposit
+                          ? "error.main"
+                          : warnings.security_deposit
+                          ? "warning.main"
+                          : "text.secondary",
+                      },
+                    }}
                   />
                 </Grid>
                 <Grid size={{ xs: 6, md: 2 }}>
@@ -368,6 +320,10 @@ export default function CreateListingPage() {
                     label="Beds"
                     value={form.bedrooms}
                     onChange={(e) => handleChange("bedrooms", e.target.value)}
+                    type="number"
+                    inputProps={{ min: 0, step: 1 }}
+                    error={Boolean(fieldErrors.bedrooms)}
+                    helperText={fieldErrors.bedrooms}
                   />
                 </Grid>
                 <Grid size={{ xs: 6, md: 2 }}>
@@ -376,6 +332,10 @@ export default function CreateListingPage() {
                     label="Baths"
                     value={form.bathrooms}
                     onChange={(e) => handleChange("bathrooms", e.target.value)}
+                    type="number"
+                    inputProps={{ min: 0, step: 0.5 }}
+                    error={Boolean(fieldErrors.bathrooms)}
+                    helperText={fieldErrors.bathrooms}
                   />
                 </Grid>
                 <Grid size={{ xs: 12, md: 2 }}>
@@ -384,6 +344,10 @@ export default function CreateListingPage() {
                     label="Sq ft"
                     value={form.square_feet || ""}
                     onChange={(e) => handleChange("square_feet", Number(e.target.value) || undefined)}
+                    type="number"
+                    inputProps={{ min: 1, max: 30000, step: 1 }}
+                    error={Boolean(fieldErrors.square_feet)}
+                    helperText={fieldErrors.square_feet}
                   />
                 </Grid>
                 <Grid size={{ xs: 12, md: 4 }}>
@@ -431,6 +395,10 @@ export default function CreateListingPage() {
                     label="Min lease (months)"
                     value={form.lease_term_min_months || ""}
                     onChange={(e) => handleChange("lease_term_min_months", Number(e.target.value) || undefined)}
+                    type="number"
+                    inputProps={{ min: 1, step: 1 }}
+                    error={Boolean(fieldErrors.lease_term_min_months)}
+                    helperText={fieldErrors.lease_term_min_months}
                   />
                 </Grid>
                 <Grid size={{ xs: 6, md: 3 }}>
@@ -439,6 +407,10 @@ export default function CreateListingPage() {
                     label="Max lease (months)"
                     value={form.lease_term_max_months || ""}
                     onChange={(e) => handleChange("lease_term_max_months", Number(e.target.value) || undefined)}
+                    type="number"
+                    inputProps={{ min: 1, step: 1 }}
+                    error={Boolean(fieldErrors.lease_term_max_months)}
+                    helperText={fieldErrors.lease_term_max_months}
                   />
                 </Grid>
                 <Grid size={{ xs: 12, md: 3 }}>
@@ -544,6 +516,8 @@ export default function CreateListingPage() {
                     label="Contact email"
                     value={form.contact_email || ""}
                     onChange={(e) => handleChange("contact_email", e.target.value)}
+                    error={Boolean(fieldErrors.contact_email)}
+                    helperText={fieldErrors.contact_email}
                   />
                 </Grid>
                 <Grid size={{ xs: 12, md: 4 }}>
@@ -552,6 +526,8 @@ export default function CreateListingPage() {
                     label="Contact phone"
                     value={form.contact_phone || ""}
                     onChange={(e) => handleChange("contact_phone", e.target.value)}
+                    error={Boolean(fieldErrors.contact_phone)}
+                    helperText={fieldErrors.contact_phone}
                   />
                 </Grid>
                 <Grid size={{ xs: 12 }}>
@@ -560,6 +536,8 @@ export default function CreateListingPage() {
                     label="Virtual tour URL (optional)"
                     value={form.virtual_tour_url || ""}
                     onChange={(e) => handleChange("virtual_tour_url", e.target.value)}
+                    error={Boolean(fieldErrors.virtual_tour_url)}
+                    helperText={fieldErrors.virtual_tour_url}
                   />
                 </Grid>
               </Grid>

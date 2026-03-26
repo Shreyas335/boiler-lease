@@ -57,7 +57,6 @@ export default function DashboardPage() {
             resend it.
           </Alert>
         )}
-
         <Box sx={{ mb: 4 }}>
           <Typography variant="h4" sx={{ fontWeight: 700, mb: 0.5 }}>
             Welcome back, {user.first_name || user.username}

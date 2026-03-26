@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Box,
@@ -27,6 +27,7 @@ import {
 import { useAuth } from "../contexts/AuthContext";
 import AddressAutocomplete, { type AddressComponents } from "../components/AddressAutocomplete";
 import PhotoManager, { type PendingPhoto } from "../components/PhotoManager";
+import { getListingWarnings, validateListingForm } from "../utils/listingFormValidation";
 
 const PROPERTY_TYPES = ["apartment", "house", "condo", "studio", "other"];
 const FURNISHED_OPTIONS = ["furnished", "unfurnished", "partially_furnished"];
@@ -77,6 +78,7 @@ export default function EditListingPage() {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [addressInput, setAddressInput] = useState("");
   const [isAddressVerified, setIsAddressVerified] = useState(false);
+  const warnings = useMemo(() => getListingWarnings(form), [form]);
 
   // Photo state
   const [existingMedia, setExistingMedia] = useState<ListingMedia[]>([]);
@@ -218,35 +220,7 @@ export default function EditListingPage() {
   }
 
   function validateForm(): boolean {
-    const nextErrors: Record<string, string> = {};
-    if (!form.title.trim()) nextErrors.title = "Title is required.";
-    if (!form.description.trim())
-      nextErrors.description = "Description is required.";
-    if (!form.monthly_rent.trim())
-      nextErrors.monthly_rent = "Monthly rent is required.";
-    if (!form.availability_start_date)
-      nextErrors.availability_start_date = "Start date is required.";
-    if (!form.availability_end_date)
-      nextErrors.availability_end_date = "End date is required.";
-
-    if (!isAddressVerified || !form.latitude || !form.longitude) {
-      nextErrors.address = "Please select an address from the Google suggestions.";
-    }
-
-    if (
-      form.availability_start_date &&
-      form.availability_end_date &&
-      form.availability_start_date > form.availability_end_date
-    ) {
-      nextErrors.availability_end_date =
-        "End date must be on or after start date.";
-    }
-
-    if (!form.parking_available && form.parking_details?.trim()) {
-      nextErrors.parking_details =
-        "Parking details should be empty unless parking is available.";
-    }
-
+    const nextErrors = validateListingForm(form, isAddressVerified);
     setFieldErrors(nextErrors);
     return Object.keys(nextErrors).length === 0;
   }
@@ -365,6 +339,8 @@ export default function EditListingPage() {
                     onChange={(e) =>
                       handleChange("monthly_rent", e.target.value)
                     }
+                    type="number"
+                    inputProps={{ min: 1, step: 1 }}
                     error={Boolean(fieldErrors.monthly_rent)}
                     helperText={fieldErrors.monthly_rent}
                   />
@@ -377,6 +353,19 @@ export default function EditListingPage() {
                     onChange={(e) =>
                       handleChange("security_deposit", e.target.value)
                     }
+                    type="number"
+                    inputProps={{ min: 0, step: 1 }}
+                    error={Boolean(fieldErrors.security_deposit)}
+                    helperText={fieldErrors.security_deposit || warnings.security_deposit}
+                    FormHelperTextProps={{
+                      sx: {
+                        color: fieldErrors.security_deposit
+                          ? "error.main"
+                          : warnings.security_deposit
+                          ? "warning.main"
+                          : "text.secondary",
+                      },
+                    }}
                   />
                 </Grid>
                 <Grid size={{ xs: 6, md: 2 }}>
@@ -385,6 +374,10 @@ export default function EditListingPage() {
                     label="Beds"
                     value={form.bedrooms}
                     onChange={(e) => handleChange("bedrooms", e.target.value)}
+                    type="number"
+                    inputProps={{ min: 0, step: 1 }}
+                    error={Boolean(fieldErrors.bedrooms)}
+                    helperText={fieldErrors.bedrooms}
                   />
                 </Grid>
                 <Grid size={{ xs: 6, md: 2 }}>
@@ -393,6 +386,10 @@ export default function EditListingPage() {
                     label="Baths"
                     value={form.bathrooms}
                     onChange={(e) => handleChange("bathrooms", e.target.value)}
+                    type="number"
+                    inputProps={{ min: 0, step: 0.5 }}
+                    error={Boolean(fieldErrors.bathrooms)}
+                    helperText={fieldErrors.bathrooms}
                   />
                 </Grid>
                 <Grid size={{ xs: 12, md: 2 }}>
@@ -406,6 +403,10 @@ export default function EditListingPage() {
                         Number(e.target.value) || undefined,
                       )
                     }
+                    type="number"
+                    inputProps={{ min: 1, max: 30000, step: 1 }}
+                    error={Boolean(fieldErrors.square_feet)}
+                    helperText={fieldErrors.square_feet}
                   />
                 </Grid>
                 <Grid size={{ xs: 12, md: 4 }}>
@@ -464,6 +465,10 @@ export default function EditListingPage() {
                         Number(e.target.value) || undefined,
                       )
                     }
+                    type="number"
+                    inputProps={{ min: 1, step: 1 }}
+                    error={Boolean(fieldErrors.lease_term_min_months)}
+                    helperText={fieldErrors.lease_term_min_months}
                   />
                 </Grid>
                 <Grid size={{ xs: 6, md: 3 }}>
@@ -477,6 +482,10 @@ export default function EditListingPage() {
                         Number(e.target.value) || undefined,
                       )
                     }
+                    type="number"
+                    inputProps={{ min: 1, step: 1 }}
+                    error={Boolean(fieldErrors.lease_term_max_months)}
+                    helperText={fieldErrors.lease_term_max_months}
                   />
                 </Grid>
                 <Grid size={{ xs: 12, md: 3 }}>
@@ -582,6 +591,8 @@ export default function EditListingPage() {
                     label="Contact email"
                     value={form.contact_email || ""}
                     onChange={(e) => handleChange("contact_email", e.target.value)}
+                    error={Boolean(fieldErrors.contact_email)}
+                    helperText={fieldErrors.contact_email}
                   />
                 </Grid>
                 <Grid size={{ xs: 12, md: 4 }}>
@@ -590,6 +601,8 @@ export default function EditListingPage() {
                     label="Contact phone"
                     value={form.contact_phone || ""}
                     onChange={(e) => handleChange("contact_phone", e.target.value)}
+                    error={Boolean(fieldErrors.contact_phone)}
+                    helperText={fieldErrors.contact_phone}
                   />
                 </Grid>
                 <Grid size={{ xs: 12 }}>
@@ -598,6 +611,8 @@ export default function EditListingPage() {
                     label="Virtual tour URL (optional)"
                     value={form.virtual_tour_url || ""}
                     onChange={(e) => handleChange("virtual_tour_url", e.target.value)}
+                    error={Boolean(fieldErrors.virtual_tour_url)}
+                    helperText={fieldErrors.virtual_tour_url}
                   />
                 </Grid>
               </Grid>

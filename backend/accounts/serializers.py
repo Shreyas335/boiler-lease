@@ -1,4 +1,5 @@
 from django.contrib.auth.password_validation import validate_password
+from django.conf import settings
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
@@ -10,6 +11,7 @@ from .models import (
     ListingMedia,
     PropertyBooking,
     PropertyListing,
+    TransactionRecord,
     User,
 )
 
@@ -211,6 +213,8 @@ class FeedbackSubmissionSerializer(serializers.ModelSerializer):
 
 class ListingMediaSerializer(serializers.ModelSerializer):
     access_url = serializers.SerializerMethodField()
+    file_url = serializers.SerializerMethodField()
+    thumbnail_url = serializers.SerializerMethodField()
 
     class Meta:
         model = ListingMedia
@@ -262,6 +266,36 @@ class ListingMediaSerializer(serializers.ModelSerializer):
             return private_storage.url(storage_key)
         except (KeyError, Exception):
             return None
+
+    def _build_url(self, url: str) -> str:
+        if not url:
+            return ""
+        if url.startswith("http://") or url.startswith("https://"):
+            return url
+        base = settings.BACKEND_URL.rstrip("/")
+        return f"{base}{url}"
+
+    def get_file_url(self, obj):
+        if obj.file:
+            return self._build_url(obj.file.url)
+        return self._build_url(obj.file_url or "")
+
+    def get_thumbnail_url(self, obj):
+        if obj.thumbnail_url:
+            return self._build_url(obj.thumbnail_url)
+        return ""
+
+
+class ListingMediaUploadSerializer(serializers.Serializer):
+    file = serializers.FileField(write_only=True)
+    is_primary = serializers.BooleanField(required=False, default=False)
+    display_order = serializers.IntegerField(required=False, min_value=0, default=0)
+
+    def validate_file(self, value):
+        content_type = getattr(value, "content_type", "")
+        if content_type and not content_type.startswith("image/"):
+            raise serializers.ValidationError("Only image files are allowed.")
+        return value
 
 
 class ListingAmenitySerializer(serializers.ModelSerializer):
@@ -349,11 +383,17 @@ class PropertyListingSummarySerializer(serializers.ModelSerializer):
         )
 
     def get_primary_photo_url(self, obj):
-        primary = obj.media.filter(is_primary=True).first()
-        if primary:
-            return primary.file_url
-        fallback = obj.media.first()
-        return fallback.file_url if fallback else ""
+        media = (
+            ListingMedia.objects.filter(listing_id=obj.id)
+            .order_by("-is_primary", "display_order", "id")
+            .first()
+        )
+        if not media:
+            return ""
+
+        if media.file:
+            return ListingMediaSerializer()._build_url(media.file.url)
+        return ListingMediaSerializer()._build_url(media.file_url or "")
 
     def get_is_favorited(self, obj):
         user = self.context.get("user")
@@ -662,63 +702,18 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
         return attrs
 
 
-class UploadInitSerializer(serializers.Serializer):
-    """Request schema for presigned upload initiation."""
-
-    ALLOWED_CONTENT_TYPES = [
-        "image/jpeg",
-        "image/png",
-        "image/webp",
-        "image/gif",
-    ]
-    MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
-
-    listing_id = serializers.IntegerField()
-    filename = serializers.CharField(max_length=255)
-    content_type = serializers.CharField(max_length=100)
-    file_size = serializers.IntegerField(min_value=1)
-    is_private = serializers.BooleanField(default=False)
-
-    def validate_content_type(self, value):
-        if value not in self.ALLOWED_CONTENT_TYPES:
-            raise serializers.ValidationError(
-                f"Unsupported file type. Allowed: {', '.join(self.ALLOWED_CONTENT_TYPES)}"
-            )
-        return value
-
-    def validate_file_size(self, value):
-        if value > self.MAX_FILE_SIZE:
-            raise serializers.ValidationError(
-                f"File too large. Maximum size is {self.MAX_FILE_SIZE // (1024 * 1024)} MB."
-            )
-        return value
-
-    def validate_listing_id(self, value):
-        user = self.context["request"].user
-        try:
-            listing = PropertyListing.objects.get(pk=value, deleted_at__isnull=True)
-        except PropertyListing.DoesNotExist:
-            raise serializers.ValidationError("Listing not found.")
-        if listing.owner_id != user.pk:
-            raise serializers.ValidationError("You can only upload media to your own listings.")
-        return value
-
-
-class UploadFinalizeSerializer(serializers.Serializer):
-    """Request schema for upload finalization."""
-
-    media_id = serializers.IntegerField()
-    display_order = serializers.IntegerField(default=0)
-    is_primary = serializers.BooleanField(default=False)
-
-    def validate_media_id(self, value):
-        user = self.context["request"].user
-        try:
-            media = ListingMedia.objects.select_related("listing").get(pk=value)
-        except ListingMedia.DoesNotExist:
-            raise serializers.ValidationError("Media record not found.")
-        if media.listing.owner_id != user.pk:
-            raise serializers.ValidationError("You can only finalize your own uploads.")
-        if media.upload_status != ListingMedia.UploadStatus.PENDING:
-            raise serializers.ValidationError("This upload has already been finalized or failed.")
-        return value
+class TransactionRecordSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TransactionRecord
+        fields = (
+            "id",
+            "amount",
+            "currency",
+            "booking_reference",
+            "status",
+            "stripe_payment_intent_id",
+            "stripe_checkout_session_id",
+            "paid_at",
+            "created_at",
+        )
+        read_only_fields = fields
