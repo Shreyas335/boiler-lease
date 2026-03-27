@@ -253,6 +253,12 @@ class PropertyBooking(models.Model):
     start_date = models.DateField()
     end_date = models.DateField()
     monthly_rent_snapshot = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    security_deposit_snapshot = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING, db_index=True)
     booked_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
