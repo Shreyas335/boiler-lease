@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import axios from "axios";
 import { Alert, Box, Button, Card, CardContent, Chip, Container, Grid, Stack, TextField, Typography } from "@mui/material";
 import FavoriteBorderRoundedIcon from "@mui/icons-material/FavoriteBorderRounded";
 import FavoriteRoundedIcon from "@mui/icons-material/FavoriteRounded";
@@ -24,6 +25,23 @@ export default function PropertyDetailPage() {
   const [bookingBusy, setBookingBusy] = useState(false);
   const [bookingMessage, setBookingMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [bookingDates, setBookingDates] = useState({ start_date: "", end_date: "" });
+
+  function validateBookingForm() {
+    if (!listing) return "Property listing not found.";
+    if (!bookingDates.start_date || !bookingDates.end_date) {
+      return "Please provide both a start date and an end date.";
+    }
+    if (bookingDates.end_date < bookingDates.start_date) {
+      return "End date must be on or after the start date.";
+    }
+    if (
+      bookingDates.start_date < listing.availability_start_date ||
+      bookingDates.end_date > listing.availability_end_date
+    ) {
+      return "Booking dates must stay within the listing's availability window.";
+    }
+    return null;
+  }
 
   useEffect(() => {
     async function loadListing() {
@@ -72,29 +90,28 @@ export default function PropertyDetailPage() {
   async function handleBookingSubmit() {
     if (!listing) return;
 
+    const validationError = validateBookingForm();
+    if (validationError) {
+      setBookingMessage({ type: "error", text: validationError });
+      return;
+    }
+
     try {
       setBookingBusy(true);
       setBookingMessage(null);
-      await createBooking({
+      const booking = await createBooking({
         listing: listing.id,
         start_date: bookingDates.start_date,
         end_date: bookingDates.end_date,
       });
       setBookingMessage({
         type: "success",
-        text: "Booking confirmed. You can track it from your current bookings.",
+        text: `Booking submitted successfully. Current status: ${booking.status_label}.`,
       });
     } catch (err) {
       const fallback = "Unable to complete booking. Please review your dates and try again.";
-      if (
-        typeof err === "object" &&
-        err !== null &&
-        "response" in err &&
-        typeof err.response === "object" &&
-        err.response !== null &&
-        "data" in err.response
-      ) {
-        const data = err.response.data as Record<string, string[] | string> | undefined;
+      if (axios.isAxiosError(err)) {
+        const data = err.response?.data as Record<string, string[] | string> | undefined;
         const firstMessage = data
           ? Object.values(data).flatMap((value) => (Array.isArray(value) ? value : [value]))[0]
           : null;
@@ -252,9 +269,9 @@ export default function PropertyDetailPage() {
                       <Button
                         variant="contained"
                         onClick={handleBookingSubmit}
-                        disabled={bookingBusy || !bookingDates.start_date || !bookingDates.end_date}
+                        disabled={bookingBusy}
                       >
-                        {bookingBusy ? "Booking..." : "Book now"}
+                        {bookingBusy ? "Booking..." : "Book"}
                       </Button>
                       <Button
                         variant="text"
