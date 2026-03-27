@@ -70,8 +70,8 @@ class ListingMediaAdmin(admin.ModelAdmin):
 
 @admin.register(PropertyBooking)
 class PropertyBookingAdmin(admin.ModelAdmin):
-    list_display = ("sublessee", "listing", "start_date", "end_date", "monthly_rent_snapshot", "booked_at")
-    list_filter = ("start_date", "end_date", "booked_at")
+    list_display = ("sublessee", "listing", "status", "start_date", "end_date", "monthly_rent_snapshot", "booked_at")
+    list_filter = ("status", "start_date", "end_date", "booked_at")
     search_fields = ("sublessee__email", "sublessee__username", "listing__title")
 
 
