@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Alert, Box, Container, FormControl, InputLabel, MenuItem, Select, Stack, Typography, type ChipProps } from "@mui/material";
 import {
   addFavorite,
@@ -18,7 +18,7 @@ interface BookingsPageContentProps {
   emptyMessage: string;
   fetchBookings: (sortBy: BookingSortBy, order: SortOrder) => Promise<BookingRecord[]>;
   loadingText: string;
-  allowCancelUpcoming?: boolean;
+  allowCancelBookings?: boolean;
 }
 
 export default function BookingsPageContent({
@@ -27,7 +27,7 @@ export default function BookingsPageContent({
   emptyMessage,
   fetchBookings,
   loadingText,
-  allowCancelUpcoming = false,
+  allowCancelBookings = false,
 }: BookingsPageContentProps) {
   const { user } = useAuth();
   const [bookings, setBookings] = useState<BookingRecord[]>([]);
@@ -37,11 +37,13 @@ export default function BookingsPageContent({
   const [order, setOrder] = useState<SortOrder>("desc");
   const [favoriteBusyId, setFavoriteBusyId] = useState<number | null>(null);
   const [cancelBusyId, setCancelBusyId] = useState<number | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   useEffect(() => {
     async function loadBookings() {
       try {
         setError(null);
+        setSuccessMessage(null);
         setLoading(true);
         const data = await fetchBookings(sortBy, order);
         setBookings(data);
@@ -59,24 +61,27 @@ export default function BookingsPageContent({
     }
   }, [user, fetchBookings, sortBy, order]);
 
-  const sortLabel = useMemo(() => {
-    if (sortBy === "price") return "Price";
-    if (sortBy === "start_date") return "Start date";
-    if (sortBy === "end_date") return "End date";
-    return "Date booked";
-  }, [sortBy]);
-
-  function getBookingStatusMeta(status: BookingRecord["booking_status"]): {
+  function getBookingStatusMeta(status: BookingRecord["status"]): {
     label: string;
     color: ChipProps["color"];
   } {
-    if (status === "active") {
-      return { label: "Active", color: "success" };
+    if (status === "confirmed") {
+      return { label: "Confirmed", color: "success" };
     }
-    if (status === "completed") {
-      return { label: "Completed", color: "default" };
+    if (status === "declined") {
+      return { label: "Declined", color: "warning" };
     }
-    return { label: "Upcoming", color: "info" };
+    if (status === "cancelled") {
+      return { label: "Cancelled", color: "default" };
+    }
+    if (status === "pending") {
+      return { label: "Pending", color: "info" };
+    }
+    return { label: "Confirmed", color: "success" };
+  }
+
+  function buildFooterText(booking: BookingRecord) {
+    return `Booked on ${new Date(booking.booked_at).toLocaleDateString()} | Stay ${booking.start_date} to ${booking.end_date} | Status ${booking.status_label}`;
   }
 
   async function toggleFavorite(listing: PropertyListingSummary) {
@@ -105,8 +110,10 @@ export default function BookingsPageContent({
     try {
       setCancelBusyId(bookingId);
       setError(null);
-      await cancelBooking(bookingId);
+      setSuccessMessage(null);
+      const response = await cancelBooking(bookingId);
       setBookings((prev) => prev.filter((booking) => booking.id !== bookingId));
+      setSuccessMessage(response.detail);
     } catch {
       setError("Unable to cancel booking. Please try again.");
     } finally {
@@ -166,6 +173,7 @@ export default function BookingsPageContent({
           </Stack>
         </Stack>
 
+        {successMessage && <Alert severity="success" sx={{ mb: 2 }}>{successMessage}</Alert>}
         {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
 
         {loading ? (
@@ -174,27 +182,31 @@ export default function BookingsPageContent({
           <Alert severity="info">{emptyMessage}</Alert>
         ) : (
           <Stack spacing={2}>
-            {bookings.map((booking) => (
-              <PropertySummaryCard
-                key={booking.id}
-                listing={booking.listing}
-                onToggleFavorite={toggleFavorite}
-                favoriteLoading={favoriteBusyId === booking.listing.id}
-                statusLabel={getBookingStatusMeta(booking.booking_status).label}
-                statusColor={getBookingStatusMeta(booking.booking_status).color}
-                actionButton={
-                  allowCancelUpcoming && booking.booking_status === "upcoming"
-                    ? {
-                        label: cancelBusyId === booking.id ? "Canceling..." : "Cancel booking",
-                        onClick: () => handleCancelBooking(booking.id),
-                        disabled: cancelBusyId === booking.id,
-                        color: "error",
-                      }
-                    : undefined
-                }
-                footerText={`Booked on ${new Date(booking.booked_at).toLocaleDateString()} | Stay ${booking.start_date} to ${booking.end_date} | Sorted by ${sortLabel.toLowerCase()} (${order})`}
-              />
-            ))}
+            {bookings.map((booking) => {
+              const statusMeta = getBookingStatusMeta(booking.status);
+
+              return (
+                <PropertySummaryCard
+                  key={booking.id}
+                  listing={booking.listing}
+                  onToggleFavorite={toggleFavorite}
+                  favoriteLoading={favoriteBusyId === booking.listing.id}
+                  statusLabel={statusMeta.label}
+                  statusColor={statusMeta.color}
+                  actionButton={
+                    allowCancelBookings && booking.is_cancelable
+                      ? {
+                          label: cancelBusyId === booking.id ? "Cancelling..." : "Cancel Booking",
+                          onClick: () => handleCancelBooking(booking.id),
+                          disabled: cancelBusyId === booking.id,
+                          color: "error",
+                        }
+                      : undefined
+                  }
+                  footerText={buildFooterText(booking)}
+                />
+              );
+            })}
           </Stack>
         )}
       </Container>
