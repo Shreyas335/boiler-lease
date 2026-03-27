@@ -830,6 +830,9 @@ def private_media_access(request, media_id):
         )
 
     return Response({"access_url": signed_url, "expires_in": settings.AWS_S3_PRIVATE_URL_EXPIRE_SECONDS})
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
 def my_current_bookings(request):
     if not _is_sublessee(request):
         return Response(
