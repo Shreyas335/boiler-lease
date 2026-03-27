@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import {
   Box,
   Container,
@@ -7,12 +8,16 @@ import {
   Button,
   Chip,
   Alert,
+  Stack,
+  type ChipProps,
 } from "@mui/material";
 import { Link as RouterLink } from "react-router-dom";
 import HomeWorkRoundedIcon from "@mui/icons-material/HomeWorkRounded";
 import PersonSearchRoundedIcon from "@mui/icons-material/PersonSearchRounded";
 import BusinessRoundedIcon from "@mui/icons-material/BusinessRounded";
 import WarningAmberRoundedIcon from "@mui/icons-material/WarningAmberRounded";
+import PropertySummaryCard from "../components/PropertySummaryCard";
+import { getBookingHistory, type BookingRecord } from "../api/listings";
 import { useAuth } from "../contexts/AuthContext";
 
 const USER_TYPE_CONFIG: Record<
@@ -38,6 +43,65 @@ const USER_TYPE_CONFIG: Record<
 
 export default function DashboardPage() {
   const { user } = useAuth();
+  const [recentBookings, setRecentBookings] = useState<BookingRecord[]>([]);
+  const [bookingsLoading, setBookingsLoading] = useState(false);
+  const [bookingsError, setBookingsError] = useState<string | null>(null);
+  const userType = user?.user_type;
+
+  function getBookingStatusMeta(status: BookingRecord["status"]): {
+    label: string;
+    color: ChipProps["color"];
+  } {
+    if (status === "confirmed") {
+      return { label: "Confirmed", color: "success" };
+    }
+    if (status === "declined") {
+      return { label: "Declined", color: "warning" };
+    }
+    if (status === "cancelled") {
+      return { label: "Cancelled", color: "default" };
+    }
+    return { label: "Pending", color: "info" };
+  }
+
+  useEffect(() => {
+    if (userType !== "sublessee") return undefined;
+
+    let isMounted = true;
+
+    async function loadBookingHistory(showSpinner: boolean) {
+      try {
+        if (showSpinner && isMounted) {
+          setBookingsLoading(true);
+        }
+        if (isMounted) {
+          setBookingsError(null);
+        }
+        const data = await getBookingHistory("date_booked", "desc");
+        if (isMounted) {
+          setRecentBookings(data.slice(0, 3));
+        }
+      } catch {
+        if (isMounted) {
+          setBookingsError("Unable to load recent booking updates.");
+        }
+      } finally {
+        if (showSpinner && isMounted) {
+          setBookingsLoading(false);
+        }
+      }
+    }
+
+    void loadBookingHistory(true);
+    const intervalId = window.setInterval(() => {
+      void loadBookingHistory(false);
+    }, 15000);
+
+    return () => {
+      isMounted = false;
+      window.clearInterval(intervalId);
+    };
+  }, [userType]);
 
   if (!user) return null;
 
@@ -86,6 +150,44 @@ export default function DashboardPage() {
             </Typography>
           </CardContent>
         </Card>
+
+        {user.user_type === "sublessee" && (
+          <Card sx={{ mb: 4 }}>
+            <CardContent sx={{ p: 4 }}>
+              <Stack spacing={2}>
+                <Box>
+                  <Typography variant="h6">Recent booking updates</Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Booking statuses refresh automatically every 15 seconds.
+                  </Typography>
+                </Box>
+
+                {bookingsError && <Alert severity="error">{bookingsError}</Alert>}
+
+                {bookingsLoading ? (
+                  <Typography>Loading recent booking updates...</Typography>
+                ) : recentBookings.length === 0 ? (
+                  <Alert severity="info">You haven&apos;t submitted any bookings yet.</Alert>
+                ) : (
+                  <Stack spacing={2}>
+                    {recentBookings.map((booking) => {
+                      const statusMeta = getBookingStatusMeta(booking.status);
+                      return (
+                        <PropertySummaryCard
+                          key={booking.id}
+                          listing={booking.listing}
+                          statusLabel={statusMeta.label}
+                          statusColor={statusMeta.color}
+                          footerText={`Submitted ${new Date(booking.booked_at).toLocaleDateString()} | Stay ${booking.start_date} to ${booking.end_date}`}
+                        />
+                      );
+                    })}
+                  </Stack>
+                )}
+              </Stack>
+            </CardContent>
+          </Card>
+        )}
 
         <Box sx={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
           {user.user_type === "sublessee" && (

@@ -15,7 +15,7 @@ export default function CurrentBookingsPage() {
       emptyMessage="You don't have any current bookings yet."
       loadingText="Loading current bookings..."
       fetchBookings={fetchBookings}
-      allowCancelUpcoming
+      allowCancelBookings
     />
   );
 }
