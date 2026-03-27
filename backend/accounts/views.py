@@ -1009,7 +1009,7 @@ def my_payment_history(request):
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def create_deposit_checkout_session(request):
-    """Create a Stripe Checkout Session for a security deposit (placeholder amount until booking-linked)."""
+    """Stripe Checkout for security deposit; optional booking_id uses snapshotted listing deposit."""
     if not _is_sublessee(request):
         return Response(
             {"detail": "Only sublessees can start deposit payments."},
@@ -1028,15 +1028,52 @@ def create_deposit_checkout_session(request):
 
     stripe.api_key = settings.STRIPE_SECRET_KEY
 
-    # TODO: set from booking / listing security_deposit when bookings integrate with checkout.
+    booking_ref = ""
     amount_cents = 5000
+    raw_bid = request.data.get("booking_id")
+    if raw_bid is not None:
+        try:
+            bid = int(raw_bid)
+        except (TypeError, ValueError):
+            return Response({"detail": "Invalid booking_id."}, status=status.HTTP_400_BAD_REQUEST)
+        booking = (
+            PropertyBooking.objects.filter(pk=bid, sublessee=request.user)
+            .select_related("listing")
+            .first()
+        )
+        if not booking:
+            return Response({"detail": "Booking not found."}, status=status.HTTP_404_NOT_FOUND)
+        if booking.status in (
+            PropertyBooking.Status.DECLINED,
+            PropertyBooking.Status.CANCELLED,
+        ):
+            return Response(
+                {"detail": "Cannot pay a deposit for this booking."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        dep = booking.security_deposit_snapshot or booking.listing.security_deposit
+        if dep is None or dep <= 0:
+            return Response(
+                {"detail": "No security deposit amount for this booking."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        amount_cents = int(dep * 100)
+        booking_ref = str(bid)
+
     txn = TransactionRecord.objects.create(
         user=request.user,
         amount=amount_cents / 100,
         currency="usd",
-        booking_reference="",
+        booking_reference=booking_ref,
         status=TransactionRecord.Status.PENDING,
     )
+
+    session_metadata = {
+        "transaction_id": str(txn.id),
+        "user_id": str(request.user.id),
+    }
+    if booking_ref:
+        session_metadata["booking_id"] = booking_ref
 
     session = stripe.checkout.Session.create(
         mode="payment",
@@ -1051,10 +1088,7 @@ def create_deposit_checkout_session(request):
                 "quantity": 1,
             }
         ],
-        metadata={
-            "transaction_id": str(txn.id),
-            "user_id": str(request.user.id),
-        },
+        metadata=session_metadata,
         success_url=f"{settings.FRONTEND_URL}/dashboard",
         cancel_url=f"{settings.FRONTEND_URL}/dashboard",
     )
