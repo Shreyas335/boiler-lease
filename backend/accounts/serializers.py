@@ -420,6 +420,7 @@ class PropertyBookingSerializer(serializers.ModelSerializer):
             "end_date",
             "booked_at",
             "monthly_rent_snapshot",
+            "security_deposit_snapshot",
             "status",
             "status_label",
             "price",
@@ -502,6 +503,7 @@ class PropertyBookingCreateSerializer(serializers.ModelSerializer):
             start_date=validated_data["start_date"],
             end_date=validated_data["end_date"],
             monthly_rent_snapshot=listing.monthly_rent,
+            security_deposit_snapshot=listing.security_deposit,
             status=PropertyBooking.Status.PENDING,
         )
 

@@ -71,6 +71,7 @@ export interface BookingRecord {
   end_date: string;
   booked_at: string;
   monthly_rent_snapshot: string | null;
+  security_deposit_snapshot: string | null;
   status: "pending" | "confirmed" | "declined" | "cancelled";
   status_label: string;
   price: string;
