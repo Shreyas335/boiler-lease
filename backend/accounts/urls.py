@@ -39,4 +39,5 @@ urlpatterns = [
     path("payments/webhook/", views.stripe_webhook),
     path("favorites/", views.my_favorite_listings),
     path("favorites/<int:listing_id>/", views.favorite_listing_toggle),
+    path("company/status/", views.company_status),
 ]

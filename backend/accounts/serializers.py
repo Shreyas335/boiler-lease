@@ -4,11 +4,13 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
 from .models import (
+    CompanyDocument,
     FavoriteListing,
     FeedbackSubmission,
     ListingAmenity,
     ListingAmenityMap,
     ListingMedia,
+    ManagementCompany,
     PropertyBooking,
     PropertyListing,
     TransactionRecord,
@@ -827,3 +829,22 @@ class TransactionRecordSerializer(serializers.ModelSerializer):
             "created_at",
         )
         read_only_fields = fields
+
+
+class ManagementCompanySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ManagementCompany
+        fields = ("id", "company_name", "status", "rejection_reason", "guidelines", "reviewed_at", "created_at")
+        read_only_fields = ("id", "status", "rejection_reason", "reviewed_at", "created_at")
+
+
+class CompanyDocumentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CompanyDocument
+        fields = ("id", "document_type", "original_filename", "uploaded_at")
+        read_only_fields = fields
+
+
+class CompanyDocumentUploadSerializer(serializers.Serializer):
+    file = serializers.FileField()
+    document_type = serializers.ChoiceField(choices=CompanyDocument.DocumentType.choices)
