@@ -56,6 +56,23 @@ class ManagementCompany(models.Model):
         return f"{self.company_name} ({self.get_status_display()})"
 
 
+class CompanyDocument(models.Model):
+
+    class DocumentType(models.TextChoices):
+        BUSINESS_LICENSE = "business_license", "Business License"
+        PROOF_OF_OWNERSHIP = "proof_of_ownership", "Proof of Ownership"
+        OTHER = "other", "Other"
+
+    company = models.ForeignKey(ManagementCompany, on_delete=models.CASCADE, related_name="documents")
+    file = models.FileField(upload_to="company_docs/")
+    document_type = models.CharField(max_length=24, choices=DocumentType.choices, default=DocumentType.OTHER)
+    original_filename = models.CharField(max_length=255, blank=True)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.original_filename} ({self.get_document_type_display()})"
+
+
 class FeedbackSubmission(models.Model):
     """Feedback message submitted from the Help page."""
 
