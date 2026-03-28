@@ -7,6 +7,7 @@ from .models import (
     ListingAmenity,
     ListingAmenityMap,
     ListingMedia,
+    ManagementCompany,
     PasswordResetToken,
     PropertyBooking,
     PropertyListing,
@@ -23,6 +24,19 @@ class UserAdmin(BaseUserAdmin):
     )
     add_fieldsets = BaseUserAdmin.add_fieldsets + (
         ("User Type", {"fields": ("user_type",)}),
+    )
+
+
+@admin.register(ManagementCompany)
+class ManagementCompanyAdmin(admin.ModelAdmin):
+    list_display = ("company_name", "user", "status", "created_at")
+    list_filter = ("status",)
+    search_fields = ("company_name", "user__email", "user__username")
+    readonly_fields = ("user", "created_at", "updated_at")
+    fieldsets = (
+        ("Company Info", {"fields": ("user", "company_name")}),
+        ("Review", {"fields": ("status", "rejection_reason", "reviewed_at")}),
+        ("Timestamps", {"fields": ("created_at", "updated_at")}),
     )
 
 
