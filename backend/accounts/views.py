@@ -37,9 +37,12 @@ from .pagination import PropertyListingPagination
 
 from .serializers import (
     AccountUpdateSerializer,
+    CompanyDocumentSerializer,
+    CompanyDocumentUploadSerializer,
     FavoriteListingSerializer,
     FeedbackSubmissionSerializer,
     LoginSerializer,
+    ManagementCompanySerializer,
     PasswordChangeSerializer,
     PasswordResetConfirmSerializer,
     PasswordResetRequestSerializer,
@@ -1255,3 +1258,15 @@ def my_favorite_listings(request):
         context={"user": request.user, "favorite_listing_ids": favorite_listing_ids},
     )
     return Response(serializer.data)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def company_status(request):
+    if request.user.user_type != User.UserType.MANAGEMENT:
+        return Response({"detail": "Only management users can access this."}, status=status.HTTP_403_FORBIDDEN)
+    try:
+        company = request.user.management_company
+    except ManagementCompany.DoesNotExist:
+        return Response({"detail": "No company found for this user."}, status=status.HTTP_404_NOT_FOUND)
+    return Response(ManagementCompanySerializer(company).data)
