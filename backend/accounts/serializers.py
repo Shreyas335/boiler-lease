@@ -17,6 +17,8 @@ from .models import (
 
 
 class UserSerializer(serializers.ModelSerializer):
+    company_name = serializers.SerializerMethodField()
+
     class Meta:
         model = User
         fields = (
@@ -28,6 +30,7 @@ class UserSerializer(serializers.ModelSerializer):
             "last_name",
             "email_verified",
             "two_factor_enabled",
+            "company_name",
         )
         read_only_fields = (
             "id",
@@ -38,7 +41,16 @@ class UserSerializer(serializers.ModelSerializer):
             "last_name",
             "email_verified",
             "two_factor_enabled",
+            "company_name",
         )
+
+    def get_company_name(self, obj):
+        if obj.user_type == User.UserType.MANAGEMENT:
+            try:
+                return obj.management_company.company_name
+            except Exception:
+                return None
+        return None
 
 
 class AccountUpdateSerializer(serializers.ModelSerializer):
