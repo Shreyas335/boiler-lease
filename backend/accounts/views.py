@@ -1305,3 +1305,20 @@ def company_document_list(request):
         return Response({"detail": "No company found for this user."}, status=status.HTTP_404_NOT_FOUND)
     docs = company.documents.all().order_by("-uploaded_at")
     return Response(CompanyDocumentSerializer(docs, many=True).data)
+
+
+@api_view(["DELETE"])
+@permission_classes([IsAuthenticated])
+def company_document_delete(request, pk):
+    if request.user.user_type != User.UserType.MANAGEMENT:
+        return Response({"detail": "Only management users can access this."}, status=status.HTTP_403_FORBIDDEN)
+    try:
+        company = request.user.management_company
+    except ManagementCompany.DoesNotExist:
+        return Response({"detail": "No company found for this user."}, status=status.HTTP_404_NOT_FOUND)
+    try:
+        doc = company.documents.get(pk=pk)
+    except CompanyDocument.DoesNotExist:
+        return Response({"detail": "Document not found."}, status=status.HTTP_404_NOT_FOUND)
+    doc.delete()
+    return Response(status=status.HTTP_204_NO_CONTENT)
