@@ -237,6 +237,14 @@ export default function EditListingPage() {
       return;
     }
 
+    if (!listing) {
+      setPageMessage({
+        type: "error",
+        text: "Listing not found.",
+      });
+      return;
+    }
+
     setSubmitting(true);
     try {
       await updateListing(listing.id, form);
