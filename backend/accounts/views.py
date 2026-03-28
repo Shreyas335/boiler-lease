@@ -1292,3 +1292,16 @@ def company_document_upload(request):
         original_filename=file.name,
     )
     return Response(CompanyDocumentSerializer(doc).data, status=status.HTTP_201_CREATED)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def company_document_list(request):
+    if request.user.user_type != User.UserType.MANAGEMENT:
+        return Response({"detail": "Only management users can access this."}, status=status.HTTP_403_FORBIDDEN)
+    try:
+        company = request.user.management_company
+    except ManagementCompany.DoesNotExist:
+        return Response({"detail": "No company found for this user."}, status=status.HTTP_404_NOT_FOUND)
+    docs = company.documents.all().order_by("-uploaded_at")
+    return Response(CompanyDocumentSerializer(docs, many=True).data)
