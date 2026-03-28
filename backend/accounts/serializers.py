@@ -97,10 +97,11 @@ class PasswordChangeSerializer(serializers.Serializer):
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, min_length=8)
     password_confirm = serializers.CharField(write_only=True)
+    company_name = serializers.CharField(write_only=True, required=False, allow_blank=True)
 
     class Meta:
         model = User
-        fields = ("username", "email", "password", "password_confirm", "user_type", "first_name", "last_name")
+        fields = ("username", "email", "password", "password_confirm", "user_type", "first_name", "last_name", "company_name")
 
     def validate(self, data):
         # Validate required fields
@@ -108,28 +109,33 @@ class RegisterSerializer(serializers.ModelSerializer):
         for field in required_fields:
             if not data.get(field):
                 raise serializers.ValidationError({field: f"{field.replace('_', ' ').title()} is required."})
-        
+
         # Validate password match
         if data["password"] != data["password_confirm"]:
             raise serializers.ValidationError({"password_confirm": "Passwords do not match."})
-        
+
         # Validate email uniqueness
         if User.objects.filter(email=data["email"]).exists():
             raise serializers.ValidationError({"email": "A user with this email already exists."})
-        
+
         # Validate username uniqueness
         if User.objects.filter(username=data["username"]).exists():
             raise serializers.ValidationError({"username": "A user with this username already exists."})
-        
+
         # Validate user type
         valid_types = [choice[0] for choice in User.UserType.choices]
         if data["user_type"] not in valid_types:
             raise serializers.ValidationError({"user_type": f"Must be one of: {', '.join(valid_types)}"})
-        
+
+        # company_name required for management users
+        if data["user_type"] == User.UserType.MANAGEMENT and not data.get("company_name"):
+            raise serializers.ValidationError({"company_name": "Company name is required for management accounts."})
+
         return data
 
     def create(self, validated_data):
         validated_data.pop("password_confirm")
+        validated_data.pop("company_name", None)
         password = validated_data.pop("password")
         user = User(**validated_data)
         user.set_password(password)
