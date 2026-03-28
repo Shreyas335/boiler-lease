@@ -29,6 +29,9 @@ class User(AbstractUser):
     two_factor_enabled = models.BooleanField(default=False)
     totp_secret = models.CharField(max_length=32, null=True, blank=True)
 
+    # Messaging notifications
+    message_notifications_enabled = models.BooleanField(default=True)
+
     class Meta:
         db_table = "accounts_user"
 
@@ -136,23 +139,23 @@ class PropertyListing(models.Model):
     class Meta:
         constraints = [
             models.CheckConstraint(
-                check=models.Q(availability_start_date__lte=models.F("availability_end_date")),
+                condition=models.Q(availability_start_date__lte=models.F("availability_end_date")),
                 name="listing_dates_valid",
             ),
             models.CheckConstraint(
-                check=models.Q(monthly_rent__gte=0),
+                condition=models.Q(monthly_rent__gte=0),
                 name="listing_monthly_rent_non_negative",
             ),
             models.CheckConstraint(
-                check=models.Q(security_deposit__gte=0) | models.Q(security_deposit__isnull=True),
+                condition=models.Q(security_deposit__gte=0) | models.Q(security_deposit__isnull=True),
                 name="listing_security_deposit_non_negative",
             ),
             models.CheckConstraint(
-                check=models.Q(bedrooms__gte=0),
+                condition=models.Q(bedrooms__gte=0),
                 name="listing_bedrooms_non_negative",
             ),
             models.CheckConstraint(
-                check=models.Q(bathrooms__gte=0),
+                condition=models.Q(bathrooms__gte=0),
                 name="listing_bathrooms_non_negative",
             ),
         ]
@@ -259,7 +262,7 @@ class PropertyBooking(models.Model):
     class Meta:
         constraints = [
             models.CheckConstraint(
-                check=models.Q(start_date__lte=models.F("end_date")),
+                condition=models.Q(start_date__lte=models.F("end_date")),
                 name="booking_dates_valid",
             ),
             models.UniqueConstraint(
@@ -333,3 +336,111 @@ class PasswordResetToken(models.Model):
     @property
     def is_usable(self):
         return self.used_at is None and not self.is_expired
+
+
+class Conversation(models.Model):
+    """Direct message thread between two users, optionally scoped to a listing."""
+
+    participant_1 = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="conversations_as_p1"
+    )
+    participant_2 = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="conversations_as_p2"
+    )
+    listing = models.ForeignKey(
+        PropertyListing,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="conversations",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "messaging_conversation"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["participant_1", "participant_2", "listing"],
+                name="conversation_unique_pair_listing",
+            ),
+            models.UniqueConstraint(
+                fields=["participant_1", "participant_2"],
+                condition=models.Q(listing__isnull=True),
+                name="conversation_unique_pair_no_listing",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["participant_1", "-updated_at"], name="conv_p1_updated_idx"),
+            models.Index(fields=["participant_2", "-updated_at"], name="conv_p2_updated_idx"),
+        ]
+
+    def get_other_participant(self, user):
+        return self.participant_2 if self.participant_1_id == user.pk else self.participant_1
+
+
+class ConversationDeletion(models.Model):
+    """Records that a specific user has soft-deleted a conversation from their inbox."""
+
+    conversation = models.ForeignKey(
+        Conversation, on_delete=models.CASCADE, related_name="deletions"
+    )
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="deleted_conversations"
+    )
+    deleted_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "messaging_conversation_deletion"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["conversation", "user"],
+                name="conv_deletion_unique",
+            )
+        ]
+
+
+class Message(models.Model):
+    """A single message within a conversation."""
+
+    conversation = models.ForeignKey(
+        Conversation, on_delete=models.CASCADE, related_name="messages"
+    )
+    sender = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="sent_messages"
+    )
+    content = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    is_read = models.BooleanField(default=False)
+
+    class Meta:
+        db_table = "messaging_message"
+        ordering = ("created_at",)
+        indexes = [
+            models.Index(fields=["conversation", "-created_at"], name="msg_conv_created_idx"),
+            models.Index(fields=["conversation", "is_read"], name="msg_conv_read_idx"),
+        ]
+
+
+class UserBlock(models.Model):
+    """Records that blocker has blocked blocked_user, preventing messaging between them."""
+
+    blocker = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="blocks_initiated"
+    )
+    blocked = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="blocks_received"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "messaging_user_block"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["blocker", "blocked"],
+                name="userblock_unique",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["blocker", "blocked"], name="block_lookup_idx"),
+        ]
