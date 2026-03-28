@@ -1270,3 +1270,25 @@ def company_status(request):
     except ManagementCompany.DoesNotExist:
         return Response({"detail": "No company found for this user."}, status=status.HTTP_404_NOT_FOUND)
     return Response(ManagementCompanySerializer(company).data)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def company_document_upload(request):
+    if request.user.user_type != User.UserType.MANAGEMENT:
+        return Response({"detail": "Only management users can access this."}, status=status.HTTP_403_FORBIDDEN)
+    try:
+        company = request.user.management_company
+    except ManagementCompany.DoesNotExist:
+        return Response({"detail": "No company found for this user."}, status=status.HTTP_404_NOT_FOUND)
+    serializer = CompanyDocumentUploadSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    file = serializer.validated_data["file"]
+    doc = CompanyDocument.objects.create(
+        company=company,
+        file=file,
+        document_type=serializer.validated_data["document_type"],
+        original_filename=file.name,
+    )
+    return Response(CompanyDocumentSerializer(doc).data, status=status.HTTP_201_CREATED)
