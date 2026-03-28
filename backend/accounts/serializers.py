@@ -18,6 +18,7 @@ from .models import (
 
 class UserSerializer(serializers.ModelSerializer):
     company_name = serializers.SerializerMethodField()
+    company_status = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -31,6 +32,7 @@ class UserSerializer(serializers.ModelSerializer):
             "email_verified",
             "two_factor_enabled",
             "company_name",
+            "company_status",
         )
         read_only_fields = (
             "id",
@@ -42,12 +44,21 @@ class UserSerializer(serializers.ModelSerializer):
             "email_verified",
             "two_factor_enabled",
             "company_name",
+            "company_status",
         )
 
     def get_company_name(self, obj):
         if obj.user_type == User.UserType.MANAGEMENT:
             try:
                 return obj.management_company.company_name
+            except Exception:
+                return None
+        return None
+
+    def get_company_status(self, obj):
+        if obj.user_type == User.UserType.MANAGEMENT:
+            try:
+                return obj.management_company.status
             except Exception:
                 return None
         return None
