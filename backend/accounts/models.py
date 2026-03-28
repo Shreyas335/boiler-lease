@@ -36,6 +36,21 @@ class User(AbstractUser):
         db_table = "accounts_user"
 
 
+class ManagementCompany(models.Model):
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending Review"
+        APPROVED = "approved", "Approved"
+        REJECTED = "rejected", "Rejected"
+
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="management_company")
+    company_name = models.CharField(max_length=200)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
+
+    def __str__(self):
+        return f"{self.company_name} ({self.get_status_display()})"
+
+
 class FeedbackSubmission(models.Model):
     """Feedback message submitted from the Help page."""
 
