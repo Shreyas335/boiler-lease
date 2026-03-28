@@ -42,7 +42,15 @@ class ManagementCompany(models.Model):
 
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="management_company")
     company_name = models.CharField(max_length=200)
+    guidelines = models.JSONField(default=list, blank=True)
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
+    rejection_reason = models.TextField(blank=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name_plural = "Management companies"
 
     def __str__(self):
         return f"{self.company_name} ({self.get_status_display()})"
