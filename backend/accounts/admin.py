@@ -1,7 +1,10 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 
+from django.utils import timezone
+
 from .models import (
+    CompanyDocument,
     FavoriteListing,
     FeedbackSubmission,
     ListingAmenity,
@@ -27,6 +30,26 @@ class UserAdmin(BaseUserAdmin):
     )
 
 
+class CompanyDocumentInline(admin.TabularInline):
+    model = CompanyDocument
+    extra = 0
+    readonly_fields = ("original_filename", "document_type", "uploaded_at")
+    fields = ("document_type", "file", "original_filename", "uploaded_at")
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+
+def approve_selected(modeladmin, request, queryset):
+    queryset.update(status=ManagementCompany.Status.APPROVED, reviewed_at=timezone.now())
+approve_selected.short_description = "Approve selected companies"
+
+
+def reject_selected(modeladmin, request, queryset):
+    queryset.update(status=ManagementCompany.Status.REJECTED, reviewed_at=timezone.now())
+reject_selected.short_description = "Reject selected companies"
+
+
 @admin.register(ManagementCompany)
 class ManagementCompanyAdmin(admin.ModelAdmin):
     list_display = ("company_name", "user", "status", "created_at")
@@ -38,6 +61,8 @@ class ManagementCompanyAdmin(admin.ModelAdmin):
         ("Review", {"fields": ("status", "rejection_reason", "reviewed_at")}),
         ("Timestamps", {"fields": ("created_at", "updated_at")}),
     )
+    inlines = [CompanyDocumentInline]
+    actions = [approve_selected, reject_selected]
 
 
 @admin.register(FeedbackSubmission)
