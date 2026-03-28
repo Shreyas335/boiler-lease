@@ -21,10 +21,12 @@ from rest_framework.response import Response
 from .email_verification import send_2fa_code_email, send_password_reset_email, send_verification_email
 
 from .models import (
+    CompanyDocument,
     FavoriteListing,
     ListingAmenity,
     ListingAmenityMap,
     ListingMedia,
+    ManagementCompany,
     PasswordResetToken,
     PropertyBooking,
     PropertyListing,
@@ -122,7 +124,10 @@ def _sort_property_listings(queryset, sort_by, order):
 def register(request):
     serializer = RegisterSerializer(data=request.data)
     if serializer.is_valid():
+        company_name = request.data.get("company_name", "")
         user = serializer.save()
+        if user.user_type == User.UserType.MANAGEMENT:
+            ManagementCompany.objects.create(user=user, company_name=company_name)
         login(request, user)
         try:
             send_verification_email(user)
