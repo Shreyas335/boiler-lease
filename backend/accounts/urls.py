@@ -40,4 +40,6 @@ urlpatterns = [
     path("favorites/", views.my_favorite_listings),
     path("favorites/<int:listing_id>/", views.favorite_listing_toggle),
     path("company/status/", views.company_status),
+    path("company/documents/", views.company_documents),
+    path("company/documents/<int:pk>/", views.company_document_delete),
 ]
