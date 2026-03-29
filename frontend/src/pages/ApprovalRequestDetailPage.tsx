@@ -5,10 +5,12 @@ import {
   Button,
   Card,
   CardContent,
+  CardMedia,
   Chip,
   CircularProgress,
   Container,
   Divider,
+  Grid,
   Stack,
   TextField,
   Typography,
@@ -157,34 +159,143 @@ export default function ApprovalRequestDetailPage() {
           Submitted by {request.subleaser_email} on {new Date(request.created_at).toLocaleDateString()}
         </Typography>
 
+        {/* Photos */}
+        {listing.media.length > 0 && (
+          <Card sx={{ mb: 3 }}>
+            <CardContent>
+              <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+                Photos ({listing.media.length})
+              </Typography>
+              <Grid container spacing={1}>
+                {listing.media.map((m) => (
+                  <Grid key={m.id} size={{ xs: 6, sm: 4, md: 3 }}>
+                    <CardMedia
+                      component="img"
+                      image={m.access_url ?? m.file_url}
+                      alt="listing photo"
+                      sx={{ borderRadius: 1, aspectRatio: "4/3", objectFit: "cover", width: "100%" }}
+                    />
+                  </Grid>
+                ))}
+              </Grid>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Listing details */}
         <Card sx={{ mb: 3 }}>
           <CardContent>
             <Typography variant="subtitle2" color="text.secondary" gutterBottom>
               Listing Details
             </Typography>
-            <Stack spacing={0.5}>
-              <Typography variant="body2">
-                <strong>Address:</strong> {listing.street_line_1}{listing.street_line_2 ? `, ${listing.street_line_2}` : ""}, {listing.city}, {listing.state} {listing.postal_code}
+
+            {listing.description && (
+              <Typography variant="body2" sx={{ mb: 2 }}>
+                {listing.description}
               </Typography>
-              <Typography variant="body2">
-                <strong>Rent:</strong> {formatMoney(listing.monthly_rent)}/mo · <strong>Deposit:</strong> {formatMoney(listing.security_deposit)}
-              </Typography>
-              <Typography variant="body2">
-                <strong>Beds/Baths:</strong> {listing.bedrooms} bed / {listing.bathrooms} bath
-              </Typography>
-              <Typography variant="body2">
-                <strong>Furnished:</strong> {listing.furnished_status} · <strong>Pets:</strong> {listing.pets_allowed ? "Allowed" : "Not allowed"} · <strong>Utilities:</strong> {listing.utilities_included ? "Included" : "Not included"}
-              </Typography>
-              <Typography variant="body2">
-                <strong>Available:</strong> {listing.availability_start_date} → {listing.availability_end_date}
-              </Typography>
-              {listing.amenities.length > 0 && (
+            )}
+
+            <Grid container spacing={1.5}>
+              <Grid size={{ xs: 12 }}>
                 <Typography variant="body2">
-                  <strong>Amenities:</strong> {listing.amenities.map((a) => a.label).join(", ")}
+                  <strong>Address:</strong> {listing.street_line_1}{listing.street_line_2 ? `, ${listing.street_line_2}` : ""}, {listing.city}, {listing.state} {listing.postal_code}
                 </Typography>
+              </Grid>
+              <Grid size={{ xs: 6, sm: 3 }}>
+                <Typography variant="body2"><strong>Rent</strong></Typography>
+                <Typography variant="body2">{formatMoney(listing.monthly_rent)}/mo</Typography>
+              </Grid>
+              <Grid size={{ xs: 6, sm: 3 }}>
+                <Typography variant="body2"><strong>Deposit</strong></Typography>
+                <Typography variant="body2">{formatMoney(listing.security_deposit)}</Typography>
+              </Grid>
+              <Grid size={{ xs: 6, sm: 3 }}>
+                <Typography variant="body2"><strong>Beds / Baths</strong></Typography>
+                <Typography variant="body2">{listing.bedrooms} bed / {listing.bathrooms} bath</Typography>
+              </Grid>
+              {listing.square_feet && (
+                <Grid size={{ xs: 6, sm: 3 }}>
+                  <Typography variant="body2"><strong>Sq ft</strong></Typography>
+                  <Typography variant="body2">{listing.square_feet.toLocaleString()}</Typography>
+                </Grid>
               )}
-            </Stack>
+              <Grid size={{ xs: 6, sm: 3 }}>
+                <Typography variant="body2"><strong>Type</strong></Typography>
+                <Typography variant="body2" sx={{ textTransform: "capitalize" }}>{listing.property_type}</Typography>
+              </Grid>
+              <Grid size={{ xs: 6, sm: 3 }}>
+                <Typography variant="body2"><strong>Furnished</strong></Typography>
+                <Typography variant="body2" sx={{ textTransform: "capitalize" }}>{listing.furnished_status.replace("_", " ")}</Typography>
+              </Grid>
+              <Grid size={{ xs: 6, sm: 3 }}>
+                <Typography variant="body2"><strong>Pets</strong></Typography>
+                <Typography variant="body2">{listing.pets_allowed ? "Allowed" : "Not allowed"}</Typography>
+              </Grid>
+              <Grid size={{ xs: 6, sm: 3 }}>
+                <Typography variant="body2"><strong>Smoking</strong></Typography>
+                <Typography variant="body2">{listing.smoking_allowed ? "Allowed" : "Not allowed"}</Typography>
+              </Grid>
+              <Grid size={{ xs: 6, sm: 3 }}>
+                <Typography variant="body2"><strong>Utilities</strong></Typography>
+                <Typography variant="body2">{listing.utilities_included ? "Included" : "Not included"}</Typography>
+              </Grid>
+              <Grid size={{ xs: 6, sm: 3 }}>
+                <Typography variant="body2"><strong>Parking</strong></Typography>
+                <Typography variant="body2">{listing.parking_available ? "Available" : "Not available"}</Typography>
+              </Grid>
+              {listing.parking_details && (
+                <Grid size={{ xs: 12 }}>
+                  <Typography variant="body2"><strong>Parking details:</strong> {listing.parking_details}</Typography>
+                </Grid>
+              )}
+              <Grid size={{ xs: 12 }}>
+                <Typography variant="body2">
+                  <strong>Available:</strong> {listing.availability_start_date} → {listing.availability_end_date}
+                </Typography>
+              </Grid>
+              {(listing.lease_term_min_months || listing.lease_term_max_months) && (
+                <Grid size={{ xs: 12 }}>
+                  <Typography variant="body2">
+                    <strong>Lease term:</strong>{" "}
+                    {listing.lease_term_min_months && `${listing.lease_term_min_months} mo min`}
+                    {listing.lease_term_min_months && listing.lease_term_max_months && " · "}
+                    {listing.lease_term_max_months && `${listing.lease_term_max_months} mo max`}
+                  </Typography>
+                </Grid>
+              )}
+              {listing.amenities.length > 0 && (
+                <Grid size={{ xs: 12 }}>
+                  <Typography variant="body2" sx={{ mb: 0.5 }}><strong>Amenities</strong></Typography>
+                  <Stack direction="row" flexWrap="wrap" gap={0.5}>
+                    {listing.amenities.map((a) => (
+                      <Chip key={a.id} label={a.label} size="small" variant="outlined" />
+                    ))}
+                  </Stack>
+                </Grid>
+              )}
+              {listing.contact_email && (
+                <Grid size={{ xs: 6, sm: 4 }}>
+                  <Typography variant="body2"><strong>Contact email</strong></Typography>
+                  <Typography variant="body2">{listing.contact_email}</Typography>
+                </Grid>
+              )}
+              {listing.contact_phone && (
+                <Grid size={{ xs: 6, sm: 4 }}>
+                  <Typography variant="body2"><strong>Contact phone</strong></Typography>
+                  <Typography variant="body2">{listing.contact_phone}</Typography>
+                </Grid>
+              )}
+              {listing.virtual_tour_url && (
+                <Grid size={{ xs: 12 }}>
+                  <Typography variant="body2">
+                    <strong>Virtual tour:</strong>{" "}
+                    <a href={listing.virtual_tour_url} target="_blank" rel="noopener noreferrer">
+                      {listing.virtual_tour_url}
+                    </a>
+                  </Typography>
+                </Grid>
+              )}
+            </Grid>
           </CardContent>
         </Card>
 
