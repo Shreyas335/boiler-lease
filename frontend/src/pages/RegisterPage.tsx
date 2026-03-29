@@ -33,6 +33,7 @@ export default function RegisterPage() {
   const [userType, setUserType] = useState<UserType>("sublessee");
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
+  const [companyName, setCompanyName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
@@ -58,6 +59,7 @@ export default function RegisterPage() {
         user_type: userType,
         first_name: firstName || undefined,
         last_name: lastName || undefined,
+        company_name: userType === "management" ? companyName : undefined,
       });
       navigate("/dashboard");
     } catch (err) {
@@ -124,6 +126,19 @@ export default function RegisterPage() {
                 </MenuItem>
               ))}
             </TextField>
+            {userType === "management" && (
+              <TextField
+                fullWidth
+                label="Company Name"
+                value={companyName}
+                onChange={(e) => setCompanyName(e.target.value)}
+                required
+                disabled={submitting}
+                error={!!fieldErrors.company_name}
+                helperText={fieldErrors.company_name}
+                sx={{ mb: 2 }}
+              />
+            )}
             <TextField
               fullWidth
               label="Username"
