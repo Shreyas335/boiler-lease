@@ -123,7 +123,6 @@ export interface CreatePropertyListingPayload {
   contact_email?: string;
   contact_phone?: string;
   virtual_tour_url?: string;
-  status: string;
   amenity_codes?: string[];
 }
 
