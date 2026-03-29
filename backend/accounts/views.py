@@ -1345,12 +1345,12 @@ def company_document_delete(request, pk):
 @permission_classes([IsAuthenticated])
 def company_guidelines(request):
     """List all guidelines for this company or create a new one."""
-    if request.method == "GET":
-        guidelines = company.guidelines.all().order_by("name")
-        return Response(GuidelineSerializer(guidelines, many=True).data)
     if not _is_approved_management(request):
         return Response({"detail": "Only approved management companies can access this."}, status=status.HTTP_403_FORBIDDEN)
     company = request.user.management_company
+    if request.method == "GET":
+        guidelines = company.guidelines.all().order_by("name")
+        return Response(GuidelineSerializer(guidelines, many=True).data)
     is_valid, error = validate_guideline_data(request.data)
     if not is_valid:
         return Response({"detail": error}, status=status.HTTP_400_BAD_REQUEST)
@@ -1413,10 +1413,6 @@ def management_company_detail(request, pk):
     return Response(PublicManagementCompanySerializer(company).data)
 
 
-# ---------------------------------------------------------------------------
-# Approval workflow helpers
-# ---------------------------------------------------------------------------
-
 def _check_guideline_compliance(listing, guideline):
     """Return a list of compliance result dicts for each non-null guideline criterion."""
     results = []
@@ -1469,10 +1465,6 @@ def _check_guideline_compliance(listing, guideline):
     return results
 
 
-# ---------------------------------------------------------------------------
-# Task 7: POST /listings/<id>/request-approval/
-# ---------------------------------------------------------------------------
-
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def submit_approval_request(request, listing_id):
@@ -1509,11 +1501,6 @@ def submit_approval_request(request, listing_id):
 
     return Response(ApprovalRequestSummarySerializer(approval_request).data, status=status.HTTP_201_CREATED)
 
-
-# ---------------------------------------------------------------------------
-# Task 8: GET /company/approval-requests/
-# ---------------------------------------------------------------------------
-
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def company_approval_request_list(request):
@@ -1533,10 +1520,6 @@ def company_approval_request_list(request):
     qs = qs.order_by("-created_at")
     return Response(ApprovalRequestSummarySerializer(qs, many=True).data)
 
-
-# ---------------------------------------------------------------------------
-# Task 9: GET /company/approval-requests/<id>/
-# ---------------------------------------------------------------------------
 
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
@@ -1561,10 +1544,6 @@ def company_approval_request_detail(request, pk):
     )
     return Response(serializer.data)
 
-
-# ---------------------------------------------------------------------------
-# Task 10: PATCH /company/approval-requests/<id>/
-# ---------------------------------------------------------------------------
 
 @api_view(["PATCH"])
 @permission_classes([IsAuthenticated])

@@ -600,7 +600,6 @@ class PropertyListingCreateSerializer(serializers.ModelSerializer):
             "contact_email",
             "contact_phone",
             "virtual_tour_url",
-            "status",
             "amenity_codes",
         )
         extra_kwargs = {
@@ -646,6 +645,7 @@ class PropertyListingCreateSerializer(serializers.ModelSerializer):
         owner = self.context["request"].user
         if not validated_data.get("contact_email"):
             validated_data["contact_email"] = owner.email
+        validated_data["status"] = PropertyListing.Status.DRAFT
         listing = PropertyListing.objects.create(owner=owner, **validated_data)
 
         if amenity_codes:
