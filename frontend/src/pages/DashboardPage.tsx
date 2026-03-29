@@ -232,13 +232,21 @@ export default function DashboardPage() {
             </>
           )}
           {user.user_type === "management" && (
-            <Button
-              component={RouterLink}
-              to="/company/verify"
-              variant="outlined"
-            >
-              Upload Documents
-            </Button>
+            <>
+              <Button
+                component={RouterLink}
+                to="/company/verify"
+                variant="outlined"
+              >
+                Upload Documents
+              </Button>
+              <Button variant="outlined" disabled>
+                Guideline Settings
+              </Button>
+              <Button variant="outlined" disabled>
+                Approval Queue
+              </Button>
+            </>
           )}
         </Box>
       </Container>
