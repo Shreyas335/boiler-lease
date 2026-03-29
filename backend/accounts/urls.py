@@ -43,4 +43,5 @@ urlpatterns = [
     path("company/documents/", views.company_documents),
     path("company/documents/<int:pk>/", views.company_document_delete),
     path("company/guidelines/", views.company_guidelines),
+    path("company/guidelines/<int:pk>/", views.company_guideline_detail),
 ]

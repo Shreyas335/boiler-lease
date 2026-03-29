@@ -1336,18 +1336,47 @@ def company_document_delete(request, pk):
     return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-@api_view(["GET", "PUT"])
+@api_view(["GET", "POST"])
 @permission_classes([IsAuthenticated])
 def company_guidelines(request):
+    """List all guidelines for this company or create a new one."""
     if not _is_approved_management(request):
         return Response({"detail": "Only approved management companies can access this."}, status=status.HTTP_403_FORBIDDEN)
     company = request.user.management_company
     if request.method == "GET":
-        return Response({"guidelines": company.guidelines})
-    guidelines = request.data.get("guidelines")
-    is_valid, error = validate_guidelines(guidelines)
+        guidelines = company.guidelines.all().order_by("name")
+        return Response(GuidelineSerializer(guidelines, many=True).data)
+    is_valid, error = validate_guideline_data(request.data)
     if not is_valid:
-        return Response({"guidelines": error}, status=status.HTTP_400_BAD_REQUEST)
-    company.guidelines = guidelines
-    company.save(update_fields=["guidelines", "updated_at"])
-    return Response({"guidelines": company.guidelines})
+        return Response({"detail": error}, status=status.HTTP_400_BAD_REQUEST)
+    serializer = GuidelineSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    serializer.save(company=company)
+    return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+@api_view(["GET", "PUT", "DELETE"])
+@permission_classes([IsAuthenticated])
+def company_guideline_detail(request, pk):
+    """Retrieve, update, or delete a single guideline."""
+    if not _is_approved_management(request):
+        return Response({"detail": "Only approved management companies can access this."}, status=status.HTTP_403_FORBIDDEN)
+    company = request.user.management_company
+    try:
+        guideline = company.guidelines.get(pk=pk)
+    except Guideline.DoesNotExist:
+        return Response({"detail": "Guideline not found."}, status=status.HTTP_404_NOT_FOUND)
+    if request.method == "GET":
+        return Response(GuidelineSerializer(guideline).data)
+    if request.method == "DELETE":
+        guideline.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+    is_valid, error = validate_guideline_data(request.data)
+    if not is_valid:
+        return Response({"detail": error}, status=status.HTTP_400_BAD_REQUEST)
+    serializer = GuidelineSerializer(guideline, data=request.data, partial=True)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    serializer.save()
+    return Response(serializer.data)
