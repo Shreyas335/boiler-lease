@@ -21,23 +21,35 @@ from rest_framework.response import Response
 from .email_verification import send_2fa_code_email, send_password_reset_email, send_verification_email
 
 from .models import (
+    ApprovalRequest,
+    CompanyDocument,
     FavoriteListing,
+    Guideline,
     ListingAmenity,
     ListingAmenityMap,
     ListingMedia,
+    ManagementCompany,
     PasswordResetToken,
     PropertyBooking,
     PropertyListing,
     TransactionRecord,
     User,
 )
+from .guidelines import validate_guideline_data
 from .pagination import PropertyListingPagination
 
 from .serializers import (
     AccountUpdateSerializer,
+    ApprovalRequestCreateSerializer,
+    ApprovalRequestDetailSerializer,
+    ApprovalRequestSummarySerializer,
+    CompanyDocumentSerializer,
+    CompanyDocumentUploadSerializer,
     FavoriteListingSerializer,
     FeedbackSubmissionSerializer,
+    GuidelineSerializer,
     LoginSerializer,
+    ManagementCompanySerializer,
     PasswordChangeSerializer,
     PasswordResetConfirmSerializer,
     PasswordResetRequestSerializer,
@@ -48,6 +60,7 @@ from .serializers import (
     PropertyListingCreateSerializer,
     PropertyListingSerializer,
     PropertyListingSummarySerializer,
+    PublicManagementCompanySerializer,
     RegisterSerializer,
     ListingMediaSerializer,
     ListingMediaUploadSerializer,
@@ -76,6 +89,19 @@ def _hash_token(token):
 
 def _is_sublessee(request):
     return request.user.user_type == User.UserType.SUBLESSEE
+
+
+def _email_verified(request):
+    return request.user.email_verified
+
+
+def _is_approved_management(request):
+    if request.user.user_type != User.UserType.MANAGEMENT:
+        return False
+    try:
+        return request.user.management_company.status == ManagementCompany.Status.APPROVED
+    except ManagementCompany.DoesNotExist:
+        return False
 
 
 def _sort_order_prefix(order):
@@ -122,7 +148,10 @@ def _sort_property_listings(queryset, sort_by, order):
 def register(request):
     serializer = RegisterSerializer(data=request.data)
     if serializer.is_valid():
+        company_name = request.data.get("company_name", "")
         user = serializer.save()
+        if user.user_type == User.UserType.MANAGEMENT:
+            ManagementCompany.objects.create(user=user, company_name=company_name)
         login(request, user)
         try:
             send_verification_email(user)
@@ -566,9 +595,9 @@ def my_property_listings(request):
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def listing_amenities(request):
-    if request.user.user_type != User.UserType.SUBLEASER:
+    if request.user.user_type not in (User.UserType.SUBLEASER, User.UserType.MANAGEMENT):
         return Response(
-            {"detail": "Only subleasers can access listing amenities."},
+            {"detail": "Only subleasers and management companies can access listing amenities."},
             status=status.HTTP_403_FORBIDDEN,
         )
     amenities = ListingAmenity.objects.filter(is_active=True).order_by("label")
@@ -1250,3 +1279,340 @@ def my_favorite_listings(request):
         context={"user": request.user, "favorite_listing_ids": favorite_listing_ids},
     )
     return Response(serializer.data)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def company_status(request):
+    if request.user.user_type != User.UserType.MANAGEMENT:
+        return Response({"detail": "Only management users can access this."}, status=status.HTTP_403_FORBIDDEN)
+    if not _email_verified(request):
+        return Response({"detail": "Email verification required."}, status=status.HTTP_403_FORBIDDEN)
+    try:
+        company = request.user.management_company
+    except ManagementCompany.DoesNotExist:
+        return Response({"detail": "No company found for this user."}, status=status.HTTP_404_NOT_FOUND)
+    return Response(ManagementCompanySerializer(company).data)
+
+
+@api_view(["GET", "POST"])
+@permission_classes([IsAuthenticated])
+def company_documents(request):
+    if request.user.user_type != User.UserType.MANAGEMENT:
+        return Response({"detail": "Only management users can access this."}, status=status.HTTP_403_FORBIDDEN)
+    if not _email_verified(request):
+        return Response({"detail": "Email verification required."}, status=status.HTTP_403_FORBIDDEN)
+    try:
+        company = request.user.management_company
+    except ManagementCompany.DoesNotExist:
+        return Response({"detail": "No company found for this user."}, status=status.HTTP_404_NOT_FOUND)
+    if request.method == "GET":
+        docs = company.documents.all().order_by("-uploaded_at")
+        return Response(CompanyDocumentSerializer(docs, many=True).data)
+    serializer = CompanyDocumentUploadSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    file = serializer.validated_data["file"]
+    doc = CompanyDocument.objects.create(
+        company=company,
+        file=file,
+        document_type=serializer.validated_data["document_type"],
+        original_filename=file.name,
+    )
+    return Response(CompanyDocumentSerializer(doc).data, status=status.HTTP_201_CREATED)
+
+
+@api_view(["DELETE"])
+@permission_classes([IsAuthenticated])
+def company_document_delete(request, pk):
+    if request.user.user_type != User.UserType.MANAGEMENT:
+        return Response({"detail": "Only management users can access this."}, status=status.HTTP_403_FORBIDDEN)
+    if not _email_verified(request):
+        return Response({"detail": "Email verification required."}, status=status.HTTP_403_FORBIDDEN)
+    try:
+        company = request.user.management_company
+    except ManagementCompany.DoesNotExist:
+        return Response({"detail": "No company found for this user."}, status=status.HTTP_404_NOT_FOUND)
+    try:
+        doc = company.documents.get(pk=pk)
+    except CompanyDocument.DoesNotExist:
+        return Response({"detail": "Document not found."}, status=status.HTTP_404_NOT_FOUND)
+    doc.delete()
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+@api_view(["GET", "POST"])
+@permission_classes([IsAuthenticated])
+def company_guidelines(request):
+    """List all guidelines for this company or create a new one."""
+    if not _is_approved_management(request):
+        return Response({"detail": "Only approved management companies can access this."}, status=status.HTTP_403_FORBIDDEN)
+    company = request.user.management_company
+    if request.method == "GET":
+        guidelines = company.guidelines.all().order_by("name")
+        return Response(GuidelineSerializer(guidelines, many=True).data)
+    is_valid, error = validate_guideline_data(request.data)
+    if not is_valid:
+        return Response({"detail": error}, status=status.HTTP_400_BAD_REQUEST)
+    serializer = GuidelineSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    serializer.save(company=company)
+    return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+@api_view(["GET", "PUT", "DELETE"])
+@permission_classes([IsAuthenticated])
+def company_guideline_detail(request, pk):
+    """Retrieve, update, or delete a single guideline."""
+    if not _is_approved_management(request):
+        return Response({"detail": "Only approved management companies can access this."}, status=status.HTTP_403_FORBIDDEN)
+    company = request.user.management_company
+    try:
+        guideline = company.guidelines.get(pk=pk)
+    except Guideline.DoesNotExist:
+        return Response({"detail": "Guideline not found."}, status=status.HTTP_404_NOT_FOUND)
+    if request.method == "GET":
+        return Response(GuidelineSerializer(guideline).data)
+    if request.method == "DELETE":
+        guideline.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+    is_valid, error = validate_guideline_data(request.data)
+    if not is_valid:
+        return Response({"detail": error}, status=status.HTTP_400_BAD_REQUEST)
+    serializer = GuidelineSerializer(guideline, data=request.data, partial=True)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    serializer.save()
+    return Response(serializer.data)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def browse_management_companies(request):
+    """List approved management companies with their building guidelines. Supports ?search= on company name."""
+    qs = ManagementCompany.objects.filter(status=ManagementCompany.Status.APPROVED).prefetch_related("guidelines")
+    search = request.query_params.get("search", "").strip()
+    if search:
+        qs = qs.filter(company_name__icontains=search)
+    qs = qs.order_by("company_name")
+    return Response(PublicManagementCompanySerializer(qs, many=True).data)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def management_company_detail(request, pk):
+    """Retrieve a single approved management company with full guideline details."""
+    # TODO: add company information here also
+    try:
+        company = ManagementCompany.objects.prefetch_related("guidelines").get(
+            pk=pk, status=ManagementCompany.Status.APPROVED
+        )
+    except ManagementCompany.DoesNotExist:
+        return Response({"detail": "Company not found."}, status=status.HTTP_404_NOT_FOUND)
+    return Response(PublicManagementCompanySerializer(company).data)
+
+
+def _check_guideline_compliance(listing, guideline):
+    """Return a list of compliance result dicts for each non-null guideline criterion."""
+    results = []
+
+    def _add(field, label, required, actual, passed):
+        results.append({"field": field, "label": label, "required": required, "actual": actual, "passed": passed})
+
+    if guideline.min_rent is not None:
+        _add("min_rent", "Minimum rent", str(guideline.min_rent), str(listing.monthly_rent),
+             listing.monthly_rent >= guideline.min_rent)
+
+    if guideline.max_rent is not None:
+        _add("max_rent", "Maximum rent", str(guideline.max_rent), str(listing.monthly_rent),
+             listing.monthly_rent <= guideline.max_rent)
+
+    if guideline.min_deposit is not None and listing.security_deposit is not None:
+        _add("min_deposit", "Minimum deposit", str(guideline.min_deposit), str(listing.security_deposit),
+             listing.security_deposit >= guideline.min_deposit)
+
+    if guideline.max_deposit is not None and listing.security_deposit is not None:
+        _add("max_deposit", "Maximum deposit", str(guideline.max_deposit), str(listing.security_deposit),
+             listing.security_deposit <= guideline.max_deposit)
+
+    if guideline.min_availability_days is not None:
+        from datetime import date
+        availability_days = (listing.availability_end_date - listing.availability_start_date).days
+        _add("min_availability_days", "Minimum availability (days)", guideline.min_availability_days,
+             availability_days, availability_days >= guideline.min_availability_days)
+
+    if guideline.utilities_included is not None:
+        _add("utilities_included", "Utilities included", guideline.utilities_included,
+             listing.utilities_included, listing.utilities_included == guideline.utilities_included)
+
+    if guideline.pets_allowed is not None:
+        _add("pets_allowed", "Pets allowed", guideline.pets_allowed,
+             listing.pets_allowed, listing.pets_allowed == guideline.pets_allowed)
+
+    if guideline.furnished_status:
+        _add("furnished_status", "Furnished status", guideline.furnished_status,
+             listing.furnished_status, listing.furnished_status == guideline.furnished_status)
+
+    if guideline.required_amenities:
+        listing_amenity_codes = set(
+            listing.amenity_links.values_list("amenity__code", flat=True)
+        )
+        missing = [code for code in guideline.required_amenities if code not in listing_amenity_codes]
+        _add("required_amenities", "Required amenities", guideline.required_amenities,
+             list(listing_amenity_codes), len(missing) == 0)
+
+    return results
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def submit_approval_request(request, listing_id):
+    """Subleaser submits a listing for approval by a management company."""
+    if request.user.user_type != User.UserType.SUBLEASER:
+        return Response({"detail": "Only subleasers can submit approval requests."}, status=status.HTTP_403_FORBIDDEN)
+
+    try:
+        listing = PropertyListing.objects.get(pk=listing_id, owner=request.user, deleted_at__isnull=True)
+    except PropertyListing.DoesNotExist:
+        return Response({"detail": "Listing not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    if ApprovalRequest.objects.filter(listing=listing, status=ApprovalRequest.Status.PENDING).exists():
+        return Response({"detail": "This listing already has a pending approval request."}, status=status.HTTP_400_BAD_REQUEST)
+
+    serializer = ApprovalRequestCreateSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    data = serializer.validated_data
+    company = ManagementCompany.objects.get(pk=data["management_company_id"])
+    guideline = Guideline.objects.get(pk=data["guideline_id"])
+
+    approval_request = ApprovalRequest.objects.create(
+        listing=listing,
+        management_company=company,
+        guideline=guideline,
+        subleaser_notes=data.get("subleaser_notes", ""),
+        status=ApprovalRequest.Status.PENDING,
+    )
+
+    listing.approval_status = PropertyListing.ApprovalStatus.PENDING
+    listing.save(update_fields=["approval_status", "updated_at"])
+
+    return Response(ApprovalRequestSummarySerializer(approval_request).data, status=status.HTTP_201_CREATED)
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def company_approval_request_list(request):
+    """Management company views their queue of approval requests."""
+    if not _is_approved_management(request):
+        return Response({"detail": "Only approved management companies can access this."}, status=status.HTTP_403_FORBIDDEN)
+
+    company = request.user.management_company
+    qs = ApprovalRequest.objects.filter(management_company=company).select_related(
+        "listing", "guideline", "management_company"
+    )
+
+    filter_status = request.query_params.get("status", "").strip()
+    if filter_status:
+        qs = qs.filter(status=filter_status)
+
+    qs = qs.order_by("-created_at")
+    return Response(ApprovalRequestSummarySerializer(qs, many=True).data)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def company_approval_request_detail(request, pk):
+    """Management company views full detail of one request, including compliance check."""
+    if not _is_approved_management(request):
+        return Response({"detail": "Only approved management companies can access this."}, status=status.HTTP_403_FORBIDDEN)
+
+    company = request.user.management_company
+    try:
+        approval_request = ApprovalRequest.objects.select_related(
+            "listing__owner", "listing__approved_by_company", "guideline", "management_company"
+        ).prefetch_related(
+            "listing__amenity_links__amenity", "listing__media"
+        ).get(pk=pk, management_company=company)
+    except ApprovalRequest.DoesNotExist:
+        return Response({"detail": "Approval request not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    serializer = ApprovalRequestDetailSerializer(
+        approval_request,
+        context={"check_compliance": _check_guideline_compliance},
+    )
+    return Response(serializer.data)
+
+
+@api_view(["PATCH"])
+@permission_classes([IsAuthenticated])
+def company_review_approval_request(request, pk):
+    """Management company approves or rejects an approval request."""
+    if not _is_approved_management(request):
+        return Response({"detail": "Only approved management companies can access this."}, status=status.HTTP_403_FORBIDDEN)
+
+    company = request.user.management_company
+    try:
+        approval_request = ApprovalRequest.objects.select_related("listing", "management_company").get(
+            pk=pk, management_company=company
+        )
+    except ApprovalRequest.DoesNotExist:
+        return Response({"detail": "Approval request not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    if approval_request.status != ApprovalRequest.Status.PENDING:
+        return Response({"detail": "This request has already been reviewed."}, status=status.HTTP_400_BAD_REQUEST)
+
+    action = request.data.get("action", "").strip()
+    reviewer_notes = request.data.get("reviewer_notes", "").strip()
+
+    if action not in ("approve", "reject"):
+        return Response({"detail": "action must be 'approve' or 'reject'."}, status=status.HTTP_400_BAD_REQUEST)
+
+    if action == "reject" and not reviewer_notes:
+        return Response({"detail": "reviewer_notes is required when rejecting."}, status=status.HTTP_400_BAD_REQUEST)
+
+    now = timezone.now()
+    listing = approval_request.listing
+
+    if action == "approve":
+        approval_request.status = ApprovalRequest.Status.APPROVED
+        approval_request.reviewer_notes = reviewer_notes
+        approval_request.reviewed_at = now
+        approval_request.save(update_fields=["status", "reviewer_notes", "reviewed_at", "updated_at"])
+
+        listing.approval_status = PropertyListing.ApprovalStatus.APPROVED
+        listing.approved_by_company = company
+        listing.status = PropertyListing.ListingStatus.PUBLISHED
+        listing.published_at = now
+        listing.save(update_fields=["approval_status", "approved_by_company", "status", "published_at", "updated_at"])
+
+    else:  # reject
+        approval_request.status = ApprovalRequest.Status.REJECTED
+        approval_request.reviewer_notes = reviewer_notes
+        approval_request.reviewed_at = now
+        approval_request.save(update_fields=["status", "reviewer_notes", "reviewed_at", "updated_at"])
+
+        listing.approval_status = PropertyListing.ApprovalStatus.REJECTED
+        listing.save(update_fields=["approval_status", "updated_at"])
+
+        try:
+            listing_url = f"{settings.FRONTEND_URL}/my-listings"
+            send_mail(
+                subject="Your listing was not approved",
+                message=(
+                    f"Hi {listing.owner.first_name or listing.owner.username},\n\n"
+                    f"Unfortunately, your listing '{listing.title}' was not approved by "
+                    f"{company.company_name}.\n\n"
+                    f"Reason: {reviewer_notes}\n\n"
+                    f"You can view your listing and resubmit for approval here:\n{listing_url}\n\n"
+                    f"— The BoilerLease Team"
+                ),
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[listing.owner.email],
+                fail_silently=True,
+            )
+        except Exception:
+            pass
+
+    return Response(ApprovalRequestSummarySerializer(approval_request).data)
