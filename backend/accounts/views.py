@@ -83,6 +83,10 @@ def _is_sublessee(request):
     return request.user.user_type == User.UserType.SUBLESSEE
 
 
+def _email_verified(request):
+    return request.user.email_verified
+
+
 def _is_approved_management(request):
     if request.user.user_type != User.UserType.MANAGEMENT:
         return False
@@ -1274,6 +1278,8 @@ def my_favorite_listings(request):
 def company_status(request):
     if request.user.user_type != User.UserType.MANAGEMENT:
         return Response({"detail": "Only management users can access this."}, status=status.HTTP_403_FORBIDDEN)
+    if not _email_verified(request):
+        return Response({"detail": "Email verification required."}, status=status.HTTP_403_FORBIDDEN)
     try:
         company = request.user.management_company
     except ManagementCompany.DoesNotExist:
@@ -1286,6 +1292,8 @@ def company_status(request):
 def company_documents(request):
     if request.user.user_type != User.UserType.MANAGEMENT:
         return Response({"detail": "Only management users can access this."}, status=status.HTTP_403_FORBIDDEN)
+    if not _email_verified(request):
+        return Response({"detail": "Email verification required."}, status=status.HTTP_403_FORBIDDEN)
     try:
         company = request.user.management_company
     except ManagementCompany.DoesNotExist:
@@ -1311,6 +1319,8 @@ def company_documents(request):
 def company_document_delete(request, pk):
     if request.user.user_type != User.UserType.MANAGEMENT:
         return Response({"detail": "Only management users can access this."}, status=status.HTTP_403_FORBIDDEN)
+    if not _email_verified(request):
+        return Response({"detail": "Email verification required."}, status=status.HTTP_403_FORBIDDEN)
     try:
         company = request.user.management_company
     except ManagementCompany.DoesNotExist:
