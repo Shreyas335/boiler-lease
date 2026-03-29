@@ -7,6 +7,7 @@ from .models import (
     CompanyDocument,
     FavoriteListing,
     FeedbackSubmission,
+    Guideline,
     ListingAmenity,
     ListingAmenityMap,
     ListingMedia,
@@ -838,8 +839,23 @@ class TransactionRecordSerializer(serializers.ModelSerializer):
 class ManagementCompanySerializer(serializers.ModelSerializer):
     class Meta:
         model = ManagementCompany
-        fields = ("id", "company_name", "status", "rejection_reason", "guidelines", "reviewed_at", "created_at")
+        fields = ("id", "company_name", "status", "rejection_reason", "reviewed_at", "created_at")
         read_only_fields = ("id", "status", "rejection_reason", "reviewed_at", "created_at")
+
+
+class GuidelineSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Guideline
+        fields = (
+            "id", "name",
+            "min_rent", "max_rent",
+            "min_deposit", "max_deposit",
+            "min_availability_days",
+            "utilities_included", "pets_allowed",
+            "furnished_status", "required_amenities",
+            "created_at", "updated_at",
+        )
+        read_only_fields = ("id", "created_at", "updated_at")
 
 
 class CompanyDocumentSerializer(serializers.ModelSerializer):
