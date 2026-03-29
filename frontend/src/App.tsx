@@ -21,6 +21,7 @@ import CurrentBookingsPage from "./pages/CurrentBookingsPage";
 import PastBookingsPage from "./pages/PastBookingsPage";
 import FavoritesPage from "./pages/FavoritesPage";
 import PropertyDetailPage from "./pages/PropertyDetailPage";
+import BookingRequestsPage from "./pages/BookingRequestsPage";
 
 function App() {
   return (
@@ -81,6 +82,14 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <MyListingsPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/booking-requests"
+                element={
+                  <ProtectedRoute>
+                    <BookingRequestsPage />
                   </ProtectedRoute>
                 }
               />
