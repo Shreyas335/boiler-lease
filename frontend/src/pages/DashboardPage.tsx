@@ -9,6 +9,7 @@ import {
   Chip,
   Alert,
   Stack,
+  Tooltip,
   type ChipProps,
 } from "@mui/material";
 import { Link as RouterLink } from "react-router-dom";
@@ -240,12 +241,20 @@ export default function DashboardPage() {
               >
                 Upload Documents
               </Button>
-              <Button variant="outlined" disabled>
-                Guideline Settings
-              </Button>
-              <Button variant="outlined" disabled>
-                Approval Queue
-              </Button>
+              <Tooltip title={user.company_status !== "approved" ? "Company verification required" : ""}>
+                <span>
+                  <Button variant="outlined" disabled={user.company_status !== "approved"}>
+                    Guideline Settings
+                  </Button>
+                </span>
+              </Tooltip>
+              <Tooltip title={user.company_status !== "approved" ? "Company verification required" : ""}>
+                <span>
+                  <Button variant="outlined" disabled={user.company_status !== "approved"}>
+                    Approval Queue
+                  </Button>
+                </span>
+              </Tooltip>
             </>
           )}
         </Box>
