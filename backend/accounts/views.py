@@ -33,6 +33,7 @@ from .models import (
     TransactionRecord,
     User,
 )
+from .guidelines import validate_guidelines
 from .pagination import PropertyListingPagination
 
 from .serializers import (
@@ -1342,10 +1343,9 @@ def company_guidelines(request):
     if request.method == "GET":
         return Response({"guidelines": company.guidelines})
     guidelines = request.data.get("guidelines")
-    if not isinstance(guidelines, list):
-        return Response({"guidelines": "Must be a list of strings."}, status=status.HTTP_400_BAD_REQUEST)
-    if not all(isinstance(g, str) and g.strip() for g in guidelines):
-        return Response({"guidelines": "Each guideline must be a non-empty string."}, status=status.HTTP_400_BAD_REQUEST)
-    company.guidelines = [g.strip() for g in guidelines]
+    is_valid, error = validate_guidelines(guidelines)
+    if not is_valid:
+        return Response({"guidelines": error}, status=status.HTTP_400_BAD_REQUEST)
+    company.guidelines = guidelines
     company.save(update_fields=["guidelines", "updated_at"])
     return Response({"guidelines": company.guidelines})
