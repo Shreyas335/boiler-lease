@@ -41,3 +41,13 @@ export async function getDocuments(): Promise<CompanyDocument[]> {
 export async function deleteDocument(id: number): Promise<void> {
   await api.delete(`/company/documents/${id}/`);
 }
+
+export async function getGuidelines(): Promise<string[]> {
+  const { data } = await api.get<{ guidelines: string[] }>("/company/guidelines/");
+  return data.guidelines;
+}
+
+export async function saveGuidelines(guidelines: string[]): Promise<string[]> {
+  const { data } = await api.put<{ guidelines: string[] }>("/company/guidelines/", { guidelines });
+  return data.guidelines;
+}

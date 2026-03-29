@@ -261,7 +261,12 @@ export default function DashboardPage() {
             <>
               <Tooltip title={user.company_status !== "approved" ? "Company verification required" : ""}>
                 <span>
-                  <Button variant="outlined" disabled={user.company_status !== "approved"}>
+                  <Button
+                    component={user.company_status === "approved" ? RouterLink : "button"}
+                    to={user.company_status === "approved" ? "/company/guidelines" : undefined}
+                    variant="outlined"
+                    disabled={user.company_status !== "approved"}
+                  >
                     Guideline Settings
                   </Button>
                 </span>
