@@ -23,6 +23,12 @@ interface PropertySummaryCardProps {
     disabled?: boolean;
     color?: "primary" | "error";
   };
+  secondaryActionButton?: {
+    label: string;
+    onClick: () => Promise<void> | void;
+    disabled?: boolean;
+    color?: "primary" | "error";
+  };
 }
 
 export default function PropertySummaryCard({
@@ -33,6 +39,7 @@ export default function PropertySummaryCard({
   statusLabel,
   statusColor = "default",
   actionButton,
+  secondaryActionButton,
 }: PropertySummaryCardProps) {
   return (
     <Card>
@@ -103,7 +110,7 @@ export default function PropertySummaryCard({
               </Typography>
               {statusLabel && <Chip size="small" label={statusLabel} color={statusColor} variant="outlined" />}
             </Stack>
-            <Stack direction="row" spacing={1}>
+            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
               {actionButton && (
                 <Button
                   variant="outlined"
@@ -113,6 +120,17 @@ export default function PropertySummaryCard({
                   disabled={actionButton.disabled}
                 >
                   {actionButton.label}
+                </Button>
+              )}
+              {secondaryActionButton && (
+                <Button
+                  variant="outlined"
+                  size="small"
+                  color={secondaryActionButton.color || "primary"}
+                  onClick={secondaryActionButton.onClick}
+                  disabled={secondaryActionButton.disabled}
+                >
+                  {secondaryActionButton.label}
                 </Button>
               )}
               <Button component={RouterLink} to={`/properties/${listing.id}`} variant="text" size="small">

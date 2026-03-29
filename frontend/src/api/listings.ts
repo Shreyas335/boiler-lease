@@ -55,6 +55,7 @@ export interface PropertyListingSummary {
   city: string;
   state: string;
   monthly_rent: string;
+  security_deposit: string | null;
   availability_start_date: string;
   availability_end_date: string;
   status: string;
@@ -72,6 +73,7 @@ export interface BookingRecord {
   booked_at: string;
   monthly_rent_snapshot: string | null;
   security_deposit_snapshot: string | null;
+  deposit_paid_at: string | null;
   status: "pending" | "confirmed" | "declined" | "cancelled";
   status_label: string;
   price: string;
