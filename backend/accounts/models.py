@@ -204,7 +204,14 @@ class PropertyListing(models.Model):
     approval_status = models.CharField(
         max_length=16,
         choices=ApprovalStatus.choices,
-        default=ApprovalStatus.APPROVED,
+        default=ApprovalStatus.PENDING,
+    )
+    approved_by_company = models.ForeignKey(
+        "ManagementCompany",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="approved_listings",
     )
     published_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
