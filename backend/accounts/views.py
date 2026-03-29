@@ -23,6 +23,7 @@ from .email_verification import send_2fa_code_email, send_password_reset_email, 
 from .models import (
     CompanyDocument,
     FavoriteListing,
+    Guideline,
     ListingAmenity,
     ListingAmenityMap,
     ListingMedia,
@@ -33,7 +34,7 @@ from .models import (
     TransactionRecord,
     User,
 )
-from .guidelines import validate_guidelines
+from .guidelines import validate_guideline_data
 from .pagination import PropertyListingPagination
 
 from .serializers import (
@@ -42,6 +43,7 @@ from .serializers import (
     CompanyDocumentUploadSerializer,
     FavoriteListingSerializer,
     FeedbackSubmissionSerializer,
+    GuidelineSerializer,
     LoginSerializer,
     ManagementCompanySerializer,
     PasswordChangeSerializer,

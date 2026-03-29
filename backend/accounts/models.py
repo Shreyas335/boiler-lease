@@ -42,7 +42,6 @@ class ManagementCompany(models.Model):
 
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="management_company")
     company_name = models.CharField(max_length=200)
-    guidelines = models.JSONField(default=list, blank=True)
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
     rejection_reason = models.TextField(blank=True)
     reviewed_at = models.DateTimeField(null=True, blank=True)
@@ -71,6 +70,45 @@ class CompanyDocument(models.Model):
 
     def __str__(self):
         return f"{self.original_filename} ({self.get_document_type_display()})"
+
+
+class Guideline(models.Model):
+    """A named set of listing requirements for a building managed by a ManagementCompany."""
+
+    class FurnishedStatus(models.TextChoices):
+        FURNISHED = "furnished", "Furnished"
+        UNFURNISHED = "unfurnished", "Unfurnished"
+        PARTIALLY_FURNISHED = "partially_furnished", "Partially Furnished"
+
+    company = models.ForeignKey(ManagementCompany, on_delete=models.CASCADE, related_name="guidelines")
+    name = models.CharField(max_length=200, help_text="e.g. Verve Apartments, The Hub")
+
+    # Rent requirements
+    min_rent = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    max_rent = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+
+    # Deposit requirements
+    min_deposit = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    max_deposit = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+
+    # Availability
+    min_availability_days = models.PositiveIntegerField(null=True, blank=True)
+
+    # Property requirements — null means no requirement
+    utilities_included = models.BooleanField(null=True, blank=True)
+    pets_allowed = models.BooleanField(null=True, blank=True)
+    furnished_status = models.CharField(
+        max_length=24, choices=FurnishedStatus.choices, null=True, blank=True
+    )
+
+    # Required amenities (list of amenity codes)
+    required_amenities = models.JSONField(default=list, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.name} — {self.company.company_name}"
 
 
 class FeedbackSubmission(models.Model):
