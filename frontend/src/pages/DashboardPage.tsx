@@ -248,15 +248,17 @@ export default function DashboardPage() {
               </Button>
             </>
           )}
-          {user.user_type === "management" && (
-            <>
-              <Button
+          { user.user_type === "management" && user.company_status !== "approved" &&
+            <Button
                 component={RouterLink}
                 to="/company/verify"
                 variant="outlined"
               >
                 Upload Documents
               </Button>
+          }
+          {user.user_type === "management" && (
+            <>
               <Tooltip title={user.company_status !== "approved" ? "Company verification required" : ""}>
                 <span>
                   <Button variant="outlined" disabled={user.company_status !== "approved"}>
