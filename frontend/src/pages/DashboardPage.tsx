@@ -231,6 +231,15 @@ export default function DashboardPage() {
               </Button>
             </>
           )}
+          {user.user_type === "management" && (
+            <Button
+              component={RouterLink}
+              to="/company/verify"
+              variant="outlined"
+            >
+              Upload Documents
+            </Button>
+          )}
         </Box>
       </Container>
     </Box>
