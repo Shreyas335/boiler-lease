@@ -3,6 +3,7 @@ import {
   Alert,
   Box,
   Button,
+  Checkbox,
   Chip,
   CircularProgress,
   Container,
@@ -12,274 +13,282 @@ import {
   DialogTitle,
   FormControl,
   FormControlLabel,
+  FormGroup,
+  FormLabel,
   IconButton,
   InputLabel,
   MenuItem,
   Paper,
   Select,
   Stack,
-  Switch,
   TextField,
   Tooltip,
   Typography,
 } from "@mui/material";
 import AddIcon from "@mui/icons-material/Add";
 import DeleteIcon from "@mui/icons-material/Delete";
-import AttachMoneyIcon from "@mui/icons-material/AttachMoney";
-import CalendarMonthIcon from "@mui/icons-material/CalendarMonth";
-import PowerIcon from "@mui/icons-material/Power";
-import PetsIcon from "@mui/icons-material/Pets";
-import WeekendIcon from "@mui/icons-material/Weekend";
-import StarIcon from "@mui/icons-material/Star";
-import HomeIcon from "@mui/icons-material/Home";
-import { getGuidelines, saveGuidelines } from "../api/company";
+import EditIcon from "@mui/icons-material/Edit";
+import HomeWorkIcon from "@mui/icons-material/HomeWork";
+import {
+  getGuidelines,
+  createGuideline,
+  updateGuideline,
+  deleteGuideline,
+} from "../api/company";
 import { getListingAmenities } from "../api/listings";
 import type { ListingAmenity } from "../api/listings";
-import type {
-  Guideline,
-  GuidelineType,
-  FurnishedStatus,
-} from "../types/guidelines";
-import { GUIDELINE_TYPE_LABELS, guidelineToHuman } from "../types/guidelines";
+import type { GuidelineRecord, GuidelineFormData } from "../types/guidelines";
+import { emptyForm, recordToForm } from "../types/guidelines";
 
-const GUIDELINE_TYPES: GuidelineType[] = [
-  "rent_range",
-  "deposit_range",
-  "min_availability_days",
-  "utilities_included",
-  "pets_allowed",
-  "furnished_status",
-  "amenity_required",
-];
+// ─── Guideline form dialog ────────────────────────────────────────────────────
 
-const GUIDELINE_ICONS: Record<GuidelineType, React.ReactNode> = {
-  rent_range: <AttachMoneyIcon fontSize="small" />,
-  deposit_range: <AttachMoneyIcon fontSize="small" />,
-  min_availability_days: <CalendarMonthIcon fontSize="small" />,
-  utilities_included: <PowerIcon fontSize="small" />,
-  pets_allowed: <PetsIcon fontSize="small" />,
-  furnished_status: <WeekendIcon fontSize="small" />,
-  amenity_required: <StarIcon fontSize="small" />,
-};
-
-function buildDefault(type: GuidelineType): Guideline {
-  switch (type) {
-    case "rent_range": return { type, min_rent: undefined, max_rent: undefined };
-    case "deposit_range": return { type, min_deposit: undefined, max_deposit: undefined };
-    case "min_availability_days": return { type, min_days: 30 };
-    case "utilities_included": return { type, required: true };
-    case "pets_allowed": return { type, required: false };
-    case "furnished_status": return { type, value: "furnished" };
-    case "amenity_required": return { type, amenity_code: "", amenity_label: "" };
-  }
-}
-
-interface AddDialogProps {
+interface GuidelineDialogProps {
   open: boolean;
+  initial: GuidelineFormData;
   amenities: ListingAmenity[];
+  title: string;
   onClose: () => void;
-  onAdd: (g: Guideline) => void;
+  onSave: (form: GuidelineFormData) => Promise<void>;
 }
 
-function AddGuidelineDialog({ open, amenities, onClose, onAdd }: AddDialogProps) {
-  const [selectedType, setSelectedType] = useState<GuidelineType>("rent_range");
-  const [draft, setDraft] = useState<Guideline>(buildDefault("rent_range"));
+function GuidelineDialog({ open, initial, amenities, title, onClose, onSave }: GuidelineDialogProps) {
+  const [form, setForm] = useState<GuidelineFormData>(initial);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  function handleTypeChange(type: GuidelineType) {
-    setSelectedType(type);
-    setDraft(buildDefault(type));
+  useEffect(() => {
+    setForm(initial);
     setError(null);
+  }, [initial, open]);
+
+  function set<K extends keyof GuidelineFormData>(key: K, value: GuidelineFormData[K]) {
+    setForm((prev) => ({ ...prev, [key]: value }));
   }
 
-  function handleAdd() {
-    if (draft.type === "rent_range") {
-      if (draft.min_rent == null && draft.max_rent == null) {
-        setError("Enter at least one of min or max rent.");
-        return;
-      }
-      if (draft.min_rent != null && draft.max_rent != null && draft.min_rent > draft.max_rent) {
-        setError("Min rent cannot be greater than max rent.");
-        return;
-      }
-    }
-    if (draft.type === "deposit_range") {
-      if (draft.min_deposit == null && draft.max_deposit == null) {
-        setError("Enter at least one of min or max deposit.");
-        return;
-      }
-      if (draft.min_deposit != null && draft.max_deposit != null && draft.min_deposit > draft.max_deposit) {
-        setError("Min deposit cannot be greater than max deposit.");
-        return;
-      }
-    }
-    if (draft.type === "min_availability_days" && draft.min_days < 1) {
-      setError("Minimum days must be at least 1.");
-      return;
-    }
-    if (draft.type === "amenity_required" && !draft.amenity_code) {
-      setError("Please select an amenity.");
-      return;
-    }
-    onAdd(draft);
-    setSelectedType("rent_range");
-    setDraft(buildDefault("rent_range"));
-    setError(null);
+  function toggleAmenity(code: string) {
+    setForm((prev) => {
+      const has = prev.required_amenities.includes(code);
+      return {
+        ...prev,
+        required_amenities: has
+          ? prev.required_amenities.filter((c) => c !== code)
+          : [...prev.required_amenities, code],
+      };
+    });
   }
 
-  function renderFields() {
-    switch (draft.type) {
-      case "rent_range":
-        return (
-          <Stack direction="row" spacing={2}>
-            <TextField
-              label="Min rent ($)"
-              type="number"
-              fullWidth
-              value={draft.min_rent ?? ""}
-              onChange={(e) => setDraft({ ...draft, min_rent: e.target.value ? Number(e.target.value) : undefined })}
-              inputProps={{ min: 0 }}
-            />
-            <TextField
-              label="Max rent ($)"
-              type="number"
-              fullWidth
-              value={draft.max_rent ?? ""}
-              onChange={(e) => setDraft({ ...draft, max_rent: e.target.value ? Number(e.target.value) : undefined })}
-              inputProps={{ min: 0 }}
-            />
-          </Stack>
-        );
-      case "deposit_range":
-        return (
-          <Stack direction="row" spacing={2}>
-            <TextField
-              label="Min deposit ($)"
-              type="number"
-              fullWidth
-              value={draft.min_deposit ?? ""}
-              onChange={(e) => setDraft({ ...draft, min_deposit: e.target.value ? Number(e.target.value) : undefined })}
-              inputProps={{ min: 0 }}
-            />
-            <TextField
-              label="Max deposit ($)"
-              type="number"
-              fullWidth
-              value={draft.max_deposit ?? ""}
-              onChange={(e) => setDraft({ ...draft, max_deposit: e.target.value ? Number(e.target.value) : undefined })}
-              inputProps={{ min: 0 }}
-            />
-          </Stack>
-        );
-      case "min_availability_days":
-        return (
-          <TextField
-            label="Minimum days available"
-            type="number"
-            fullWidth
-            value={draft.min_days}
-            onChange={(e) => setDraft({ ...draft, min_days: Number(e.target.value) })}
-            inputProps={{ min: 1 }}
-            helperText="e.g. 30 = at least one month, 90 = at least one semester"
-          />
-        );
-      case "utilities_included":
-        return (
-          <FormControlLabel
-            control={
-              <Switch
-                checked={draft.required}
-                onChange={(e) => setDraft({ ...draft, required: e.target.checked })}
-              />
-            }
-            label={draft.required ? "Utilities must be included" : "Utilities must not be included"}
-          />
-        );
-      case "pets_allowed":
-        return (
-          <FormControlLabel
-            control={
-              <Switch
-                checked={draft.required}
-                onChange={(e) => setDraft({ ...draft, required: e.target.checked })}
-              />
-            }
-            label={draft.required ? "Must allow pets" : "Must not allow pets"}
-          />
-        );
-      case "furnished_status":
-        return (
-          <FormControl fullWidth>
-            <InputLabel>Furnished status</InputLabel>
-            <Select
-              value={draft.value}
-              label="Furnished status"
-              onChange={(e) => setDraft({ ...draft, value: e.target.value as FurnishedStatus })}
-            >
-              <MenuItem value="furnished">Furnished</MenuItem>
-              <MenuItem value="unfurnished">Unfurnished</MenuItem>
-              <MenuItem value="partially_furnished">Partially Furnished</MenuItem>
-            </Select>
-          </FormControl>
-        );
-      case "amenity_required":
-        return (
-          <FormControl fullWidth>
-            <InputLabel>Amenity</InputLabel>
-            <Select
-              value={draft.amenity_code}
-              label="Amenity"
-              onChange={(e) => {
-                const amenity = amenities.find((a) => a.code === e.target.value);
-                if (amenity) setDraft({ ...draft, amenity_code: amenity.code, amenity_label: amenity.label });
-              }}
-            >
-              {amenities.map((a) => (
-                <MenuItem key={a.code} value={a.code}>{a.label}</MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-        );
+  async function handleSave() {
+    if (!form.name.trim()) {
+      setError("Building name is required.");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      await onSave(form);
+    } catch (e: unknown) {
+      const msg =
+        e instanceof Error ? e.message : "Failed to save guideline.";
+      setError(msg);
+    } finally {
+      setSaving(false);
     }
   }
 
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
-      <DialogTitle>Add Guideline</DialogTitle>
+      <DialogTitle>{title}</DialogTitle>
       <DialogContent>
-        <Stack spacing={3} mt={1}>
+        <Stack spacing={2.5} mt={1}>
+          <TextField
+            label="Building name"
+            placeholder="e.g. Verve Apartments"
+            fullWidth
+            required
+            value={form.name}
+            onChange={(e) => set("name", e.target.value)}
+          />
+
+          <Stack direction="row" spacing={2}>
+            <TextField
+              label="Min monthly rent ($)"
+              type="number"
+              fullWidth
+              value={form.min_rent}
+              onChange={(e) => set("min_rent", e.target.value)}
+              inputProps={{ min: 0 }}
+            />
+            <TextField
+              label="Max monthly rent ($)"
+              type="number"
+              fullWidth
+              value={form.max_rent}
+              onChange={(e) => set("max_rent", e.target.value)}
+              inputProps={{ min: 0 }}
+            />
+          </Stack>
+
+          <Stack direction="row" spacing={2}>
+            <TextField
+              label="Min security deposit ($)"
+              type="number"
+              fullWidth
+              value={form.min_deposit}
+              onChange={(e) => set("min_deposit", e.target.value)}
+              inputProps={{ min: 0 }}
+            />
+            <TextField
+              label="Max security deposit ($)"
+              type="number"
+              fullWidth
+              value={form.max_deposit}
+              onChange={(e) => set("max_deposit", e.target.value)}
+              inputProps={{ min: 0 }}
+            />
+          </Stack>
+
+          <TextField
+            label="Minimum availability (days)"
+            type="number"
+            fullWidth
+            value={form.min_availability_days}
+            onChange={(e) => set("min_availability_days", e.target.value)}
+            inputProps={{ min: 1 }}
+            helperText="e.g. 30 = one month, 120 = one semester"
+          />
+
           <FormControl fullWidth>
-            <InputLabel>Guideline type</InputLabel>
+            <InputLabel>Utilities included</InputLabel>
             <Select
-              value={selectedType}
-              label="Guideline type"
-              onChange={(e) => handleTypeChange(e.target.value as GuidelineType)}
+              value={form.utilities_included}
+              label="Utilities included"
+              onChange={(e) => set("utilities_included", e.target.value as GuidelineFormData["utilities_included"])}
             >
-              {GUIDELINE_TYPES.map((t) => (
-                <MenuItem key={t} value={t}>{GUIDELINE_TYPE_LABELS[t]}</MenuItem>
-              ))}
+              <MenuItem value="">No requirement</MenuItem>
+              <MenuItem value="true">Must be included</MenuItem>
+              <MenuItem value="false">Must not be included</MenuItem>
             </Select>
           </FormControl>
-          {renderFields()}
+
+          <FormControl fullWidth>
+            <InputLabel>Pets allowed</InputLabel>
+            <Select
+              value={form.pets_allowed}
+              label="Pets allowed"
+              onChange={(e) => set("pets_allowed", e.target.value as GuidelineFormData["pets_allowed"])}
+            >
+              <MenuItem value="">No requirement</MenuItem>
+              <MenuItem value="true">Must allow pets</MenuItem>
+              <MenuItem value="false">Must not allow pets</MenuItem>
+            </Select>
+          </FormControl>
+
+          <FormControl fullWidth>
+            <InputLabel>Furnished status</InputLabel>
+            <Select
+              value={form.furnished_status}
+              label="Furnished status"
+              onChange={(e) => set("furnished_status", e.target.value as GuidelineFormData["furnished_status"])}
+            >
+              <MenuItem value="">No requirement</MenuItem>
+              <MenuItem value="furnished">Furnished</MenuItem>
+              <MenuItem value="unfurnished">Unfurnished</MenuItem>
+              <MenuItem value="partially_furnished">Partially Furnished</MenuItem>
+            </Select>
+          </FormControl>
+
+          {amenities.length > 0 && (
+            <FormControl component="fieldset">
+              <FormLabel component="legend">Required amenities</FormLabel>
+              <FormGroup row>
+                {amenities.map((a) => (
+                  <FormControlLabel
+                    key={a.code}
+                    control={
+                      <Checkbox
+                        size="small"
+                        checked={form.required_amenities.includes(a.code)}
+                        onChange={() => toggleAmenity(a.code)}
+                      />
+                    }
+                    label={a.label}
+                  />
+                ))}
+              </FormGroup>
+            </FormControl>
+          )}
+
           {error && <Alert severity="error">{error}</Alert>}
         </Stack>
       </DialogContent>
       <DialogActions>
-        <Button onClick={onClose}>Cancel</Button>
-        <Button variant="contained" onClick={handleAdd}>Add</Button>
+        <Button onClick={onClose} disabled={saving}>Cancel</Button>
+        <Button variant="contained" onClick={handleSave} disabled={saving}>
+          {saving ? <CircularProgress size={16} color="inherit" /> : "Save"}
+        </Button>
       </DialogActions>
     </Dialog>
   );
 }
 
+// ─── Human-readable summary of a guideline ───────────────────────────────────
+
+function GuidelineSummary({ g, amenities }: { g: GuidelineRecord; amenities: ListingAmenity[] }) {
+  const chips: string[] = [];
+
+  const minR = g.min_rent ? Number(g.min_rent) : null;
+  const maxR = g.max_rent ? Number(g.max_rent) : null;
+  if (minR != null && maxR != null)
+    chips.push(`Rent $${minR.toLocaleString()}–$${maxR.toLocaleString()}`);
+  else if (minR != null) chips.push(`Rent ≥ $${minR.toLocaleString()}`);
+  else if (maxR != null) chips.push(`Rent ≤ $${maxR.toLocaleString()}`);
+
+  const minD = g.min_deposit ? Number(g.min_deposit) : null;
+  const maxD = g.max_deposit ? Number(g.max_deposit) : null;
+  if (minD != null && maxD != null)
+    chips.push(`Deposit $${minD.toLocaleString()}–$${maxD.toLocaleString()}`);
+  else if (minD != null) chips.push(`Deposit ≥ $${minD.toLocaleString()}`);
+  else if (maxD != null) chips.push(`Deposit ≤ $${maxD.toLocaleString()}`);
+
+  if (g.min_availability_days != null)
+    chips.push(`Available ≥ ${g.min_availability_days}d`);
+
+  if (g.utilities_included === true) chips.push("Utilities included");
+  else if (g.utilities_included === false) chips.push("No utilities");
+
+  if (g.pets_allowed === true) chips.push("Pets OK");
+  else if (g.pets_allowed === false) chips.push("No pets");
+
+  if (g.furnished_status) chips.push(g.furnished_status.replace(/_/g, " "));
+
+  for (const code of g.required_amenities ?? []) {
+    const label = amenities.find((a) => a.code === code)?.label ?? code;
+    chips.push(label);
+  }
+
+  if (chips.length === 0) return <Typography variant="body2" color="text.secondary">No requirements set.</Typography>;
+
+  return (
+    <Box display="flex" flexWrap="wrap" gap={0.75}>
+      {chips.map((c) => (
+        <Chip key={c} label={c} size="small" variant="outlined" />
+      ))}
+    </Box>
+  );
+}
+
+// ─── Page ─────────────────────────────────────────────────────────────────────
+
 export default function GuidelineSettingsPage() {
-  const [guidelines, setGuidelines] = useState<Guideline[]>([]);
+  const [guidelines, setGuidelines] = useState<GuidelineRecord[]>([]);
   const [amenities, setAmenities] = useState<ListingAmenity[]>([]);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [dialogOpen, setDialogOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState(false);
+
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editTarget, setEditTarget] = useState<GuidelineRecord | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<GuidelineRecord | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     Promise.all([getGuidelines(), getListingAmenities()])
@@ -288,29 +297,30 @@ export default function GuidelineSettingsPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  function handleAdd(g: Guideline) {
-    setGuidelines((prev) => [...prev, g]);
+  async function handleCreate(form: GuidelineFormData) {
+    const created = await createGuideline(form);
+    setGuidelines((prev) => [...prev, created]);
     setDialogOpen(false);
-    setSuccess(false);
   }
 
-  function handleDelete(index: number) {
-    setGuidelines((prev) => prev.filter((_, i) => i !== index));
-    setSuccess(false);
+  async function handleUpdate(form: GuidelineFormData) {
+    if (!editTarget) return;
+    const updated = await updateGuideline(editTarget.id, form);
+    setGuidelines((prev) => prev.map((g) => (g.id === updated.id ? updated : g)));
+    setEditTarget(null);
   }
 
-  async function handleSave() {
-    setSaving(true);
-    setError(null);
-    setSuccess(false);
+  async function handleDelete() {
+    if (!deleteTarget) return;
+    setDeleting(true);
     try {
-      const saved = await saveGuidelines(guidelines);
-      setGuidelines(saved);
-      setSuccess(true);
+      await deleteGuideline(deleteTarget.id);
+      setGuidelines((prev) => prev.filter((g) => g.id !== deleteTarget.id));
+      setDeleteTarget(null);
     } catch {
-      setError("Failed to save guidelines. Please try again.");
+      setError("Failed to delete guideline.");
     } finally {
-      setSaving(false);
+      setDeleting(false);
     }
   }
 
@@ -328,62 +338,85 @@ export default function GuidelineSettingsPage() {
         Guideline Settings
       </Typography>
       <Typography variant="body1" color="text.secondary" mb={3}>
-        Set the requirements a listing must meet for your company to consider approving it.
+        Define listing requirements per building. Each guideline represents a building your
+        company manages (e.g. Verve Apartments, The Hub).
       </Typography>
 
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
-      {success && <Alert severity="success" sx={{ mb: 2 }}>Guidelines saved successfully.</Alert>}
 
-      <Paper variant="outlined" sx={{ mb: 3 }}>
+      <Stack spacing={2} mb={3}>
         {guidelines.length === 0 ? (
-          <Box px={3} py={3}>
+          <Paper variant="outlined" sx={{ px: 3, py: 3 }}>
             <Typography color="text.secondary">No guidelines yet. Add one below.</Typography>
-          </Box>
+          </Paper>
         ) : (
-          <Stack divider={<Box sx={{ borderBottom: "1px solid", borderColor: "divider" }} />}>
-            {guidelines.map((g, index) => (
-              <Box key={index} display="flex" alignItems="center" justifyContent="space-between" px={2} py={1.5}>
-                <Box display="flex" alignItems="center" gap={1.5}>
-                  <Chip
-                    icon={GUIDELINE_ICONS[g.type] as React.ReactElement}
-                    label={GUIDELINE_TYPE_LABELS[g.type]}
-                    size="small"
-                    variant="outlined"
-                    sx={{ fontWeight: 500 }}
-                  />
-                  <Typography variant="body2">{guidelineToHuman(g)}</Typography>
+          guidelines.map((g) => (
+            <Paper key={g.id} variant="outlined" sx={{ px: 2.5, py: 2 }}>
+              <Box display="flex" alignItems="flex-start" justifyContent="space-between" gap={1}>
+                <Box flex={1}>
+                  <Box display="flex" alignItems="center" gap={1} mb={1}>
+                    <HomeWorkIcon fontSize="small" color="primary" />
+                    <Typography fontWeight={600}>{g.name}</Typography>
+                  </Box>
+                  <GuidelineSummary g={g} amenities={amenities} />
                 </Box>
-                <Tooltip title="Remove">
-                  <IconButton size="small" color="error" onClick={() => handleDelete(index)}>
-                    <DeleteIcon fontSize="small" />
-                  </IconButton>
-                </Tooltip>
+                <Box display="flex" gap={0.5}>
+                  <Tooltip title="Edit">
+                    <IconButton size="small" onClick={() => setEditTarget(g)}>
+                      <EditIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                  <Tooltip title="Delete">
+                    <IconButton size="small" color="error" onClick={() => setDeleteTarget(g)}>
+                      <DeleteIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                </Box>
               </Box>
-            ))}
-          </Stack>
+            </Paper>
+          ))
         )}
-      </Paper>
-
-      <Stack direction="row" spacing={2}>
-        <Button variant="outlined" startIcon={<AddIcon />} onClick={() => setDialogOpen(true)}>
-          Add Guideline
-        </Button>
-        <Button
-          variant="contained"
-          onClick={handleSave}
-          disabled={saving}
-          startIcon={saving ? <CircularProgress size={16} color="inherit" /> : <HomeIcon />}
-        >
-          {saving ? "Saving…" : "Save Guidelines"}
-        </Button>
       </Stack>
 
-      <AddGuidelineDialog
+      <Button variant="outlined" startIcon={<AddIcon />} onClick={() => setDialogOpen(true)}>
+        Add Building Guideline
+      </Button>
+
+      {/* Create dialog */}
+      <GuidelineDialog
         open={dialogOpen}
+        initial={emptyForm()}
         amenities={amenities}
+        title="Add Building Guideline"
         onClose={() => setDialogOpen(false)}
-        onAdd={handleAdd}
+        onSave={handleCreate}
       />
+
+      {/* Edit dialog */}
+      <GuidelineDialog
+        open={editTarget !== null}
+        initial={editTarget ? recordToForm(editTarget) : emptyForm()}
+        amenities={amenities}
+        title="Edit Building Guideline"
+        onClose={() => setEditTarget(null)}
+        onSave={handleUpdate}
+      />
+
+      {/* Delete confirmation */}
+      <Dialog open={deleteTarget !== null} onClose={() => setDeleteTarget(null)}>
+        <DialogTitle>Delete guideline?</DialogTitle>
+        <DialogContent>
+          <Typography>
+            Remove guidelines for <strong>{deleteTarget?.name}</strong>? This cannot be undone.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteTarget(null)} disabled={deleting}>Cancel</Button>
+          <Button color="error" variant="contained" onClick={handleDelete} disabled={deleting}>
+            {deleting ? <CircularProgress size={16} color="inherit" /> : "Delete"}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Container>
   );
 }
