@@ -4,6 +4,7 @@ from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.utils import timezone
 
 from .models import (
+    ApprovalRequest,
     CompanyDocument,
     FavoriteListing,
     FeedbackSubmission,
@@ -63,6 +64,17 @@ class ManagementCompanyAdmin(admin.ModelAdmin):
     )
     inlines = [CompanyDocumentInline]
     actions = [approve_selected, reject_selected]
+
+
+@admin.register(ApprovalRequest)
+class ApprovalRequestAdmin(admin.ModelAdmin):
+    list_display = ("id", "listing", "management_company", "guideline", "status", "reviewed_at", "created_at")
+    list_filter = ("status",)
+    search_fields = ("listing__title", "management_company__company_name")
+    readonly_fields = ("created_at", "updated_at")
+
+    def has_add_permission(self, request):
+        return False
 
 
 @admin.register(FeedbackSubmission)

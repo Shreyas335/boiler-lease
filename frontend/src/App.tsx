@@ -25,6 +25,9 @@ import CompanyVerificationPage from "./pages/CompanyVerificationPage";
 import GuidelineSettingsPage from "./pages/GuidelineSettingsPage";
 import ManagementCompaniesPage from "./pages/ManagementCompaniesPage";
 import ManagementCompanyDetailPage from "./pages/ManagementCompanyDetailPage";
+import SubmitApprovalPage from "./pages/SubmitApprovalPage";
+import ManagementApprovalQueuePage from "./pages/ManagementApprovalQueuePage";
+import ApprovalRequestDetailPage from "./pages/ApprovalRequestDetailPage";
 
 function App() {
   return (
@@ -150,6 +153,30 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <ManagementCompanyDetailPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/listings/:id/request-approval"
+                element={
+                  <ProtectedRoute>
+                    <SubmitApprovalPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/company/approvals"
+                element={
+                  <ProtectedRoute>
+                    <ManagementApprovalQueuePage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/company/approvals/:id"
+                element={
+                  <ProtectedRoute>
+                    <ApprovalRequestDetailPage />
                   </ProtectedRoute>
                 }
               />
