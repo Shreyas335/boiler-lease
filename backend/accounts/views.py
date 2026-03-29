@@ -1393,3 +1393,17 @@ def browse_management_companies(request):
         qs = qs.filter(company_name__icontains=search)
     qs = qs.order_by("company_name")
     return Response(PublicManagementCompanySerializer(qs, many=True).data)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def management_company_detail(request, pk):
+    """Retrieve a single approved management company with full guideline details."""
+    # TODO: add company information here also
+    try:
+        company = ManagementCompany.objects.prefetch_related("guidelines").get(
+            pk=pk, status=ManagementCompany.Status.APPROVED
+        )
+    except ManagementCompany.DoesNotExist:
+        return Response({"detail": "Company not found."}, status=status.HTTP_404_NOT_FOUND)
+    return Response(PublicManagementCompanySerializer(company).data)

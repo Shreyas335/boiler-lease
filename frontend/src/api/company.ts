@@ -87,6 +87,11 @@ export async function getManagementCompanies(search?: string): Promise<PublicMan
   return data;
 }
 
+export async function getManagementCompany(id: number): Promise<PublicManagementCompany> {
+  const { data } = await api.get<PublicManagementCompany>(`/companies/${id}/`);
+  return data;
+}
+
 function formToPayload(form: GuidelineFormData) {
   return {
     name: form.name,

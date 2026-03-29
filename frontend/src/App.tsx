@@ -24,6 +24,7 @@ import PropertyDetailPage from "./pages/PropertyDetailPage";
 import CompanyVerificationPage from "./pages/CompanyVerificationPage";
 import GuidelineSettingsPage from "./pages/GuidelineSettingsPage";
 import ManagementCompaniesPage from "./pages/ManagementCompaniesPage";
+import ManagementCompanyDetailPage from "./pages/ManagementCompanyDetailPage";
 
 function App() {
   return (
@@ -141,6 +142,14 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <ManagementCompaniesPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/companies/:id"
+                element={
+                  <ProtectedRoute>
+                    <ManagementCompanyDetailPage />
                   </ProtectedRoute>
                 }
               />
