@@ -78,7 +78,8 @@ class AccountUpdateSerializer(serializers.ModelSerializer):
 
     def validate_username(self, value):
         user = self.instance
-        if value and User.objects.exclude(pk=user.pk).filter(username=value).exists():
+        value = value.lower()
+        if value and User.objects.exclude(pk=user.pk).filter(username__iexact=value).exists():
             raise serializers.ValidationError("A user with this username already exists.")
         return value
 
@@ -143,8 +144,11 @@ class RegisterSerializer(serializers.ModelSerializer):
         if User.objects.filter(email=data["email"]).exists():
             raise serializers.ValidationError({"email": "A user with this email already exists."})
 
-        # Validate username uniqueness
-        if User.objects.filter(username=data["username"]).exists():
+        # Normalize username to lowercase
+        data["username"] = data["username"].lower()
+
+        # Validate username uniqueness (case-insensitive)
+        if User.objects.filter(username__iexact=data["username"]).exists():
             raise serializers.ValidationError({"username": "A user with this username already exists."})
 
         # Validate user type
