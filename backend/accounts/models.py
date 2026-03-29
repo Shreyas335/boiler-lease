@@ -211,6 +211,56 @@ class PropertyListing(models.Model):
         return self.title
 
 
+class ApprovalRequest(models.Model):
+    """A subleaser's request for a management company to approve their listing."""
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        APPROVED = "approved", "Approved"
+        REJECTED = "rejected", "Rejected"
+
+    listing = models.ForeignKey(
+        PropertyListing,
+        on_delete=models.CASCADE,
+        related_name="approval_requests",
+    )
+    management_company = models.ForeignKey(
+        ManagementCompany,
+        on_delete=models.CASCADE,
+        related_name="approval_requests",
+    )
+    guideline = models.ForeignKey(
+        Guideline,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="approval_requests",
+    )
+    subleaser_notes = models.TextField(blank=True)
+    status = models.CharField(
+        max_length=16,
+        choices=Status.choices,
+        default=Status.PENDING,
+        db_index=True,
+    )
+    reviewer_notes = models.TextField(blank=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        indexes = [
+            models.Index(
+                fields=["management_company", "status", "-created_at"],
+                name="approval_company_status_idx",
+            ),
+        ]
+
+    def __str__(self):
+        return f"ApprovalRequest #{self.pk} — {self.listing} → {self.management_company}"
+
+
 class ListingAmenity(models.Model):
     code = models.CharField(max_length=60, unique=True, db_index=True)
     label = models.CharField(max_length=100)
