@@ -83,6 +83,15 @@ def _is_sublessee(request):
     return request.user.user_type == User.UserType.SUBLESSEE
 
 
+def _is_approved_management(request):
+    if request.user.user_type != User.UserType.MANAGEMENT:
+        return False
+    try:
+        return request.user.management_company.status == ManagementCompany.Status.APPROVED
+    except ManagementCompany.DoesNotExist:
+        return False
+
+
 def _sort_order_prefix(order):
     return "" if str(order).lower() == "asc" else "-"
 
