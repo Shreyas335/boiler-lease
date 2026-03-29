@@ -4,6 +4,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
 from .models import (
+    ApprovalRequest,
     CompanyDocument,
     FavoriteListing,
     FeedbackSubmission,
@@ -343,6 +344,7 @@ class ListingAmenitySerializer(serializers.ModelSerializer):
 class PropertyListingSerializer(serializers.ModelSerializer):
     amenities = serializers.SerializerMethodField()
     media = serializers.SerializerMethodField()
+    approved_by_company_name = serializers.SerializerMethodField()
 
     class Meta:
         model = PropertyListing
@@ -381,6 +383,7 @@ class PropertyListingSerializer(serializers.ModelSerializer):
             "virtual_tour_url",
             "status",
             "approval_status",
+            "approved_by_company_name",
             "published_at",
             "created_at",
             "updated_at",
@@ -395,6 +398,11 @@ class PropertyListingSerializer(serializers.ModelSerializer):
     def get_media(self, obj):
         finalized = obj.media.filter(upload_status=ListingMedia.UploadStatus.UPLOADED)
         return ListingMediaSerializer(finalized, many=True).data
+
+    def get_approved_by_company_name(self, obj):
+        if obj.approved_by_company_id:
+            return obj.approved_by_company.company_name
+        return None
 
 
 class PropertyListingSummarySerializer(serializers.ModelSerializer):
@@ -757,6 +765,7 @@ class PropertyListingBrowseSerializer(serializers.ModelSerializer):
     """Read-only serializer for browsing properties. Optimized for list view with nested media and amenities."""
     amenities = serializers.SerializerMethodField()
     media = ListingMediaSerializer(many=True, read_only=True)
+    approved_by_company_name = serializers.SerializerMethodField()
 
     class Meta:
         model = PropertyListing
@@ -783,6 +792,7 @@ class PropertyListingBrowseSerializer(serializers.ModelSerializer):
             "availability_end_date",
             "lease_term_min_months",
             "lease_term_max_months",
+            "approved_by_company_name",
             "amenities",
             "media",
         )
@@ -791,6 +801,11 @@ class PropertyListingBrowseSerializer(serializers.ModelSerializer):
     def get_amenities(self, obj):
         amenities = ListingAmenity.objects.filter(listing_links__listing=obj, is_active=True).distinct()
         return ListingAmenitySerializer(amenities, many=True).data
+
+    def get_approved_by_company_name(self, obj):
+        if obj.approved_by_company_id:
+            return obj.approved_by_company.company_name
+        return None
 
 
 class PasswordResetRequestSerializer(serializers.Serializer):
@@ -889,3 +904,80 @@ class CompanyDocumentSerializer(serializers.ModelSerializer):
 class CompanyDocumentUploadSerializer(serializers.Serializer):
     file = serializers.FileField()
     document_type = serializers.ChoiceField(choices=CompanyDocument.DocumentType.choices)
+
+
+class ApprovalRequestCreateSerializer(serializers.Serializer):
+    management_company_id = serializers.IntegerField()
+    guideline_id = serializers.IntegerField()
+    subleaser_notes = serializers.CharField(required=False, allow_blank=True, default="")
+
+    def validate_management_company_id(self, value):
+        if not ManagementCompany.objects.filter(pk=value, status=ManagementCompany.Status.APPROVED).exists():
+            raise serializers.ValidationError("Management company not found or not approved.")
+        return value
+
+    def validate(self, attrs):
+        company_id = attrs["management_company_id"]
+        guideline_id = attrs["guideline_id"]
+        if not Guideline.objects.filter(pk=guideline_id, company_id=company_id).exists():
+            raise serializers.ValidationError({"guideline_id": "Guideline not found for this company."})
+        return attrs
+
+
+class ApprovalRequestSummarySerializer(serializers.ModelSerializer):
+    listing_title = serializers.CharField(source="listing.title", read_only=True)
+    listing_rent = serializers.DecimalField(source="listing.monthly_rent", max_digits=10, decimal_places=2, read_only=True)
+    listing_city = serializers.CharField(source="listing.city", read_only=True)
+    management_company_name = serializers.CharField(source="management_company.company_name", read_only=True)
+    guideline_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ApprovalRequest
+        fields = (
+            "id",
+            "listing_id",
+            "listing_title",
+            "listing_rent",
+            "listing_city",
+            "management_company_id",
+            "management_company_name",
+            "guideline_name",
+            "status",
+            "subleaser_notes",
+            "reviewer_notes",
+            "reviewed_at",
+            "created_at",
+        )
+
+    def get_guideline_name(self, obj):
+        return obj.guideline.name if obj.guideline else None
+
+
+class ApprovalRequestDetailSerializer(serializers.ModelSerializer):
+    listing = PropertyListingSerializer(read_only=True)
+    management_company_name = serializers.CharField(source="management_company.company_name", read_only=True)
+    guideline = PublicGuidelineSerializer(read_only=True)
+    compliance_results = serializers.SerializerMethodField()
+    subleaser_email = serializers.EmailField(source="listing.owner.email", read_only=True)
+
+    class Meta:
+        model = ApprovalRequest
+        fields = (
+            "id",
+            "listing",
+            "management_company_name",
+            "guideline",
+            "compliance_results",
+            "subleaser_email",
+            "subleaser_notes",
+            "reviewer_notes",
+            "status",
+            "reviewed_at",
+            "created_at",
+        )
+
+    def get_compliance_results(self, obj):
+        check_fn = self.context.get("check_compliance")
+        if check_fn and obj.guideline:
+            return check_fn(obj.listing, obj.guideline)
+        return []

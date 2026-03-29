@@ -156,7 +156,8 @@ class PropertyListing(models.Model):
         ARCHIVED = "archived", "Archived"
 
     class ApprovalStatus(models.TextChoices):
-        PENDING = "pending", "Pending"
+        NOT_SUBMITTED = "not_submitted", "Not Submitted"
+        PENDING = "pending", "Pending Approval"
         APPROVED = "approved", "Approved"
         REJECTED = "rejected", "Rejected"
 
@@ -204,7 +205,7 @@ class PropertyListing(models.Model):
     approval_status = models.CharField(
         max_length=16,
         choices=ApprovalStatus.choices,
-        default=ApprovalStatus.PENDING,
+        default=ApprovalStatus.NOT_SUBMITTED,
     )
     approved_by_company = models.ForeignKey(
         "ManagementCompany",
