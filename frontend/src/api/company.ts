@@ -1,12 +1,13 @@
 import api from "./axios";
 import type { CompanyStatus } from "../types/auth";
+import type { Guideline } from "../types/guidelines";
 
 export interface CompanyProfile {
   id: number;
   company_name: string;
   status: CompanyStatus;
   rejection_reason: string;
-  guidelines: string[];
+  guidelines: Guideline[];
   reviewed_at: string | null;
   created_at: string;
 }
@@ -42,12 +43,12 @@ export async function deleteDocument(id: number): Promise<void> {
   await api.delete(`/company/documents/${id}/`);
 }
 
-export async function getGuidelines(): Promise<string[]> {
-  const { data } = await api.get<{ guidelines: string[] }>("/company/guidelines/");
+export async function getGuidelines(): Promise<Guideline[]> {
+  const { data } = await api.get<{ guidelines: Guideline[] }>("/company/guidelines/");
   return data.guidelines;
 }
 
-export async function saveGuidelines(guidelines: string[]): Promise<string[]> {
-  const { data } = await api.put<{ guidelines: string[] }>("/company/guidelines/", { guidelines });
+export async function saveGuidelines(guidelines: Guideline[]): Promise<Guideline[]> {
+  const { data } = await api.put<{ guidelines: Guideline[] }>("/company/guidelines/", { guidelines });
   return data.guidelines;
 }
