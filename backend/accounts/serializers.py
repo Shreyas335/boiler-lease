@@ -645,7 +645,7 @@ class PropertyListingCreateSerializer(serializers.ModelSerializer):
         owner = self.context["request"].user
         if not validated_data.get("contact_email"):
             validated_data["contact_email"] = owner.email
-        validated_data["status"] = PropertyListing.Status.DRAFT
+        validated_data["status"] = PropertyListing.ListingStatus.DRAFT
         listing = PropertyListing.objects.create(owner=owner, **validated_data)
 
         if amenity_codes:
