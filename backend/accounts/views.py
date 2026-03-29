@@ -1051,6 +1051,11 @@ def create_deposit_checkout_session(request):
                 {"detail": "Cannot pay a deposit for this booking."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        if booking.deposit_paid_at is not None:
+            return Response(
+                {"detail": "Security deposit for this booking has already been paid."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         dep = booking.security_deposit_snapshot or booking.listing.security_deposit
         if dep is None or dep <= 0:
             return Response(
@@ -1129,6 +1134,18 @@ def stripe_webhook(request):
             txn.paid_at = timezone.now()
             txn.stripe_payment_intent_id = payment_intent_id
             txn.save(update_fields=["amount", "status", "paid_at", "stripe_payment_intent_id"])
+            ref = (txn.booking_reference or "").strip()
+            if ref:
+                try:
+                    bid = int(ref)
+                except ValueError:
+                    bid = None
+                if bid is not None:
+                    PropertyBooking.objects.filter(
+                        pk=bid,
+                        sublessee_id=txn.user_id,
+                        deposit_paid_at__isnull=True,
+                    ).update(deposit_paid_at=timezone.now())
 
     elif event_type == "checkout.session.expired":
         session_id = obj.get("id")

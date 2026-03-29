@@ -260,6 +260,7 @@ class PropertyBooking(models.Model):
         blank=True,
     )
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING, db_index=True)
+    deposit_paid_at = models.DateTimeField(null=True, blank=True)
     booked_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
     class Meta:

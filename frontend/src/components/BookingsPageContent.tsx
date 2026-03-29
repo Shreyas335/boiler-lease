@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import type { AxiosError } from "axios";
 import { Alert, Box, Container, FormControl, InputLabel, MenuItem, Select, Stack, Typography, type ChipProps } from "@mui/material";
 import {
   addFavorite,
@@ -9,6 +10,7 @@ import {
   type PropertyListingSummary,
   type SortOrder,
 } from "../api/listings";
+import { createDepositCheckoutSession } from "../api/payments";
 import PropertySummaryCard from "./PropertySummaryCard";
 import { useAuth } from "../contexts/AuthContext";
 
@@ -37,6 +39,7 @@ export default function BookingsPageContent({
   const [order, setOrder] = useState<SortOrder>("desc");
   const [favoriteBusyId, setFavoriteBusyId] = useState<number | null>(null);
   const [cancelBusyId, setCancelBusyId] = useState<number | null>(null);
+  const [payBusyId, setPayBusyId] = useState<number | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -82,6 +85,40 @@ export default function BookingsPageContent({
 
   function buildFooterText(booking: BookingRecord) {
     return `Booked on ${new Date(booking.booked_at).toLocaleDateString()} | Stay ${booking.start_date} to ${booking.end_date} | Status ${booking.status_label}`;
+  }
+
+  function effectiveDepositAmount(booking: BookingRecord): number | null {
+    const snap = booking.security_deposit_snapshot;
+    if (snap != null && snap !== "" && Number(snap) > 0) return Number(snap);
+    const list = booking.listing.security_deposit;
+    if (list != null && list !== "" && Number(list) > 0) return Number(list);
+    return null;
+  }
+
+  function canPaySecurityDeposit(booking: BookingRecord): boolean {
+    if (booking.deposit_paid_at) return false;
+    if (booking.status === "declined" || booking.status === "cancelled") return false;
+    return effectiveDepositAmount(booking) != null;
+  }
+
+  async function handlePayDeposit(bookingId: number) {
+    try {
+      setPayBusyId(bookingId);
+      setError(null);
+      const { checkout_url } = await createDepositCheckoutSession(bookingId);
+      window.location.assign(checkout_url);
+    } catch (e) {
+      const ax = e as AxiosError<{ detail?: string | string[] }>;
+      const d = ax.response?.data?.detail;
+      const msg =
+        typeof d === "string"
+          ? d
+          : Array.isArray(d) && typeof d[0] === "string"
+            ? d[0]
+            : "Unable to start deposit checkout.";
+      setError(msg);
+      setPayBusyId(null);
+    }
   }
 
   async function toggleFavorite(listing: PropertyListingSummary) {
@@ -184,6 +221,8 @@ export default function BookingsPageContent({
           <Stack spacing={2}>
             {bookings.map((booking) => {
               const statusMeta = getBookingStatusMeta(booking.status);
+              const showPay = canPaySecurityDeposit(booking);
+              const showCancel = allowCancelBookings && booking.is_cancelable;
 
               return (
                 <PropertySummaryCard
@@ -194,11 +233,28 @@ export default function BookingsPageContent({
                   statusLabel={statusMeta.label}
                   statusColor={statusMeta.color}
                   actionButton={
-                    allowCancelBookings && booking.is_cancelable
+                    showPay
                       ? {
-                          label: cancelBusyId === booking.id ? "Cancelling..." : "Cancel Booking",
+                          label: payBusyId === booking.id ? "Redirecting..." : "Pay security deposit",
+                          onClick: () => void handlePayDeposit(booking.id),
+                          disabled: payBusyId === booking.id,
+                          color: "primary",
+                        }
+                      : showCancel
+                        ? {
+                            label: cancelBusyId === booking.id ? "Cancelling..." : "Cancel Booking",
+                            onClick: () => handleCancelBooking(booking.id),
+                            disabled: cancelBusyId === booking.id,
+                            color: "error",
+                          }
+                        : undefined
+                  }
+                  secondaryActionButton={
+                    showPay && showCancel
+                      ? {
+                          label: cancelBusyId === booking.id ? "Cancelling..." : "Cancel booking",
                           onClick: () => handleCancelBooking(booking.id),
-                          disabled: cancelBusyId === booking.id,
+                          disabled: cancelBusyId === booking.id || payBusyId === booking.id,
                           color: "error",
                         }
                       : undefined
