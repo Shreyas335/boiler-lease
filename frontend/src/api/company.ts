@@ -1,13 +1,12 @@
 import api from "./axios";
 import type { CompanyStatus } from "../types/auth";
-import type { Guideline } from "../types/guidelines";
+import type { GuidelineRecord, GuidelineFormData } from "../types/guidelines";
 
 export interface CompanyProfile {
   id: number;
   company_name: string;
   status: CompanyStatus;
   rejection_reason: string;
-  guidelines: Guideline[];
   reviewed_at: string | null;
   created_at: string;
 }
@@ -43,12 +42,38 @@ export async function deleteDocument(id: number): Promise<void> {
   await api.delete(`/company/documents/${id}/`);
 }
 
-export async function getGuidelines(): Promise<Guideline[]> {
-  const { data } = await api.get<{ guidelines: Guideline[] }>("/company/guidelines/");
-  return data.guidelines;
+export async function getGuidelines(): Promise<GuidelineRecord[]> {
+  const { data } = await api.get<GuidelineRecord[]>("/company/guidelines/");
+  return data;
 }
 
-export async function saveGuidelines(guidelines: Guideline[]): Promise<Guideline[]> {
-  const { data } = await api.put<{ guidelines: Guideline[] }>("/company/guidelines/", { guidelines });
-  return data.guidelines;
+export async function createGuideline(form: GuidelineFormData): Promise<GuidelineRecord> {
+  const { data } = await api.post<GuidelineRecord>("/company/guidelines/", formToPayload(form));
+  return data;
+}
+
+export async function updateGuideline(id: number, form: GuidelineFormData): Promise<GuidelineRecord> {
+  const { data } = await api.put<GuidelineRecord>(`/company/guidelines/${id}/`, formToPayload(form));
+  return data;
+}
+
+export async function deleteGuideline(id: number): Promise<void> {
+  await api.delete(`/company/guidelines/${id}/`);
+}
+
+function formToPayload(form: GuidelineFormData) {
+  return {
+    name: form.name,
+    min_rent: form.min_rent !== "" ? form.min_rent : null,
+    max_rent: form.max_rent !== "" ? form.max_rent : null,
+    min_deposit: form.min_deposit !== "" ? form.min_deposit : null,
+    max_deposit: form.max_deposit !== "" ? form.max_deposit : null,
+    min_availability_days: form.min_availability_days !== "" ? Number(form.min_availability_days) : null,
+    utilities_included:
+      form.utilities_included === "true" ? true : form.utilities_included === "false" ? false : null,
+    pets_allowed:
+      form.pets_allowed === "true" ? true : form.pets_allowed === "false" ? false : null,
+    furnished_status: form.furnished_status !== "" ? form.furnished_status : null,
+    required_amenities: form.required_amenities,
+  };
 }
