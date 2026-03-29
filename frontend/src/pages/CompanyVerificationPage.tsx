@@ -30,6 +30,7 @@ import {
   type CompanyProfile,
   type CompanyDocument,
 } from "../api/company";
+import { useAuth } from "../contexts/AuthContext";
 
 const DOCUMENT_TYPES = [
   { value: "business_license", label: "Business License" },
@@ -38,6 +39,7 @@ const DOCUMENT_TYPES = [
 ];
 
 export default function CompanyVerificationPage() {
+  const { user } = useAuth();
   const [company, setCompany] = useState<CompanyProfile | null>(null);
   const [documents, setDocuments] = useState<CompanyDocument[]>([]);
   const [loading, setLoading] = useState(true);
@@ -109,6 +111,17 @@ export default function CompanyVerificationPage() {
       <Alert severity="warning">
         Your documents are under review. You will be notified once approved.
       </Alert>
+    );
+  }
+
+  if (user && !user.email_verified) {
+    return (
+      <Container maxWidth="md" sx={{ py: 4 }}>
+        <Alert severity="warning">
+          You must verify your email before starting the company verification process. Please check
+          your inbox for the verification link, or resend it from Account settings.
+        </Alert>
+      </Container>
     );
   }
 
