@@ -23,6 +23,7 @@ import FavoritesPage from "./pages/FavoritesPage";
 import PropertyDetailPage from "./pages/PropertyDetailPage";
 import CompanyVerificationPage from "./pages/CompanyVerificationPage";
 import GuidelineSettingsPage from "./pages/GuidelineSettingsPage";
+import ManagementCompaniesPage from "./pages/ManagementCompaniesPage";
 
 function App() {
   return (
@@ -132,6 +133,14 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <GuidelineSettingsPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/companies"
+                element={
+                  <ProtectedRoute>
+                    <ManagementCompaniesPage />
                   </ProtectedRoute>
                 }
               />

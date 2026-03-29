@@ -61,6 +61,32 @@ export async function deleteGuideline(id: number): Promise<void> {
   await api.delete(`/company/guidelines/${id}/`);
 }
 
+export interface PublicGuideline {
+  id: number;
+  name: string;
+  min_rent: string | null;
+  max_rent: string | null;
+  min_deposit: string | null;
+  max_deposit: string | null;
+  min_availability_days: number | null;
+  utilities_included: boolean | null;
+  pets_allowed: boolean | null;
+  furnished_status: string | null;
+  required_amenities: string[];
+}
+
+export interface PublicManagementCompany {
+  id: number;
+  company_name: string;
+  guidelines: PublicGuideline[];
+}
+
+export async function getManagementCompanies(search?: string): Promise<PublicManagementCompany[]> {
+  const params = search ? { search } : {};
+  const { data } = await api.get<PublicManagementCompany[]>("/companies/", { params });
+  return data;
+}
+
 function formToPayload(form: GuidelineFormData) {
   return {
     name: form.name,
