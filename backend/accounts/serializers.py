@@ -843,6 +843,27 @@ class ManagementCompanySerializer(serializers.ModelSerializer):
         read_only_fields = ("id", "status", "rejection_reason", "reviewed_at", "created_at")
 
 
+class PublicGuidelineSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Guideline
+        fields = (
+            "id", "name",
+            "min_rent", "max_rent",
+            "min_deposit", "max_deposit",
+            "min_availability_days",
+            "utilities_included", "pets_allowed",
+            "furnished_status", "required_amenities",
+        )
+
+
+class PublicManagementCompanySerializer(serializers.ModelSerializer):
+    guidelines = PublicGuidelineSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = ManagementCompany
+        fields = ("id", "company_name", "guidelines")
+
+
 class GuidelineSerializer(serializers.ModelSerializer):
     class Meta:
         model = Guideline

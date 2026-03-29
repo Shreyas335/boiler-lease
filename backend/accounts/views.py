@@ -56,6 +56,7 @@ from .serializers import (
     PropertyListingCreateSerializer,
     PropertyListingSerializer,
     PropertyListingSummarySerializer,
+    PublicManagementCompanySerializer,
     RegisterSerializer,
     ListingMediaSerializer,
     ListingMediaUploadSerializer,
@@ -1380,3 +1381,15 @@ def company_guideline_detail(request, pk):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     serializer.save()
     return Response(serializer.data)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def browse_management_companies(request):
+    """List approved management companies with their building guidelines. Supports ?search= on company name."""
+    qs = ManagementCompany.objects.filter(status=ManagementCompany.Status.APPROVED).prefetch_related("guidelines")
+    search = request.query_params.get("search", "").strip()
+    if search:
+        qs = qs.filter(company_name__icontains=search)
+    qs = qs.order_by("company_name")
+    return Response(PublicManagementCompanySerializer(qs, many=True).data)
