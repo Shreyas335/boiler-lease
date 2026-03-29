@@ -1,6 +1,7 @@
 import api from "./axios";
 import type { CompanyStatus } from "../types/auth";
 import type { GuidelineRecord, GuidelineFormData } from "../types/guidelines";
+import type { PropertyListing } from "./listings";
 
 export interface CompanyProfile {
   id: number;
@@ -92,13 +93,74 @@ export async function getManagementCompany(id: number): Promise<PublicManagement
   return data;
 }
 
+export interface ComplianceResult {
+  field: string;
+  label: string;
+  required: string | number | boolean | string[];
+  actual: string | number | boolean | string[];
+  passed: boolean;
+}
+
+export interface ApprovalRequestSummary {
+  id: number;
+  listing_id: number;
+  listing_title: string;
+  listing_rent: string;
+  listing_city: string;
+  management_company_id: number;
+  management_company_name: string;
+  guideline_name: string | null;
+  status: "pending" | "approved" | "rejected";
+  subleaser_notes: string;
+  reviewer_notes: string;
+  reviewed_at: string | null;
+  created_at: string;
+}
+
+export interface ApprovalRequestDetail {
+  id: number;
+  listing: PropertyListing;
+  management_company_name: string;
+  guideline: PublicGuideline | null;
+  compliance_results: ComplianceResult[];
+  subleaser_email: string;
+  subleaser_notes: string;
+  reviewer_notes: string;
+  status: "pending" | "approved" | "rejected";
+  reviewed_at: string | null;
+  created_at: string;
+}
+
+export async function getApprovalRequests(status?: string): Promise<ApprovalRequestSummary[]> {
+  const params = status ? { status } : {};
+  const { data } = await api.get<ApprovalRequestSummary[]>("/company/approval-requests/", { params });
+  return data;
+}
+
+export async function getApprovalRequestDetail(id: number): Promise<ApprovalRequestDetail> {
+  const { data } = await api.get<ApprovalRequestDetail>(`/company/approval-requests/${id}/`);
+  return data;
+}
+
+export async function reviewApprovalRequest(
+  id: number,
+  action: "approve" | "reject",
+  reviewer_notes: string,
+): Promise<ApprovalRequestSummary> {
+  const { data } = await api.patch<ApprovalRequestSummary>(
+    `/company/approval-requests/${id}/review/`,
+    { action, reviewer_notes },
+  );
+  return data;
+}
+
 function formToPayload(form: GuidelineFormData) {
   return {
     name: form.name,
-    min_rent: form.min_rent !== "" ? form.min_rent : null,
-    max_rent: form.max_rent !== "" ? form.max_rent : null,
-    min_deposit: form.min_deposit !== "" ? form.min_deposit : null,
-    max_deposit: form.max_deposit !== "" ? form.max_deposit : null,
+    min_rent: form.min_rent !== "" ? Number(form.min_rent) : null,
+    max_rent: form.max_rent !== "" ? Number(form.max_rent) : null,
+    min_deposit: form.min_deposit !== "" ? Number(form.min_deposit) : null,
+    max_deposit: form.max_deposit !== "" ? Number(form.max_deposit) : null,
     min_availability_days: form.min_availability_days !== "" ? Number(form.min_availability_days) : null,
     utilities_included:
       form.utilities_included === "true" ? true : form.utilities_included === "false" ? false : null,
