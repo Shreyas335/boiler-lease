@@ -9,6 +9,7 @@ import {
   Chip,
   Alert,
   Stack,
+  Tooltip,
   type ChipProps,
 } from "@mui/material";
 import { Link as RouterLink } from "react-router-dom";
@@ -121,6 +122,22 @@ export default function DashboardPage() {
             resend it.
           </Alert>
         )}
+        {user.user_type === "management" && user.company_status === "pending" && (
+          <Alert severity="warning" icon={<WarningAmberRoundedIcon />} sx={{ mb: 3 }}>
+            Your company is pending verification. Upload your documents to speed up the review process.{" "}
+            <RouterLink to="/company/verify" style={{ fontWeight: 600 }}>
+              Upload Documents
+            </RouterLink>
+          </Alert>
+        )}
+        {user.user_type === "management" && user.company_status === "rejected" && (
+          <Alert severity="error" icon={<WarningAmberRoundedIcon />} sx={{ mb: 3 }}>
+            Your company verification was rejected. Please re-upload your documents.{" "}
+            <RouterLink to="/company/verify" style={{ fontWeight: 600 }}>
+              Re-upload Documents
+            </RouterLink>
+          </Alert>
+        )}
         <Box sx={{ mb: 4 }}>
           <Typography variant="h4" sx={{ fontWeight: 700, mb: 0.5 }}>
             Welcome back, {user.first_name || user.username}
@@ -229,6 +246,43 @@ export default function DashboardPage() {
               >
                 My listings
               </Button>
+            </>
+          )}
+          { user.user_type === "management" && user.company_status !== "approved" &&
+            <Button
+                component={RouterLink}
+                to="/company/verify"
+                variant="outlined"
+              >
+                Upload Documents
+              </Button>
+          }
+          {user.user_type === "management" && (
+            <>
+              <Tooltip title={user.company_status !== "approved" ? "Company verification required" : ""}>
+                <span>
+                  <Button
+                    component={user.company_status === "approved" ? RouterLink : "button"}
+                    to={user.company_status === "approved" ? "/company/guidelines" : undefined}
+                    variant="outlined"
+                    disabled={user.company_status !== "approved"}
+                  >
+                    Guideline Settings
+                  </Button>
+                </span>
+              </Tooltip>
+              <Tooltip title={user.company_status !== "approved" ? "Company verification required" : ""}>
+                <span>
+                  <Button
+                    component={user.company_status === "approved" ? RouterLink : "button"}
+                    to={user.company_status === "approved" ? "/company/approvals" : undefined}
+                    variant="outlined"
+                    disabled={user.company_status !== "approved"}
+                  >
+                    Approval Queue
+                  </Button>
+                </span>
+              </Tooltip>
             </>
           )}
         </Box>
