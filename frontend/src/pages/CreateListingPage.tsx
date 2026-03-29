@@ -199,7 +199,6 @@ export default function CreateListingPage() {
         }
       }
 
-      setPageMessage({ type: "success", text: "Listing created successfully." });
       navigate("/my-listings");
     } catch (error) {
       const axiosError = error as AxiosError<Record<string, unknown>>;

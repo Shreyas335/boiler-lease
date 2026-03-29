@@ -21,6 +21,7 @@ from rest_framework.response import Response
 from .email_verification import send_2fa_code_email, send_password_reset_email, send_verification_email
 
 from .models import (
+    ApprovalRequest,
     CompanyDocument,
     FavoriteListing,
     Guideline,
@@ -39,6 +40,9 @@ from .pagination import PropertyListingPagination
 
 from .serializers import (
     AccountUpdateSerializer,
+    ApprovalRequestCreateSerializer,
+    ApprovalRequestDetailSerializer,
+    ApprovalRequestSummarySerializer,
     CompanyDocumentSerializer,
     CompanyDocumentUploadSerializer,
     FavoriteListingSerializer,
@@ -1341,12 +1345,12 @@ def company_document_delete(request, pk):
 @permission_classes([IsAuthenticated])
 def company_guidelines(request):
     """List all guidelines for this company or create a new one."""
-    if not _is_approved_management(request):
-        return Response({"detail": "Only approved management companies can access this."}, status=status.HTTP_403_FORBIDDEN)
-    company = request.user.management_company
     if request.method == "GET":
         guidelines = company.guidelines.all().order_by("name")
         return Response(GuidelineSerializer(guidelines, many=True).data)
+    if not _is_approved_management(request):
+        return Response({"detail": "Only approved management companies can access this."}, status=status.HTTP_403_FORBIDDEN)
+    company = request.user.management_company
     is_valid, error = validate_guideline_data(request.data)
     if not is_valid:
         return Response({"detail": error}, status=status.HTTP_400_BAD_REQUEST)
@@ -1407,3 +1411,229 @@ def management_company_detail(request, pk):
     except ManagementCompany.DoesNotExist:
         return Response({"detail": "Company not found."}, status=status.HTTP_404_NOT_FOUND)
     return Response(PublicManagementCompanySerializer(company).data)
+
+
+# ---------------------------------------------------------------------------
+# Approval workflow helpers
+# ---------------------------------------------------------------------------
+
+def _check_guideline_compliance(listing, guideline):
+    """Return a list of compliance result dicts for each non-null guideline criterion."""
+    results = []
+
+    def _add(field, label, required, actual, passed):
+        results.append({"field": field, "label": label, "required": required, "actual": actual, "passed": passed})
+
+    if guideline.min_rent is not None:
+        _add("min_rent", "Minimum rent", str(guideline.min_rent), str(listing.monthly_rent),
+             listing.monthly_rent >= guideline.min_rent)
+
+    if guideline.max_rent is not None:
+        _add("max_rent", "Maximum rent", str(guideline.max_rent), str(listing.monthly_rent),
+             listing.monthly_rent <= guideline.max_rent)
+
+    if guideline.min_deposit is not None and listing.security_deposit is not None:
+        _add("min_deposit", "Minimum deposit", str(guideline.min_deposit), str(listing.security_deposit),
+             listing.security_deposit >= guideline.min_deposit)
+
+    if guideline.max_deposit is not None and listing.security_deposit is not None:
+        _add("max_deposit", "Maximum deposit", str(guideline.max_deposit), str(listing.security_deposit),
+             listing.security_deposit <= guideline.max_deposit)
+
+    if guideline.min_availability_days is not None:
+        from datetime import date
+        availability_days = (listing.availability_end_date - listing.availability_start_date).days
+        _add("min_availability_days", "Minimum availability (days)", guideline.min_availability_days,
+             availability_days, availability_days >= guideline.min_availability_days)
+
+    if guideline.utilities_included is not None:
+        _add("utilities_included", "Utilities included", guideline.utilities_included,
+             listing.utilities_included, listing.utilities_included == guideline.utilities_included)
+
+    if guideline.pets_allowed is not None:
+        _add("pets_allowed", "Pets allowed", guideline.pets_allowed,
+             listing.pets_allowed, listing.pets_allowed == guideline.pets_allowed)
+
+    if guideline.furnished_status:
+        _add("furnished_status", "Furnished status", guideline.furnished_status,
+             listing.furnished_status, listing.furnished_status == guideline.furnished_status)
+
+    if guideline.required_amenities:
+        listing_amenity_codes = set(
+            listing.amenity_links.values_list("amenity__code", flat=True)
+        )
+        missing = [code for code in guideline.required_amenities if code not in listing_amenity_codes]
+        _add("required_amenities", "Required amenities", guideline.required_amenities,
+             list(listing_amenity_codes), len(missing) == 0)
+
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Task 7: POST /listings/<id>/request-approval/
+# ---------------------------------------------------------------------------
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def submit_approval_request(request, listing_id):
+    """Subleaser submits a listing for approval by a management company."""
+    if request.user.user_type != User.UserType.SUBLEASER:
+        return Response({"detail": "Only subleasers can submit approval requests."}, status=status.HTTP_403_FORBIDDEN)
+
+    try:
+        listing = PropertyListing.objects.get(pk=listing_id, owner=request.user, deleted_at__isnull=True)
+    except PropertyListing.DoesNotExist:
+        return Response({"detail": "Listing not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    if ApprovalRequest.objects.filter(listing=listing, status=ApprovalRequest.Status.PENDING).exists():
+        return Response({"detail": "This listing already has a pending approval request."}, status=status.HTTP_400_BAD_REQUEST)
+
+    serializer = ApprovalRequestCreateSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    data = serializer.validated_data
+    company = ManagementCompany.objects.get(pk=data["management_company_id"])
+    guideline = Guideline.objects.get(pk=data["guideline_id"])
+
+    approval_request = ApprovalRequest.objects.create(
+        listing=listing,
+        management_company=company,
+        guideline=guideline,
+        subleaser_notes=data.get("subleaser_notes", ""),
+        status=ApprovalRequest.Status.PENDING,
+    )
+
+    listing.approval_status = PropertyListing.ApprovalStatus.PENDING
+    listing.save(update_fields=["approval_status", "updated_at"])
+
+    return Response(ApprovalRequestSummarySerializer(approval_request).data, status=status.HTTP_201_CREATED)
+
+
+# ---------------------------------------------------------------------------
+# Task 8: GET /company/approval-requests/
+# ---------------------------------------------------------------------------
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def company_approval_request_list(request):
+    """Management company views their queue of approval requests."""
+    if not _is_approved_management(request):
+        return Response({"detail": "Only approved management companies can access this."}, status=status.HTTP_403_FORBIDDEN)
+
+    company = request.user.management_company
+    qs = ApprovalRequest.objects.filter(management_company=company).select_related(
+        "listing", "guideline", "management_company"
+    )
+
+    filter_status = request.query_params.get("status", "").strip()
+    if filter_status:
+        qs = qs.filter(status=filter_status)
+
+    qs = qs.order_by("-created_at")
+    return Response(ApprovalRequestSummarySerializer(qs, many=True).data)
+
+
+# ---------------------------------------------------------------------------
+# Task 9: GET /company/approval-requests/<id>/
+# ---------------------------------------------------------------------------
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def company_approval_request_detail(request, pk):
+    """Management company views full detail of one request, including compliance check."""
+    if not _is_approved_management(request):
+        return Response({"detail": "Only approved management companies can access this."}, status=status.HTTP_403_FORBIDDEN)
+
+    company = request.user.management_company
+    try:
+        approval_request = ApprovalRequest.objects.select_related(
+            "listing__owner", "listing__approved_by_company", "guideline", "management_company"
+        ).prefetch_related(
+            "listing__amenity_links__amenity", "listing__media"
+        ).get(pk=pk, management_company=company)
+    except ApprovalRequest.DoesNotExist:
+        return Response({"detail": "Approval request not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    serializer = ApprovalRequestDetailSerializer(
+        approval_request,
+        context={"check_compliance": _check_guideline_compliance},
+    )
+    return Response(serializer.data)
+
+
+# ---------------------------------------------------------------------------
+# Task 10: PATCH /company/approval-requests/<id>/
+# ---------------------------------------------------------------------------
+
+@api_view(["PATCH"])
+@permission_classes([IsAuthenticated])
+def company_review_approval_request(request, pk):
+    """Management company approves or rejects an approval request."""
+    if not _is_approved_management(request):
+        return Response({"detail": "Only approved management companies can access this."}, status=status.HTTP_403_FORBIDDEN)
+
+    company = request.user.management_company
+    try:
+        approval_request = ApprovalRequest.objects.select_related("listing", "management_company").get(
+            pk=pk, management_company=company
+        )
+    except ApprovalRequest.DoesNotExist:
+        return Response({"detail": "Approval request not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    if approval_request.status != ApprovalRequest.Status.PENDING:
+        return Response({"detail": "This request has already been reviewed."}, status=status.HTTP_400_BAD_REQUEST)
+
+    action = request.data.get("action", "").strip()
+    reviewer_notes = request.data.get("reviewer_notes", "").strip()
+
+    if action not in ("approve", "reject"):
+        return Response({"detail": "action must be 'approve' or 'reject'."}, status=status.HTTP_400_BAD_REQUEST)
+
+    if action == "reject" and not reviewer_notes:
+        return Response({"detail": "reviewer_notes is required when rejecting."}, status=status.HTTP_400_BAD_REQUEST)
+
+    now = timezone.now()
+    listing = approval_request.listing
+
+    if action == "approve":
+        approval_request.status = ApprovalRequest.Status.APPROVED
+        approval_request.reviewer_notes = reviewer_notes
+        approval_request.reviewed_at = now
+        approval_request.save(update_fields=["status", "reviewer_notes", "reviewed_at", "updated_at"])
+
+        listing.approval_status = PropertyListing.ApprovalStatus.APPROVED
+        listing.approved_by_company = company
+        listing.status = PropertyListing.ListingStatus.PUBLISHED
+        listing.published_at = now
+        listing.save(update_fields=["approval_status", "approved_by_company", "status", "published_at", "updated_at"])
+
+    else:  # reject
+        approval_request.status = ApprovalRequest.Status.REJECTED
+        approval_request.reviewer_notes = reviewer_notes
+        approval_request.reviewed_at = now
+        approval_request.save(update_fields=["status", "reviewer_notes", "reviewed_at", "updated_at"])
+
+        listing.approval_status = PropertyListing.ApprovalStatus.REJECTED
+        listing.save(update_fields=["approval_status", "updated_at"])
+
+        try:
+            listing_url = f"{settings.FRONTEND_URL}/my-listings"
+            send_mail(
+                subject="Your listing was not approved",
+                message=(
+                    f"Hi {listing.owner.first_name or listing.owner.username},\n\n"
+                    f"Unfortunately, your listing '{listing.title}' was not approved by "
+                    f"{company.company_name}.\n\n"
+                    f"Reason: {reviewer_notes}\n\n"
+                    f"You can view your listing and resubmit for approval here:\n{listing_url}\n\n"
+                    f"— The BoilerLease Team"
+                ),
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[listing.owner.email],
+                fail_silently=True,
+            )
+        except Exception:
+            pass
+
+    return Response(ApprovalRequestSummarySerializer(approval_request).data)

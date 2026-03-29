@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import axios from "axios";
 import { Alert, Box, Button, Card, CardContent, Chip, Container, Grid, Stack, TextField, Typography } from "@mui/material";
+import VerifiedIcon from "@mui/icons-material/Verified";
 import FavoriteBorderRoundedIcon from "@mui/icons-material/FavoriteBorderRounded";
 import FavoriteRoundedIcon from "@mui/icons-material/FavoriteRounded";
 import { Link as RouterLink, useNavigate, useParams } from "react-router-dom";
@@ -156,6 +157,14 @@ export default function PropertyDetailPage() {
               {listing.street_line_1}
               {listing.street_line_2 ? `, ${listing.street_line_2}` : ""}, {listing.city}, {listing.state} {listing.postal_code}
             </Typography>
+            {listing.approved_by_company_name && (
+              <Stack direction="row" spacing={0.5} alignItems="center" sx={{ mt: 0.5 }}>
+                <VerifiedIcon fontSize="small" color="success" />
+                <Typography variant="body2" color="success.main" sx={{ fontWeight: 600 }}>
+                  Approved by {listing.approved_by_company_name}
+                </Typography>
+              </Stack>
+            )}
           </Box>
           <Stack direction="row" spacing={1}>
             <Chip label={`${formatMoney(listing.monthly_rent)}/mo`} size="small" />
