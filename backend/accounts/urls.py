@@ -45,4 +45,5 @@ urlpatterns = [
     path("company/guidelines/", views.company_guidelines),
     path("company/guidelines/<int:pk>/", views.company_guideline_detail),
     path("companies/", views.browse_management_companies),
+    path("companies/<int:pk>/", views.management_company_detail),
 ]

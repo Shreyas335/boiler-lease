@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Alert,
   Box,
@@ -13,6 +14,7 @@ import {
 } from "@mui/material";
 import SearchIcon from "@mui/icons-material/Search";
 import HomeWorkIcon from "@mui/icons-material/HomeWork";
+import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import { getManagementCompanies, type PublicManagementCompany, type PublicGuideline } from "../api/company";
 
 function guidelineChips(g: PublicGuideline): string[] {
@@ -41,14 +43,21 @@ function guidelineChips(g: PublicGuideline): string[] {
   return chips;
 }
 
-function CompanyCard({ company }: { company: PublicManagementCompany }) {
+function CompanyCard({ company, onClick }: { company: PublicManagementCompany; onClick: () => void }) {
   return (
-    <Paper variant="outlined" sx={{ px: 2.5, py: 2 }}>
-      <Box display="flex" alignItems="center" gap={1} mb={1.5}>
-        <HomeWorkIcon color="primary" />
-        <Typography variant="h6" fontWeight={600}>
-          {company.company_name}
-        </Typography>
+    <Paper
+      variant="outlined"
+      sx={{ px: 2.5, py: 2, cursor: "pointer", "&:hover": { borderColor: "primary.main", bgcolor: "action.hover" } }}
+      onClick={onClick}
+    >
+      <Box display="flex" alignItems="center" justifyContent="space-between" mb={1.5}>
+        <Box display="flex" alignItems="center" gap={1}>
+          <HomeWorkIcon color="primary" />
+          <Typography variant="h6" fontWeight={600}>
+            {company.company_name}
+          </Typography>
+        </Box>
+        <ChevronRightIcon sx={{ color: "text.disabled" }} />
       </Box>
 
       {company.guidelines.length === 0 ? (
@@ -83,6 +92,7 @@ function CompanyCard({ company }: { company: PublicManagementCompany }) {
 }
 
 export default function ManagementCompaniesPage() {
+  const navigate = useNavigate();
   const [companies, setCompanies] = useState<PublicManagementCompany[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
@@ -144,7 +154,7 @@ export default function ManagementCompaniesPage() {
       ) : (
         <Stack spacing={2}>
           {companies.map((c) => (
-            <CompanyCard key={c.id} company={c} />
+            <CompanyCard key={c.id} company={c} onClick={() => navigate(`/companies/${c.id}`)} />
           ))}
         </Stack>
       )}
