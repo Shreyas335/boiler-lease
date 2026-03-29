@@ -42,4 +42,5 @@ urlpatterns = [
     path("company/status/", views.company_status),
     path("company/documents/", views.company_documents),
     path("company/documents/<int:pk>/", views.company_document_delete),
+    path("company/guidelines/", views.company_guidelines),
 ]

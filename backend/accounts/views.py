@@ -1331,3 +1331,21 @@ def company_document_delete(request, pk):
         return Response({"detail": "Document not found."}, status=status.HTTP_404_NOT_FOUND)
     doc.delete()
     return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+@api_view(["GET", "PUT"])
+@permission_classes([IsAuthenticated])
+def company_guidelines(request):
+    if not _is_approved_management(request):
+        return Response({"detail": "Only approved management companies can access this."}, status=status.HTTP_403_FORBIDDEN)
+    company = request.user.management_company
+    if request.method == "GET":
+        return Response({"guidelines": company.guidelines})
+    guidelines = request.data.get("guidelines")
+    if not isinstance(guidelines, list):
+        return Response({"guidelines": "Must be a list of strings."}, status=status.HTTP_400_BAD_REQUEST)
+    if not all(isinstance(g, str) and g.strip() for g in guidelines):
+        return Response({"guidelines": "Each guideline must be a non-empty string."}, status=status.HTTP_400_BAD_REQUEST)
+    company.guidelines = [g.strip() for g in guidelines]
+    company.save(update_fields=["guidelines", "updated_at"])
+    return Response({"guidelines": company.guidelines})
