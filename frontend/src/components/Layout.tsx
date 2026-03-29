@@ -23,6 +23,7 @@ import SearchRoundedIcon from "@mui/icons-material/SearchRounded";
 import EventAvailableRoundedIcon from "@mui/icons-material/EventAvailableRounded";
 import HistoryRoundedIcon from "@mui/icons-material/HistoryRounded";
 import FavoriteRoundedIcon from "@mui/icons-material/FavoriteRounded";
+import BusinessRoundedIcon from "@mui/icons-material/BusinessRounded";
 import { useAuth } from "../contexts/AuthContext";
 import AccountSettingsModal from "./AccountSettingsModal";
 
@@ -111,6 +112,15 @@ export default function Layout({ children }: LayoutProps) {
                   </Button>
                   {user.user_type === "subleaser" && (
                     <>
+                      <Button
+                        component={RouterLink}
+                        to="/companies"
+                        color="inherit"
+                        startIcon={<BusinessRoundedIcon />}
+                        sx={{ color: "text.secondary" }}
+                      >
+                        Companies
+                      </Button>
                       <Button
                         component={RouterLink}
                         to="/listings/new"
