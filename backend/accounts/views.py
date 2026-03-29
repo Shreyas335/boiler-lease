@@ -588,9 +588,9 @@ def my_property_listings(request):
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def listing_amenities(request):
-    if request.user.user_type != User.UserType.SUBLEASER:
+    if request.user.user_type not in (User.UserType.SUBLEASER, User.UserType.MANAGEMENT):
         return Response(
-            {"detail": "Only subleasers can access listing amenities."},
+            {"detail": "Only subleasers and management companies can access listing amenities."},
             status=status.HTTP_403_FORBIDDEN,
         )
     amenities = ListingAmenity.objects.filter(is_active=True).order_by("label")
