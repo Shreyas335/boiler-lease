@@ -19,10 +19,10 @@ import AccountCircleRoundedIcon from "@mui/icons-material/AccountCircleRounded";
 import RateReviewRoundedIcon from "@mui/icons-material/RateReviewRounded";
 import AddHomeRoundedIcon from "@mui/icons-material/AddHomeRounded";
 import ApartmentRoundedIcon from "@mui/icons-material/ApartmentRounded";
-import SearchRoundedIcon from "@mui/icons-material/SearchRounded";
 import EventAvailableRoundedIcon from "@mui/icons-material/EventAvailableRounded";
 import HistoryRoundedIcon from "@mui/icons-material/HistoryRounded";
 import FavoriteRoundedIcon from "@mui/icons-material/FavoriteRounded";
+import FactCheckRoundedIcon from "@mui/icons-material/FactCheckRounded";
 import { useAuth } from "../contexts/AuthContext";
 import AccountSettingsModal from "./AccountSettingsModal";
 
@@ -128,6 +128,15 @@ export default function Layout({ children }: LayoutProps) {
                         sx={{ color: "text.secondary" }}
                       >
                         My Listings
+                      </Button>
+                      <Button
+                        component={RouterLink}
+                        to="/booking-requests"
+                        color="inherit"
+                        startIcon={<FactCheckRoundedIcon />}
+                        sx={{ color: "text.secondary" }}
+                      >
+                        Booking Requests
                       </Button>
                     </>
                   )}
