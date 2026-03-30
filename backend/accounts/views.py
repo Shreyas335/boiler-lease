@@ -38,10 +38,12 @@ from .serializers import (
     FavoriteListingSerializer,
     FeedbackSubmissionSerializer,
     LoginSerializer,
+    ManagedPropertyBookingSerializer,
     PasswordChangeSerializer,
     PasswordResetConfirmSerializer,
     PasswordResetRequestSerializer,
     PropertyBookingCreateSerializer,
+    PropertyBookingStatusUpdateSerializer,
     PropertyListingBrowseSerializer,
     PropertyListingUpdateSerializer,
     PropertyBookingSerializer,
@@ -76,6 +78,10 @@ def _hash_token(token):
 
 def _is_sublessee(request):
     return request.user.user_type == User.UserType.SUBLESSEE
+
+
+def _can_manage_booking_requests(request):
+    return request.user.user_type == User.UserType.SUBLEASER
 
 
 def _sort_order_prefix(order):
@@ -951,6 +957,58 @@ def cancel_booking(request, booking_id):
     booking.status = PropertyBooking.Status.CANCELLED
     booking.save(update_fields=["status"])
     return Response({"detail": "Booking cancelled successfully."}, status=status.HTTP_200_OK)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def manageable_bookings(request):
+    if not _can_manage_booking_requests(request):
+        return Response(
+            {"detail": "Only subleasers can manage booking requests."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    bookings = (
+        PropertyBooking.objects.filter(
+            listing__owner=request.user,
+            listing__deleted_at__isnull=True,
+        )
+        .select_related("listing", "sublessee")
+        .prefetch_related("listing__media")
+        .order_by("status", "-booked_at")
+    )
+    serializer = ManagedPropertyBookingSerializer(bookings, many=True)
+    return Response(serializer.data)
+
+
+@api_view(["PATCH"])
+@permission_classes([IsAuthenticated])
+def update_booking_status(request, booking_id):
+    if not _can_manage_booking_requests(request):
+        return Response(
+            {"detail": "Only subleasers can manage booking requests."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    booking = (
+        PropertyBooking.objects.filter(
+            pk=booking_id,
+            listing__owner=request.user,
+            listing__deleted_at__isnull=True,
+        )
+        .select_related("listing", "sublessee")
+        .first()
+    )
+    if not booking:
+        return Response({"detail": "Booking not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    serializer = PropertyBookingStatusUpdateSerializer(instance=booking, data=request.data, partial=True)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    serializer.save()
+    response_serializer = ManagedPropertyBookingSerializer(booking)
+    return Response(response_serializer.data, status=status.HTTP_200_OK)
 
 
 @api_view(["GET"])
