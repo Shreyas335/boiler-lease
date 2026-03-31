@@ -439,6 +439,46 @@ class PropertyBookingSerializer(serializers.ModelSerializer):
         )
 
 
+class ManagedPropertyBookingSerializer(PropertyBookingSerializer):
+    sublessee_name = serializers.SerializerMethodField()
+    sublessee_email = serializers.EmailField(source="sublessee.email", read_only=True)
+
+    class Meta(PropertyBookingSerializer.Meta):
+        fields = PropertyBookingSerializer.Meta.fields + (
+            "sublessee_name",
+            "sublessee_email",
+        )
+
+    def get_sublessee_name(self, obj):
+        full_name = obj.sublessee.get_full_name().strip()
+        return full_name or obj.sublessee.username
+
+
+class PropertyBookingStatusUpdateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PropertyBooking
+        fields = ("status",)
+
+    def validate_status(self, value):
+        allowed_statuses = {
+            PropertyBooking.Status.CONFIRMED,
+            PropertyBooking.Status.DECLINED,
+        }
+        if value not in allowed_statuses:
+            raise serializers.ValidationError(
+                "Bookings can only be updated to Confirmed or Declined."
+            )
+        return value
+
+    def validate(self, attrs):
+        booking = self.instance
+        if booking.status != PropertyBooking.Status.PENDING:
+            raise serializers.ValidationError(
+                {"status": ["Only pending bookings can be approved or declined."]}
+            )
+        return attrs
+
+
 class PropertyBookingCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = PropertyBooking
