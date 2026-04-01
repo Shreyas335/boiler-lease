@@ -1031,14 +1031,36 @@ def my_payment_history(request):
             {"detail": "Only sublessees can view payment history."},
             status=status.HTTP_403_FORBIDDEN,
         )
-    transactions = (
+    transactions = list(
         TransactionRecord.objects.filter(
             user=request.user,
             status=TransactionRecord.Status.SUCCEEDED,
-        )
-        .order_by("-paid_at", "-created_at")
+        ).order_by("-paid_at", "-created_at")
     )
-    serializer = TransactionRecordSerializer(transactions, many=True)
+    booking_ids = []
+    for txn in transactions:
+        ref = (txn.booking_reference or "").strip()
+        if not ref:
+            continue
+        try:
+            booking_ids.append(int(ref))
+        except ValueError:
+            pass
+    titles_by_booking_id = {}
+    if booking_ids:
+        for b in PropertyBooking.objects.filter(
+            pk__in=booking_ids,
+            sublessee=request.user,
+        ).select_related("listing"):
+            titles_by_booking_id[b.pk] = b.listing.title
+    serializer = TransactionRecordSerializer(
+        transactions,
+        many=True,
+        context={
+            "request": request,
+            "listing_titles_by_booking_id": titles_by_booking_id,
+        },
+    )
     return Response(serializer.data)
 
 
