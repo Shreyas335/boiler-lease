@@ -34,6 +34,7 @@ from .models import (
     PropertyListing,
     TransactionRecord,
     User,
+    UserBlock,
 )
 from .guidelines import validate_guideline_data
 from .pagination import PropertyListingPagination
@@ -102,6 +103,12 @@ def _is_approved_management(request):
         return request.user.management_company.status == ManagementCompany.Status.APPROVED
     except ManagementCompany.DoesNotExist:
         return False
+
+
+def _get_blocked_user_ids(user):
+    blocked_by_me = set(UserBlock.objects.filter(blocker=user).values_list('blocked_user_id', flat=True))
+    blocked_me = set(UserBlock.objects.filter(blocked_user=user).values_list('blocker_id', flat=True))
+    return blocked_by_me | blocked_me
 
 
 def _sort_order_prefix(order):
@@ -718,6 +725,12 @@ def browse_property_listings(request):
         Prefetch('amenity_links__amenity', queryset=ListingAmenity.objects.filter(is_active=True))
     )
 
+    # Exclude listings from blocked users
+    if request.user.is_authenticated:
+        blocked_ids = _get_blocked_user_ids(request.user)
+        if blocked_ids:
+            queryset = queryset.exclude(owner_id__in=blocked_ids)
+
     # Apply search filter (search across title, description, city, state, postal_code)
     search_query = request.query_params.get('search', '').strip()
     if search_query:
@@ -946,6 +959,11 @@ def create_booking(request):
     if not serializer.is_valid():
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+    listing = serializer.validated_data['listing']
+    blocked_ids = _get_blocked_user_ids(request.user)
+    if listing.owner_id in blocked_ids:
+        return Response({'detail': 'Cannot book this listing.'}, status=status.HTTP_403_FORBIDDEN)
+
     booking = serializer.save()
     response_serializer = PropertyBookingSerializer(
         booking,
@@ -1150,6 +1168,11 @@ def property_listing_detail(request, listing_id):
             {"detail": "Property listing not found."}, status=status.HTTP_404_NOT_FOUND
         )
 
+    if request.user.is_authenticated:
+        blocked_ids = _get_blocked_user_ids(request.user)
+        if listing.owner_id in blocked_ids:
+            return Response({'detail': 'Property listing not found.'}, status=status.HTTP_404_NOT_FOUND)
+
     # GET: Retrieve listing
     if request.method == "GET":
         # Check if sublessee can access this listing
@@ -1271,6 +1294,10 @@ def my_favorite_listings(request):
     sort_by = request.query_params.get("sort_by", "date_saved")
     order = request.query_params.get("order", "desc")
     favorites = _sort_favorites(favorites, sort_by, order)
+
+    blocked_ids = _get_blocked_user_ids(request.user)
+    if blocked_ids:
+        favorites = favorites.exclude(listing__owner_id__in=blocked_ids)
 
     favorite_listing_ids = set(favorites.values_list("listing_id", flat=True))
     serializer = FavoriteListingSerializer(
