@@ -474,3 +474,20 @@ class PasswordResetToken(models.Model):
     @property
     def is_usable(self):
         return self.used_at is None and not self.is_expired
+
+
+class UserRating(models.Model):
+    rater = models.ForeignKey(User, on_delete=models.CASCADE, related_name='ratings_given')
+    rated_user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='ratings_received')
+    score = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(5)])
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['rater', 'rated_user'], name='one_rating_per_user_pair'),
+            models.CheckConstraint(check=~models.Q(rater=models.F('rated_user')), name='cannot_rate_self'),
+        ]
+
+    def __str__(self):
+        return f'{self.rater} rated {self.rated_user}: {self.score}'
