@@ -1,7 +1,7 @@
 from django.db import migrations, models
 class Migration(migrations.Migration):
     dependencies = [
-    ("accounts", "0011_transaction_record"),
+        ("accounts", "0012_transaction_record"),
     ]
     operations = [
     migrations.AddField(
