@@ -28,6 +28,9 @@ import ManagementCompanyDetailPage from "./pages/ManagementCompanyDetailPage";
 import SubmitApprovalPage from "./pages/SubmitApprovalPage";
 import ManagementApprovalQueuePage from "./pages/ManagementApprovalQueuePage";
 import ApprovalRequestDetailPage from "./pages/ApprovalRequestDetailPage";
+import ProfilePage from "./pages/ProfilePage";
+import EditProfilePage from "./pages/EditProfilePage";
+import PrivacySettingsPage from "./pages/PrivacySettingsPage";
 
 function App() {
   return (
@@ -177,6 +180,30 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <ApprovalRequestDetailPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/profile/edit"
+                element={
+                  <ProtectedRoute>
+                    <EditProfilePage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/profile/:id"
+                element={
+                  <ProtectedRoute>
+                    <ProfilePage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/settings/privacy"
+                element={
+                  <ProtectedRoute>
+                    <PrivacySettingsPage />
                   </ProtectedRoute>
                 }
               />
