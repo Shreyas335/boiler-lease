@@ -350,6 +350,7 @@ class PropertyListingSerializer(serializers.ModelSerializer):
         model = PropertyListing
         fields = (
             "id",
+            "owner",
             "title",
             "description",
             "property_type",
@@ -878,6 +879,38 @@ class TransactionRecordSerializer(serializers.ModelSerializer):
             .first()
         )
         return booking.listing.title if booking else None
+
+
+class OwnerListingTransactionSerializer(serializers.ModelSerializer):
+    """Succeeded deposit charges for a listing, for the listing owner (subleaser)."""
+
+    booking_id = serializers.SerializerMethodField()
+    sublessee_display = serializers.SerializerMethodField()
+
+    class Meta:
+        model = TransactionRecord
+        fields = (
+            "id",
+            "amount",
+            "currency",
+            "booking_id",
+            "paid_at",
+            "status",
+            "sublessee_display",
+        )
+        read_only_fields = fields
+
+    def get_booking_id(self, obj):
+        ref = (obj.booking_reference or "").strip()
+        try:
+            return int(ref)
+        except ValueError:
+            return None
+
+    def get_sublessee_display(self, obj):
+        u = obj.user
+        name = f"{u.first_name or ''} {u.last_name or ''}".strip()
+        return name or u.username
 
 
 class ManagementCompanySerializer(serializers.ModelSerializer):
