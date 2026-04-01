@@ -1123,8 +1123,8 @@ def create_deposit_checkout_session(request):
             }
         ],
         metadata=session_metadata,
-        success_url=f"{settings.FRONTEND_URL}/dashboard",
-        cancel_url=f"{settings.FRONTEND_URL}/dashboard",
+        success_url=f"{settings.FRONTEND_URL}/dashboard?deposit=success",
+        cancel_url=f"{settings.FRONTEND_URL}/dashboard?deposit=canceled",
     )
     txn.stripe_checkout_session_id = session.id
     txn.save(update_fields=["stripe_checkout_session_id"])
@@ -1147,7 +1147,6 @@ def stripe_webhook(request):
     except Exception:
         return Response({"detail": "Invalid webhook payload/signature."}, status=status.HTTP_400_BAD_REQUEST)
 
-    # construct_event returns StripeObject, not dict — use attributes, not .get()
     event_type = event.type
     obj = event.data.object
 
