@@ -1025,12 +1025,19 @@ def my_past_bookings(request):
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def my_payment_history(request):
+    """List completed (succeeded) payment transactions for the sublessee."""
     if not _is_sublessee(request):
         return Response(
             {"detail": "Only sublessees can view payment history."},
             status=status.HTTP_403_FORBIDDEN,
         )
-    transactions = TransactionRecord.objects.filter(user=request.user).order_by("-created_at")
+    transactions = (
+        TransactionRecord.objects.filter(
+            user=request.user,
+            status=TransactionRecord.Status.SUCCEEDED,
+        )
+        .order_by("-paid_at", "-created_at")
+    )
     serializer = TransactionRecordSerializer(transactions, many=True)
     return Response(serializer.data)
 

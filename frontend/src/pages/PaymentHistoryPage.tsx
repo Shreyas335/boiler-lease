@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from "react";
 import {
   Alert,
   Box,
-  Chip,
   Container,
   Paper,
   Table,
@@ -12,26 +11,10 @@ import {
   TableHead,
   TableRow,
   Typography,
-  type ChipProps,
 } from "@mui/material";
 import { Link as RouterLink, Navigate } from "react-router-dom";
-import { fetchPaymentHistory, type PaymentTransaction, type TransactionStatus } from "../api/payments";
+import { fetchPaymentHistory, type PaymentTransaction } from "../api/payments";
 import { useAuth } from "../contexts/AuthContext";
-
-function statusMeta(status: TransactionStatus): { label: string; color: ChipProps["color"] } {
-  switch (status) {
-    case "succeeded":
-      return { label: "Succeeded", color: "success" };
-    case "pending":
-      return { label: "Pending", color: "warning" };
-    case "failed":
-      return { label: "Failed", color: "error" };
-    case "canceled":
-      return { label: "Canceled", color: "default" };
-    default:
-      return { label: status, color: "default" };
-  }
-}
 
 function formatMoney(amount: string, currency: string): string {
   const n = Number.parseFloat(amount);
@@ -92,7 +75,7 @@ export default function PaymentHistoryPage() {
           Payment history
         </Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-          Security deposits and other payments tied to your account.
+          Completed security deposits and other successful charges on your account.
         </Typography>
 
         {error && (
@@ -104,35 +87,28 @@ export default function PaymentHistoryPage() {
         {loading ? (
           <Typography color="text.secondary">Loading transactions…</Typography>
         ) : rows.length === 0 ? (
-          <Alert severity="info">You don&apos;t have any transactions yet.</Alert>
+          <Alert severity="info">You don&apos;t have any completed payments yet.</Alert>
         ) : (
           <TableContainer component={Paper} variant="outlined">
             <Table size="medium" sx={{ minWidth: 650 }}>
               <TableHead>
                 <TableRow>
-                  <TableCell>Date</TableCell>
+                  <TableCell>Paid</TableCell>
                   <TableCell>Description</TableCell>
                   <TableCell align="right">Amount</TableCell>
-                  <TableCell>Status</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
                 {rows.map((tx) => {
-                  const meta = statusMeta(tx.status);
                   const bookingRef = tx.booking_reference?.trim();
                   const description = bookingRef
                     ? `Security deposit (booking #${bookingRef})`
                     : "Security deposit";
-                  const primaryDate =
-                    tx.status === "succeeded" && tx.paid_at ? tx.paid_at : tx.created_at;
                   return (
                     <TableRow key={tx.id} hover>
-                      <TableCell>{formatDateTime(primaryDate)}</TableCell>
+                      <TableCell>{formatDateTime(tx.paid_at)}</TableCell>
                       <TableCell>{description}</TableCell>
                       <TableCell align="right">{formatMoney(tx.amount, tx.currency)}</TableCell>
-                      <TableCell>
-                        <Chip label={meta.label} color={meta.color} size="small" />
-                      </TableCell>
                     </TableRow>
                   );
                 })}
