@@ -35,6 +35,7 @@ from .models import (
     TransactionRecord,
     User,
     UserBlock,
+    UserRating,
 )
 from .guidelines import validate_guideline_data
 from .pagination import PropertyListingPagination
@@ -68,6 +69,10 @@ from .serializers import (
     TransactionRecordSerializer,
     UserSerializer,
     TwoFactorVerifyLoginSerializer,
+    BlockedUserSerializer,
+    UserProfileSerializer,
+    UserProfileUpdateSerializer,
+    UserRatingSerializer,
 )
 
 
@@ -1643,3 +1648,82 @@ def company_review_approval_request(request, pk):
             pass
 
     return Response(ApprovalRequestSummarySerializer(approval_request).data)
+
+
+@api_view(["GET", "PATCH"])
+@permission_classes([IsAuthenticated])
+def my_profile(request):
+    if request.method == "GET":
+        serializer = UserProfileSerializer(request.user, context={"request": request})
+        return Response(serializer.data)
+    serializer = UserProfileUpdateSerializer(request.user, data=request.data, partial=True)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    serializer.save()
+    return Response(UserProfileSerializer(request.user, context={"request": request}).data)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def upload_profile_picture(request):
+    url = request.data.get("url", "").strip()
+    if not url:
+        return Response({"detail": "url is required."}, status=status.HTTP_400_BAD_REQUEST)
+    request.user.profile_picture_url = url
+    request.user.save(update_fields=["profile_picture_url"])
+    return Response({"profile_picture_url": request.user.profile_picture_url})
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def user_profile(request, user_id):
+    try:
+        user = User.objects.get(pk=user_id)
+    except User.DoesNotExist:
+        return Response({"detail": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+    serializer = UserProfileSerializer(user, context={"request": request})
+    return Response(serializer.data)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def rate_user(request, user_id):
+    if request.user.pk == user_id:
+        return Response({"detail": "You cannot rate yourself."}, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        rated_user = User.objects.get(pk=user_id)
+    except User.DoesNotExist:
+        return Response({"detail": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+    serializer = UserRatingSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    UserRating.objects.update_or_create(
+        rater=request.user,
+        rated_user=rated_user,
+        defaults={"score": serializer.validated_data["score"]},
+    )
+    return Response(UserProfileSerializer(rated_user, context={"request": request}).data)
+
+
+@api_view(["POST", "DELETE"])
+@permission_classes([IsAuthenticated])
+def block_user_toggle(request, user_id):
+    if request.user.pk == user_id:
+        return Response({"detail": "You cannot block yourself."}, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        target = User.objects.get(pk=user_id)
+    except User.DoesNotExist:
+        return Response({"detail": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+    if request.method == "DELETE":
+        UserBlock.objects.filter(blocker=request.user, blocked_user=target).delete()
+        return Response({"blocked": False})
+    UserBlock.objects.get_or_create(blocker=request.user, blocked_user=target)
+    return Response({"blocked": True}, status=status.HTTP_201_CREATED)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def blocked_users_list(request):
+    blocks = UserBlock.objects.filter(blocker=request.user).select_related("blocked_user")
+    serializer = BlockedUserSerializer(blocks, many=True)
+    return Response(serializer.data)
