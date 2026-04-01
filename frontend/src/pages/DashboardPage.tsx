@@ -9,12 +9,17 @@ import {
   Button,
   Chip,
   Alert,
+  Stack,
+  Tooltip,
+  type ChipProps,
 } from "@mui/material";
-import { Link as RouterLink } from "react-router-dom";
+import { Link as RouterLink, useNavigate, useSearchParams } from "react-router-dom";
 import HomeWorkRoundedIcon from "@mui/icons-material/HomeWorkRounded";
 import PersonSearchRoundedIcon from "@mui/icons-material/PersonSearchRounded";
 import BusinessRoundedIcon from "@mui/icons-material/BusinessRounded";
 import WarningAmberRoundedIcon from "@mui/icons-material/WarningAmberRounded";
+import PropertySummaryCard from "../components/PropertySummaryCard";
+import { getBookingHistory, type BookingRecord } from "../api/listings";
 import { useAuth } from "../contexts/AuthContext";
 
 const USER_TYPE_CONFIG: Record<
@@ -43,7 +48,78 @@ export default function DashboardPage() {
   const [identityBusy, setIdentityBusy] = useState(false);
   useEffect(() => {
     void refreshUser();
-  }, [refreshUser]);
+  }, [refreshUser]);  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const [recentBookings, setRecentBookings] = useState<BookingRecord[]>([]);
+  const [bookingsLoading, setBookingsLoading] = useState(false);
+  const [bookingsError, setBookingsError] = useState<string | null>(null);
+  const [depositNotice, setDepositNotice] = useState<"success" | "canceled" | null>(null);
+  const userType = user?.user_type;
+
+  function getBookingStatusMeta(status: BookingRecord["status"]): {
+    label: string;
+    color: ChipProps["color"];
+  } {
+    if (status === "confirmed") {
+      return { label: "Confirmed", color: "success" };
+    }
+    if (status === "declined") {
+      return { label: "Declined", color: "warning" };
+    }
+    if (status === "cancelled") {
+      return { label: "Cancelled", color: "default" };
+    }
+    return { label: "Pending", color: "info" };
+  }
+
+  useEffect(() => {
+    if (userType !== "sublessee") return undefined;
+
+    let isMounted = true;
+
+    async function loadBookingHistory(showSpinner: boolean) {
+      try {
+        if (showSpinner && isMounted) {
+          setBookingsLoading(true);
+        }
+        if (isMounted) {
+          setBookingsError(null);
+        }
+        const data = await getBookingHistory("date_booked", "desc");
+        if (isMounted) {
+          setRecentBookings(data.slice(0, 3));
+        }
+      } catch {
+        if (isMounted) {
+          setBookingsError("Unable to load recent booking updates.");
+        }
+      } finally {
+        if (showSpinner && isMounted) {
+          setBookingsLoading(false);
+        }
+      }
+    }
+
+    void loadBookingHistory(true);
+    const intervalId = window.setInterval(() => {
+      void loadBookingHistory(false);
+    }, 15000);
+
+    return () => {
+      isMounted = false;
+      window.clearInterval(intervalId);
+    };
+  }, [userType]);
+
+  useEffect(() => {
+    if (userType !== "sublessee") return;
+    const d = searchParams.get("deposit");
+    if (d === "success" || d === "canceled") {
+      setDepositNotice(d);
+      navigate("/dashboard", { replace: true });
+    }
+  }, [searchParams, navigate, userType]);
+
   if (!user) return null;
 
   const config = USER_TYPE_CONFIG[user.user_type] || USER_TYPE_CONFIG.sublessee;
@@ -102,6 +178,42 @@ export default function DashboardPage() {
             resend it.
           </Alert>
         )}
+        {user.user_type === "management" && user.company_status === "pending" && (
+          <Alert severity="warning" icon={<WarningAmberRoundedIcon />} sx={{ mb: 3 }}>
+            Your company is pending verification. Upload your documents to speed up the review process.{" "}
+            <RouterLink to="/company/verify" style={{ fontWeight: 600 }}>
+              Upload Documents
+            </RouterLink>
+          </Alert>
+        )}
+        {user.user_type === "management" && user.company_status === "rejected" && (
+          <Alert severity="error" icon={<WarningAmberRoundedIcon />} sx={{ mb: 3 }}>
+            Your company verification was rejected. Please re-upload your documents.{" "}
+            <RouterLink to="/company/verify" style={{ fontWeight: 600 }}>
+              Re-upload Documents
+            </RouterLink>
+          </Alert>
+        )}
+        {user.user_type === "sublessee" && depositNotice === "success" && (
+          <Alert
+            severity="success"
+            onClose={() => setDepositNotice(null)}
+            sx={{ mb: 3 }}
+          >
+            Your security deposit payment went through. If your booking does not show as paid yet, wait a few seconds
+            and refresh—confirmation arrives via Stripe. View details in{" "}
+            <RouterLink to="/payments/history" style={{ fontWeight: 600 }}>
+              payment history
+            </RouterLink>
+            .
+          </Alert>
+        )}
+        {user.user_type === "sublessee" && depositNotice === "canceled" && (
+          <Alert severity="info" onClose={() => setDepositNotice(null)} sx={{ mb: 3 }}>
+            Checkout was canceled; no charge was made. You can pay the deposit again from your booking when you are
+            ready.
+          </Alert>
+        )}
         <Box sx={{ mb: 4 }}>
           <Typography variant="h4" sx={{ fontWeight: 700, mb: 0.5 }}>
             Welcome back, {user.first_name || user.username}
@@ -131,6 +243,44 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
+        {user.user_type === "sublessee" && (
+          <Card sx={{ mb: 4 }}>
+            <CardContent sx={{ p: 4 }}>
+              <Stack spacing={2}>
+                <Box>
+                  <Typography variant="h6">Recent booking updates</Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Booking statuses refresh automatically every 15 seconds.
+                  </Typography>
+                </Box>
+
+                {bookingsError && <Alert severity="error">{bookingsError}</Alert>}
+
+                {bookingsLoading ? (
+                  <Typography>Loading recent booking updates...</Typography>
+                ) : recentBookings.length === 0 ? (
+                  <Alert severity="info">You haven&apos;t submitted any bookings yet.</Alert>
+                ) : (
+                  <Stack spacing={2}>
+                    {recentBookings.map((booking) => {
+                      const statusMeta = getBookingStatusMeta(booking.status);
+                      return (
+                        <PropertySummaryCard
+                          key={booking.id}
+                          listing={booking.listing}
+                          statusLabel={statusMeta.label}
+                          statusColor={statusMeta.color}
+                          footerText={`Submitted ${new Date(booking.booked_at).toLocaleDateString()} | Stay ${booking.start_date} to ${booking.end_date}`}
+                        />
+                      );
+                    })}
+                  </Stack>
+                )}
+              </Stack>
+            </CardContent>
+          </Card>
+        )}
+
         <Box sx={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
           {user.user_type === "sublessee" && (
             <>
@@ -154,6 +304,9 @@ export default function DashboardPage() {
               <Button component={RouterLink} to="/favorites" variant="outlined">
                 Favorites
               </Button>
+              <Button component={RouterLink} to="/payments/history" variant="outlined">
+                Payment history
+              </Button>
             </>
           )}
           {user.user_type === "subleaser" && (
@@ -172,6 +325,43 @@ export default function DashboardPage() {
               >
                 My listings
               </Button>
+            </>
+          )}
+          { user.user_type === "management" && user.company_status !== "approved" &&
+            <Button
+                component={RouterLink}
+                to="/company/verify"
+                variant="outlined"
+              >
+                Upload Documents
+              </Button>
+          }
+          {user.user_type === "management" && (
+            <>
+              <Tooltip title={user.company_status !== "approved" ? "Company verification required" : ""}>
+                <span>
+                  <Button
+                    component={user.company_status === "approved" ? RouterLink : "button"}
+                    to={user.company_status === "approved" ? "/company/guidelines" : undefined}
+                    variant="outlined"
+                    disabled={user.company_status !== "approved"}
+                  >
+                    Guideline Settings
+                  </Button>
+                </span>
+              </Tooltip>
+              <Tooltip title={user.company_status !== "approved" ? "Company verification required" : ""}>
+                <span>
+                  <Button
+                    component={user.company_status === "approved" ? RouterLink : "button"}
+                    to={user.company_status === "approved" ? "/company/approvals" : undefined}
+                    variant="outlined"
+                    disabled={user.company_status !== "approved"}
+                  >
+                    Approval Queue
+                  </Button>
+                </span>
+              </Tooltip>
             </>
           )}
         </Box>

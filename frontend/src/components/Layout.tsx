@@ -1,9 +1,15 @@
 import { useState } from "react";
-import type { ReactNode } from "react";
+import type { ReactNode, MouseEvent } from "react";
 import { Link as RouterLink, useNavigate } from "react-router-dom";
 import {
   AppBar,
+  Avatar,
   Box,
+  Divider,
+  ListItemIcon,
+  ListItemText,
+  Menu,
+  MenuItem,
   Toolbar,
   Typography,
   Button,
@@ -23,6 +29,8 @@ import SearchRoundedIcon from "@mui/icons-material/SearchRounded";
 import EventAvailableRoundedIcon from "@mui/icons-material/EventAvailableRounded";
 import HistoryRoundedIcon from "@mui/icons-material/HistoryRounded";
 import FavoriteRoundedIcon from "@mui/icons-material/FavoriteRounded";
+import PaymentsRoundedIcon from "@mui/icons-material/PaymentsRounded";
+import BusinessRoundedIcon from "@mui/icons-material/BusinessRounded";
 import { useAuth } from "../contexts/AuthContext";
 import AccountSettingsModal from "./AccountSettingsModal";
 
@@ -34,8 +42,19 @@ export default function Layout({ children }: LayoutProps) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+  const menuOpen = Boolean(anchorEl);
+
+  function handleMenuOpen(event: MouseEvent<HTMLElement>) {
+    setAnchorEl(event.currentTarget);
+  }
+
+  function handleMenuClose() {
+    setAnchorEl(null);
+  }
 
   async function handleLogout() {
+    handleMenuClose();
     await logout();
     navigate("/login");
   }
@@ -72,34 +91,6 @@ export default function Layout({ children }: LayoutProps) {
             <Box sx={{ display: "flex", gap: 0.5, alignItems: "center" }}>
               {user ? (
                 <>
-                  <Typography
-                    variant="body2"
-                    sx={{
-                      alignSelf: "center",
-                      mr: 0.5,
-                      color: "text.secondary",
-                    }}
-                  >
-                    {user.first_name || user.username}
-                  </Typography>
-                  <Button
-                    component={RouterLink}
-                    to="/account"
-                    color="inherit"
-                    startIcon={<AccountCircleRoundedIcon />}
-                    sx={{ color: "text.secondary" }}
-                  >
-                    Account
-                  </Button>
-                  <Button
-                    component={RouterLink}
-                    to="/feedback"
-                    color="inherit"
-                    startIcon={<RateReviewRoundedIcon />}
-                    sx={{ color: "text.secondary" }}
-                  >
-                    Feedback
-                  </Button>
                   <Button
                     component={RouterLink}
                     to="/browse"
@@ -111,6 +102,15 @@ export default function Layout({ children }: LayoutProps) {
                   </Button>
                   {user.user_type === "subleaser" && (
                     <>
+                      <Button
+                        component={RouterLink}
+                        to="/companies"
+                        color="inherit"
+                        startIcon={<BusinessRoundedIcon />}
+                        sx={{ color: "text.secondary" }}
+                      >
+                        Companies
+                      </Button>
                       <Button
                         component={RouterLink}
                         to="/listings/new"
@@ -160,27 +160,110 @@ export default function Layout({ children }: LayoutProps) {
                       >
                         Favorites
                       </Button>
+                      <Button
+                        component={RouterLink}
+                        to="/payments/history"
+                        color="inherit"
+                        startIcon={<PaymentsRoundedIcon />}
+                        sx={{ color: "text.secondary" }}
+                      >
+                        Payments
+                      </Button>
                     </>
                   )}
+
+                  {/* Profile avatar dropdown */}
                   <IconButton
-                    aria-label="Account settings"
-                    onClick={() => setSettingsOpen(true)}
-                    sx={{ color: "text.secondary" }}
+                    onClick={handleMenuOpen}
+                    size="small"
+                    aria-controls={menuOpen ? "profile-menu" : undefined}
+                    aria-haspopup="true"
+                    aria-expanded={menuOpen ? "true" : undefined}
+                    sx={{ ml: 1 }}
                   >
-                    <SettingsRoundedIcon />
+                    <Avatar
+                      sx={{
+                        width: 34,
+                        height: 34,
+                        bgcolor: "primary.main",
+                        fontSize: "0.95rem",
+                        fontWeight: 600,
+                      }}
+                    >
+                      {(user.first_name?.[0] || user.username[0]).toUpperCase()}
+                    </Avatar>
                   </IconButton>
+
+                  <Menu
+                    id="profile-menu"
+                    anchorEl={anchorEl}
+                    open={menuOpen}
+                    onClose={handleMenuClose}
+                    onClick={handleMenuClose}
+                    transformOrigin={{ horizontal: "right", vertical: "top" }}
+                    anchorOrigin={{ horizontal: "right", vertical: "bottom" }}
+                    slotProps={{
+                      paper: {
+                        elevation: 4,
+                        sx: { minWidth: 180, mt: 1 },
+                      },
+                    }}
+                  >
+                    <Box sx={{ px: 2, py: 1 }}>
+                      <Typography variant="subtitle2" noWrap>
+                        {user.first_name || user.username}
+                      </Typography>
+                      <Typography
+                        variant="caption"
+                        color="text.secondary"
+                        noWrap
+                      >
+                        {user.email}
+                      </Typography>
+                    </Box>
+                    <Divider />
+                    <MenuItem
+                      component={RouterLink}
+                      to="/account"
+                    >
+                      <ListItemIcon>
+                        <AccountCircleRoundedIcon fontSize="small" />
+                      </ListItemIcon>
+                      <ListItemText>My Account</ListItemText>
+                    </MenuItem>
+                    <MenuItem
+                      onClick={() => {
+                        handleMenuClose();
+                        setSettingsOpen(true);
+                      }}
+                    >
+                      <ListItemIcon>
+                        <SettingsRoundedIcon fontSize="small" />
+                      </ListItemIcon>
+                      <ListItemText>Settings</ListItemText>
+                    </MenuItem>
+                    <MenuItem
+                      component={RouterLink}
+                      to="/feedback"
+                    >
+                      <ListItemIcon>
+                        <RateReviewRoundedIcon fontSize="small" />
+                      </ListItemIcon>
+                      <ListItemText>Feedback</ListItemText>
+                    </MenuItem>
+                    <Divider />
+                    <MenuItem onClick={handleLogout}>
+                      <ListItemIcon>
+                        <LogoutRoundedIcon fontSize="small" />
+                      </ListItemIcon>
+                      <ListItemText>Log out</ListItemText>
+                    </MenuItem>
+                  </Menu>
+
                   <AccountSettingsModal
                     open={settingsOpen}
                     onClose={() => setSettingsOpen(false)}
                   />
-                  <Button
-                    color="inherit"
-                    startIcon={<LogoutRoundedIcon />}
-                    onClick={handleLogout}
-                    sx={{ color: "text.secondary" }}
-                  >
-                    Log out
-                  </Button>
                 </>
               ) : (
                 <>

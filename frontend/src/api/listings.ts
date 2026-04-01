@@ -6,17 +6,10 @@ export interface ListingAmenity {
   label: string;
 }
 
-export interface ListingMedia {
-  id: number;
-  media_type: string;
-  file_url: string;
-  thumbnail_url: string | null;
-  display_order: number;
-  is_primary: boolean;
-}
-
 export interface PropertyListing {
   id: number;
+  /** Present on full listing payloads from the API (e.g. detail, mine, create). */
+  owner?: number;
   title: string;
   description: string;
   property_type: string;
@@ -50,6 +43,7 @@ export interface PropertyListing {
   virtual_tour_url: string;
   status: string;
   approval_status: string;
+  approved_by_company_name: string | null;
   published_at: string | null;
   created_at: string;
   updated_at: string;
@@ -64,10 +58,12 @@ export interface PropertyListingSummary {
   city: string;
   state: string;
   monthly_rent: string;
+  security_deposit: string | null;
   availability_start_date: string;
   availability_end_date: string;
   status: string;
   approval_status: string;
+  approved_by_company_name?: string | null;
   created_at: string;
   primary_photo_url: string;
   is_favorited: boolean;
@@ -80,7 +76,18 @@ export interface BookingRecord {
   end_date: string;
   booked_at: string;
   monthly_rent_snapshot: string | null;
+  security_deposit_snapshot: string | null;
+  deposit_paid_at: string | null;
+  status: "pending" | "confirmed" | "declined" | "cancelled";
+  status_label: string;
   price: string;
+  is_cancelable: boolean;
+}
+
+export interface CreateBookingPayload {
+  listing: number;
+  start_date: string;
+  end_date: string;
 }
 
 export interface FavoriteRecord {
@@ -121,7 +128,6 @@ export interface CreatePropertyListingPayload {
   contact_email?: string;
   contact_phone?: string;
   virtual_tour_url?: string;
-  status: string;
   amenity_codes?: string[];
 }
 
@@ -135,15 +141,14 @@ export async function createListing(
 export async function uploadListingMedia(
   listingId: number,
   file: File,
-  isPrimary = false,
-  displayOrder?: number,
+  displayOrder: number,
+  isPrimary: boolean,
 ): Promise<ListingMedia> {
   const formData = new FormData();
   formData.append("file", file);
+  formData.append("display_order", String(displayOrder));
   formData.append("is_primary", String(isPrimary));
-  if (displayOrder !== undefined) {
-    formData.append("display_order", String(displayOrder));
-  }
+
   const { data } = await api.post<ListingMedia>(
     `/listings/${listingId}/media/`,
     formData,
@@ -169,8 +174,66 @@ export async function getMyListings(): Promise<PropertyListing[]> {
   return data;
 }
 
+/** Security deposit payments received for bookings on this listing (subleaser only). */
+export interface OwnerListingTransaction {
+  id: number;
+  amount: string;
+  currency: string;
+  booking_id: number | null;
+  paid_at: string | null;
+  status: string;
+  sublessee_display: string;
+}
+
+export async function fetchListingOwnerTransactions(
+  listingId: number,
+): Promise<OwnerListingTransaction[]> {
+  const { data } = await api.get<OwnerListingTransaction[]>(
+    `/listings/${listingId}/transactions/`,
+  );
+  return data;
+}
+
 export async function getListingAmenities(): Promise<ListingAmenity[]> {
   const { data } = await api.get<ListingAmenity[]>("/listings/amenities/");
+  return data;
+}
+
+// --- Media types & helpers ---
+
+export interface ListingMedia {
+  id: number;
+  media_type: string;
+  file_url: string;
+  access_url: string | null;
+  thumbnail_url: string;
+  display_order: number;
+  is_primary: boolean;
+  is_private: boolean;
+  original_filename: string;
+  content_type: string;
+  file_size: number | null;
+  upload_status: string;
+}
+
+export async function deleteListingMedia(mediaId: number): Promise<void> {
+  await api.delete(`/listings/media/${mediaId}/`);
+}
+
+export interface ReorderMediaItem {
+  id: number;
+  display_order: number;
+  is_primary: boolean;
+}
+
+export async function reorderListingMedia(
+  listingId: number,
+  order: ReorderMediaItem[],
+): Promise<ListingMedia[]> {
+  const { data } = await api.patch<ListingMedia[]>("/listings/media/reorder/", {
+    listing_id: listingId,
+    order,
+  });
   return data;
 }
 
@@ -266,6 +329,23 @@ export async function getCurrentBookings(sortBy: BookingSortBy, order: SortOrder
   return data;
 }
 
+export async function createBooking(payload: CreateBookingPayload): Promise<BookingRecord> {
+  const { data } = await api.post<BookingRecord>("/bookings/", payload);
+  return data;
+}
+
+export async function cancelBooking(bookingId: number): Promise<{ detail: string }> {
+  const { data } = await api.delete<{ detail: string }>(`/bookings/${bookingId}/`);
+  return data;
+}
+
+export async function getBookingHistory(sortBy: BookingSortBy, order: SortOrder): Promise<BookingRecord[]> {
+  const { data } = await api.get<BookingRecord[]>("/bookings/history/", {
+    params: { sort_by: sortBy, order },
+  });
+  return data;
+}
+
 export async function getPastBookings(sortBy: BookingSortBy, order: SortOrder): Promise<BookingRecord[]> {
   const { data } = await api.get<BookingRecord[]>("/bookings/past/", {
     params: { sort_by: sortBy, order },
@@ -299,5 +379,32 @@ export async function getFavorites(sortBy: FavoriteSortBy, order: SortOrder): Pr
   const { data } = await api.get<FavoriteRecord[]>("/favorites/", {
     params: { sort_by: sortBy, order },
   });
+  return data;
+}
+
+export interface ApprovalRequestSummary {
+  id: number;
+  listing_id: number;
+  listing_title: string;
+  listing_rent: string;
+  listing_city: string;
+  management_company_id: number;
+  management_company_name: string;
+  guideline_name: string | null;
+  status: "pending" | "approved" | "rejected";
+  subleaser_notes: string;
+  reviewer_notes: string;
+  reviewed_at: string | null;
+  created_at: string;
+}
+
+export async function submitApprovalRequest(
+  listingId: number,
+  payload: { management_company_id: number; guideline_id: number; subleaser_notes?: string },
+): Promise<ApprovalRequestSummary> {
+  const { data } = await api.post<ApprovalRequestSummary>(
+    `/listings/${listingId}/request-approval/`,
+    payload,
+  );
   return data;
 }

@@ -1,12 +1,17 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 
+from django.utils import timezone
+
 from .models import (
+    ApprovalRequest,
+    CompanyDocument,
     FavoriteListing,
     FeedbackSubmission,
     ListingAmenity,
     ListingAmenityMap,
     ListingMedia,
+    ManagementCompany,
     PasswordResetToken,
     PropertyBooking,
     PropertyListing,
@@ -24,6 +29,52 @@ class UserAdmin(BaseUserAdmin):
     add_fieldsets = BaseUserAdmin.add_fieldsets + (
         ("User Type", {"fields": ("user_type",)}),
     )
+
+
+class CompanyDocumentInline(admin.TabularInline):
+    model = CompanyDocument
+    extra = 0
+    readonly_fields = ("original_filename", "document_type", "uploaded_at")
+    fields = ("document_type", "file", "original_filename", "uploaded_at")
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+
+def approve_selected(modeladmin, request, queryset):
+    queryset.update(status=ManagementCompany.Status.APPROVED, reviewed_at=timezone.now())
+approve_selected.short_description = "Approve selected companies"
+
+
+def reject_selected(modeladmin, request, queryset):
+    queryset.update(status=ManagementCompany.Status.REJECTED, reviewed_at=timezone.now())
+reject_selected.short_description = "Reject selected companies"
+
+
+@admin.register(ManagementCompany)
+class ManagementCompanyAdmin(admin.ModelAdmin):
+    list_display = ("company_name", "user", "status", "created_at")
+    list_filter = ("status",)
+    search_fields = ("company_name", "user__email", "user__username")
+    readonly_fields = ("user", "created_at", "updated_at")
+    fieldsets = (
+        ("Company Info", {"fields": ("user", "company_name")}),
+        ("Review", {"fields": ("status", "rejection_reason", "reviewed_at")}),
+        ("Timestamps", {"fields": ("created_at", "updated_at")}),
+    )
+    inlines = [CompanyDocumentInline]
+    actions = [approve_selected, reject_selected]
+
+
+@admin.register(ApprovalRequest)
+class ApprovalRequestAdmin(admin.ModelAdmin):
+    list_display = ("id", "listing", "management_company", "guideline", "status", "reviewed_at", "created_at")
+    list_filter = ("status",)
+    search_fields = ("listing__title", "management_company__company_name")
+    readonly_fields = ("created_at", "updated_at")
+
+    def has_add_permission(self, request):
+        return False
 
 
 @admin.register(FeedbackSubmission)
@@ -70,8 +121,8 @@ class ListingMediaAdmin(admin.ModelAdmin):
 
 @admin.register(PropertyBooking)
 class PropertyBookingAdmin(admin.ModelAdmin):
-    list_display = ("sublessee", "listing", "start_date", "end_date", "monthly_rent_snapshot", "booked_at")
-    list_filter = ("start_date", "end_date", "booked_at")
+    list_display = ("sublessee", "listing", "status", "start_date", "end_date", "monthly_rent_snapshot", "booked_at")
+    list_filter = ("status", "start_date", "end_date", "booked_at")
     search_fields = ("sublessee__email", "sublessee__username", "listing__title")
 
 
