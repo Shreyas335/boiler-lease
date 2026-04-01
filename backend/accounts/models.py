@@ -29,6 +29,11 @@ class User(AbstractUser):
     two_factor_enabled = models.BooleanField(default=False)
     totp_secret = models.CharField(max_length=32, null=True, blank=True)
 
+    # Profile fields
+    bio = models.TextField(blank=True, default="")
+    profile_picture_url = models.URLField(blank=True, default="")
+    contact_phone = models.CharField(max_length=30, blank=True, default="")
+
     class Meta:
         db_table = "accounts_user"
 
