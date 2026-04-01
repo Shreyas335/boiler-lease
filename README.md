@@ -33,6 +33,36 @@ docker-compose exec backend python manage.py createsuperuser
 
 ---
 
+## AWS S3 Media Env Vars
+
+To enable S3-backed media, copy the AWS settings from `.env.example` into `.env` and fill in:
+
+- `AWS_ACCESS_KEY_ID`: IAM access key for the media buckets.
+- `AWS_SECRET_ACCESS_KEY`: IAM secret key for the media buckets.
+- `AWS_DEFAULT_REGION`: AWS region for the buckets, for example `us-east-1`.
+- `AWS_S3_PUBLIC_BUCKET_NAME`: bucket used for publicly viewable listing photos.
+- `AWS_S3_PRIVATE_BUCKET_NAME`: bucket reserved for private photos.
+
+Optional settings:
+
+- `AWS_S3_PUBLIC_CUSTOM_DOMAIN`: hostname to use if public media should resolve through a custom domain or CDN.
+- `AWS_S3_ENDPOINT_URL`: use only for a non-default S3 endpoint or S3-compatible provider.
+- `AWS_S3_PRIVATE_URL_EXPIRE_SECONDS`: signed private-photo URL lifetime in seconds. Default is `300`.
+
+Current setup notes:
+
+- Public S3 storage settings activate only when `AWS_S3_PUBLIC_BUCKET_NAME` is set.
+- Private S3 storage settings activate only when `AWS_S3_PRIVATE_BUCKET_NAME` is set and generate signed URLs that expire based on `AWS_S3_PRIVATE_URL_EXPIRE_SECONDS`.
+- Prefer separate public and private buckets instead of mixing both access levels in one bucket.
+
+If you change Python dependencies for S3 support, rebuild the backend container:
+
+```bash
+docker-compose up --build backend
+```
+
+---
+
 ## Database: View Schemas & Data
 
 ### Option 1: Django Admin (easiest)
@@ -82,7 +112,9 @@ Frontend
 
 run npm install
 
+npm run dev
 
+## sidecommands
 
 ## sidecommands
 

@@ -14,19 +14,23 @@ import {
   DialogTitle,
   Divider,
   IconButton,
+  Grid,
   Stack,
   Typography,
 } from "@mui/material";
+import LockIcon from "@mui/icons-material/Lock";
+import PublicIcon from "@mui/icons-material/Public";
 import {
   CalendarTodayOutlined,
   DeleteOutlined,
   EditOutlined,
   KingBedOutlined,
   LocationOnOutlined,
+  PaymentsOutlined,
   ShowerOutlined,
   SquareFootOutlined,
 } from "@mui/icons-material";
-import { Link as RouterLink, useNavigate } from "react-router-dom";
+import { Link as RouterLink, useNavigate, useLocation } from "react-router-dom";
 import {
   getMyListings,
   deleteListing,
@@ -61,12 +65,23 @@ function resolveStatusColor(value: string): ChipProps["color"] {
   if (normalized === "approved") return "success";
   if (normalized === "pending") return "warning";
   if (normalized === "rejected") return "error";
+  if (normalized === "not_submitted") return "default";
   return "default";
+}
+
+function approvalStatusLabel(value: string): string {
+  if (value === "not_submitted") return "Not Submitted";
+  if (value === "pending") return "Pending Approval";
+  if (value === "approved") return "Approved";
+  if (value === "rejected") return "Rejected";
+  return value;
 }
 
 export default function MyListingsPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  const successMessage = (location.state as { successMessage?: string } | null)?.successMessage;
   const [listings, setListings] = useState<PropertyListing[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -118,6 +133,7 @@ export default function MyListingsPage() {
       setSelectedListingTitle("");
     } catch (err) {
       setError("Failed to delete listing. Please try again.");
+      console.log(err);
     } finally {
       setDeleteLoading(false);
     }
@@ -171,6 +187,11 @@ export default function MyListingsPage() {
           </Button>
         </Stack>
 
+        {successMessage && (
+          <Alert severity="success" sx={{ mb: 2 }}>
+            {successMessage}
+          </Alert>
+        )}
         {error && (
           <Alert severity="error" sx={{ mb: 2 }}>
             {error}
@@ -296,7 +317,7 @@ export default function MyListingsPage() {
                         </Typography>
                       </Box>
                       <Stack direction="row" spacing={1} alignItems="center">
-                        <Stack direction="row" spacing={1}>
+                        <Stack direction="row" spacing={1} alignItems="center">
                           <Chip
                             size="small"
                             label={listing.status}
@@ -305,12 +326,31 @@ export default function MyListingsPage() {
                           />
                           <Chip
                             size="small"
-                            label={listing.approval_status}
+                            label={approvalStatusLabel(listing.approval_status)}
                             color={resolveStatusColor(listing.approval_status)}
                             variant="outlined"
                           />
+                          {(listing.approval_status === "not_submitted" || listing.approval_status === "rejected") && (
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              color={listing.approval_status === "rejected" ? "error" : "primary"}
+                              onClick={() => navigate(`/listings/${listing.id}/request-approval`)}
+                            >
+                              {listing.approval_status === "rejected" ? "Resubmit" : "Submit for Approval"}
+                            </Button>
+                          )}
                         </Stack>
                         <Stack direction="row" spacing={0}>
+                          <IconButton
+                            size="small"
+                            color="primary"
+                            component={RouterLink}
+                            to={`/listings/${listing.id}/deposits`}
+                            title="Deposit payments"
+                          >
+                            <PaymentsOutlined fontSize="small" />
+                          </IconButton>
                           <IconButton
                             size="small"
                             color="primary"
@@ -451,6 +491,62 @@ export default function MyListingsPage() {
                             .join(", ")
                         : "None selected"}
                     </Typography>
+
+                    {listing.media && listing.media.length > 0 && (
+                      <>
+                        <Divider />
+                        <Typography variant="body2"><strong>Photos ({listing.media.length})</strong></Typography>
+                        <Grid container spacing={1}>
+                          {listing.media.map((m) => (
+                            <Grid key={m.id} size={{ xs: 4, sm: 3, md: 2 }}>
+                              <Box sx={{ position: "relative" }}>
+                                <Box
+                                  component="img"
+                                  src={m.access_url || m.file_url || ""}
+                                  alt={m.original_filename || "Photo"}
+                                  sx={{
+                                    width: "100%",
+                                    height: 80,
+                                    objectFit: "cover",
+                                    borderRadius: 1,
+                                    display: "block",
+                                  }}
+                                />
+                                <Chip
+                                  size="small"
+                                  icon={m.is_private ? <LockIcon /> : <PublicIcon />}
+                                  label={m.is_private ? "Private" : "Public"}
+                                  sx={{
+                                    position: "absolute",
+                                    top: 4,
+                                    left: 4,
+                                    height: 20,
+                                    fontSize: "0.65rem",
+                                    opacity: 0.9,
+                                  }}
+                                  color={m.is_private ? "warning" : "default"}
+                                />
+                                {m.is_primary && (
+                                  <Chip
+                                    size="small"
+                                    label="Primary"
+                                    color="primary"
+                                    sx={{
+                                      position: "absolute",
+                                      bottom: 4,
+                                      left: 4,
+                                      height: 20,
+                                      fontSize: "0.65rem",
+                                      opacity: 0.9,
+                                    }}
+                                  />
+                                )}
+                              </Box>
+                            </Grid>
+                          ))}
+                        </Grid>
+                      </>
+                    )}
                   </Stack>
                 </Stack>
                 </CardContent>
