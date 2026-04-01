@@ -1,13 +1,16 @@
-import { useEffect, useMemo, useState } from "react";
-import { Alert, Box, Container, FormControl, InputLabel, MenuItem, Select, Stack, Typography } from "@mui/material";
+import { useEffect, useState } from "react";
+import type { AxiosError } from "axios";
+import { Alert, Box, Container, FormControl, InputLabel, MenuItem, Select, Stack, Typography, type ChipProps } from "@mui/material";
 import {
   addFavorite,
+  cancelBooking,
   removeFavorite,
   type BookingRecord,
   type BookingSortBy,
   type PropertyListingSummary,
   type SortOrder,
 } from "../api/listings";
+import { createDepositCheckoutSession } from "../api/payments";
 import PropertySummaryCard from "./PropertySummaryCard";
 import { useAuth } from "../contexts/AuthContext";
 
@@ -17,6 +20,7 @@ interface BookingsPageContentProps {
   emptyMessage: string;
   fetchBookings: (sortBy: BookingSortBy, order: SortOrder) => Promise<BookingRecord[]>;
   loadingText: string;
+  allowCancelBookings?: boolean;
 }
 
 export default function BookingsPageContent({
@@ -25,6 +29,7 @@ export default function BookingsPageContent({
   emptyMessage,
   fetchBookings,
   loadingText,
+  allowCancelBookings = false,
 }: BookingsPageContentProps) {
   const { user } = useAuth();
   const [bookings, setBookings] = useState<BookingRecord[]>([]);
@@ -33,11 +38,15 @@ export default function BookingsPageContent({
   const [sortBy, setSortBy] = useState<BookingSortBy>("date_booked");
   const [order, setOrder] = useState<SortOrder>("desc");
   const [favoriteBusyId, setFavoriteBusyId] = useState<number | null>(null);
+  const [cancelBusyId, setCancelBusyId] = useState<number | null>(null);
+  const [payBusyId, setPayBusyId] = useState<number | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   useEffect(() => {
     async function loadBookings() {
       try {
         setError(null);
+        setSuccessMessage(null);
         setLoading(true);
         const data = await fetchBookings(sortBy, order);
         setBookings(data);
@@ -55,12 +64,62 @@ export default function BookingsPageContent({
     }
   }, [user, fetchBookings, sortBy, order]);
 
-  const sortLabel = useMemo(() => {
-    if (sortBy === "price") return "Price";
-    if (sortBy === "start_date") return "Start date";
-    if (sortBy === "end_date") return "End date";
-    return "Date booked";
-  }, [sortBy]);
+  function getBookingStatusMeta(status: BookingRecord["status"]): {
+    label: string;
+    color: ChipProps["color"];
+  } {
+    if (status === "confirmed") {
+      return { label: "Confirmed", color: "success" };
+    }
+    if (status === "declined") {
+      return { label: "Declined", color: "warning" };
+    }
+    if (status === "cancelled") {
+      return { label: "Cancelled", color: "default" };
+    }
+    if (status === "pending") {
+      return { label: "Pending", color: "info" };
+    }
+    return { label: "Confirmed", color: "success" };
+  }
+
+  function buildFooterText(booking: BookingRecord) {
+    return `Booked on ${new Date(booking.booked_at).toLocaleDateString()} | Stay ${booking.start_date} to ${booking.end_date} | Status ${booking.status_label}`;
+  }
+
+  function effectiveDepositAmount(booking: BookingRecord): number | null {
+    const snap = booking.security_deposit_snapshot;
+    if (snap != null && snap !== "" && Number(snap) > 0) return Number(snap);
+    const list = booking.listing.security_deposit;
+    if (list != null && list !== "" && Number(list) > 0) return Number(list);
+    return null;
+  }
+
+  function canPaySecurityDeposit(booking: BookingRecord): boolean {
+    if (booking.deposit_paid_at) return false;
+    if (booking.status === "declined" || booking.status === "cancelled") return false;
+    return effectiveDepositAmount(booking) != null;
+  }
+
+  async function handlePayDeposit(bookingId: number) {
+    try {
+      setPayBusyId(bookingId);
+      setError(null);
+      const { checkout_url } = await createDepositCheckoutSession(bookingId);
+      window.location.assign(checkout_url);
+    } catch (e) {
+      const ax = e as AxiosError<{ detail?: string | string[] }>;
+      const d = ax.response?.data?.detail;
+      const msg =
+        typeof d === "string"
+          ? d
+          : Array.isArray(d) && typeof d[0] === "string"
+            ? d[0]
+            : "Unable to start deposit checkout.";
+      setError(msg);
+      setPayBusyId(null);
+    }
+  }
 
   async function toggleFavorite(listing: PropertyListingSummary) {
     try {
@@ -81,6 +140,21 @@ export default function BookingsPageContent({
       setError("Unable to update favorites. Please try again.");
     } finally {
       setFavoriteBusyId(null);
+    }
+  }
+
+  async function handleCancelBooking(bookingId: number) {
+    try {
+      setCancelBusyId(bookingId);
+      setError(null);
+      setSuccessMessage(null);
+      const response = await cancelBooking(bookingId);
+      setBookings((prev) => prev.filter((booking) => booking.id !== bookingId));
+      setSuccessMessage(response.detail);
+    } catch {
+      setError("Unable to cancel booking. Please try again.");
+    } finally {
+      setCancelBusyId(null);
     }
   }
 
@@ -136,6 +210,7 @@ export default function BookingsPageContent({
           </Stack>
         </Stack>
 
+        {successMessage && <Alert severity="success" sx={{ mb: 2 }}>{successMessage}</Alert>}
         {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
 
         {loading ? (
@@ -144,15 +219,50 @@ export default function BookingsPageContent({
           <Alert severity="info">{emptyMessage}</Alert>
         ) : (
           <Stack spacing={2}>
-            {bookings.map((booking) => (
-              <PropertySummaryCard
-                key={booking.id}
-                listing={booking.listing}
-                onToggleFavorite={toggleFavorite}
-                favoriteLoading={favoriteBusyId === booking.listing.id}
-                footerText={`Booked on ${new Date(booking.booked_at).toLocaleDateString()} | Stay ${booking.start_date} to ${booking.end_date} | Sorted by ${sortLabel.toLowerCase()} (${order})`}
-              />
-            ))}
+            {bookings.map((booking) => {
+              const statusMeta = getBookingStatusMeta(booking.status);
+              const showPay = canPaySecurityDeposit(booking);
+              const showCancel = allowCancelBookings && booking.is_cancelable;
+
+              return (
+                <PropertySummaryCard
+                  key={booking.id}
+                  listing={booking.listing}
+                  onToggleFavorite={toggleFavorite}
+                  favoriteLoading={favoriteBusyId === booking.listing.id}
+                  statusLabel={statusMeta.label}
+                  statusColor={statusMeta.color}
+                  actionButton={
+                    showPay
+                      ? {
+                          label: payBusyId === booking.id ? "Redirecting..." : "Pay security deposit",
+                          onClick: () => void handlePayDeposit(booking.id),
+                          disabled: payBusyId === booking.id,
+                          color: "primary",
+                        }
+                      : showCancel
+                        ? {
+                            label: cancelBusyId === booking.id ? "Cancelling..." : "Cancel Booking",
+                            onClick: () => handleCancelBooking(booking.id),
+                            disabled: cancelBusyId === booking.id,
+                            color: "error",
+                          }
+                        : undefined
+                  }
+                  secondaryActionButton={
+                    showPay && showCancel
+                      ? {
+                          label: cancelBusyId === booking.id ? "Cancelling..." : "Cancel booking",
+                          onClick: () => handleCancelBooking(booking.id),
+                          disabled: cancelBusyId === booking.id || payBusyId === booking.id,
+                          color: "error",
+                        }
+                      : undefined
+                  }
+                  footerText={buildFooterText(booking)}
+                />
+              );
+            })}
           </Stack>
         )}
       </Container>

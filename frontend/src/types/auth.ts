@@ -1,5 +1,7 @@
 export type UserType = "sublessee" | "subleaser" | "management";
 
+export type CompanyStatus = "pending" | "approved" | "rejected";
+
 export type IdentityVerificationStatus =
   | "unverified"
   | "pending"
@@ -16,4 +18,6 @@ export interface User {
   email_verified: boolean;
   two_factor_enabled: boolean;
   identity_verification_status: IdentityVerificationStatus;
+  company_name: string | null;
+  company_status: CompanyStatus | null;
 }

@@ -47,6 +47,84 @@ class User(AbstractUser):
         db_table = "accounts_user"
 
 
+class ManagementCompany(models.Model):
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending Review"
+        APPROVED = "approved", "Approved"
+        REJECTED = "rejected", "Rejected"
+
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="management_company")
+    company_name = models.CharField(max_length=200)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
+    rejection_reason = models.TextField(blank=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name_plural = "Management companies"
+
+    def __str__(self):
+        return f"{self.company_name} ({self.get_status_display()})"
+
+
+class CompanyDocument(models.Model):
+
+    class DocumentType(models.TextChoices):
+        BUSINESS_LICENSE = "business_license", "Business License"
+        PROOF_OF_OWNERSHIP = "proof_of_ownership", "Proof of Ownership"
+        OTHER = "other", "Other"
+
+    company = models.ForeignKey(ManagementCompany, on_delete=models.CASCADE, related_name="documents")
+    file = models.FileField(upload_to="company_docs/")
+    document_type = models.CharField(max_length=24, choices=DocumentType.choices, default=DocumentType.OTHER)
+    original_filename = models.CharField(max_length=255, blank=True)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.original_filename} ({self.get_document_type_display()})"
+
+
+class Guideline(models.Model):
+    """A named set of listing requirements for a building managed by a ManagementCompany."""
+
+    class FurnishedStatus(models.TextChoices):
+        FURNISHED = "furnished", "Furnished"
+        UNFURNISHED = "unfurnished", "Unfurnished"
+        PARTIALLY_FURNISHED = "partially_furnished", "Partially Furnished"
+
+    company = models.ForeignKey(ManagementCompany, on_delete=models.CASCADE, related_name="guidelines")
+    name = models.CharField(max_length=200, help_text="e.g. Verve Apartments, The Hub")
+
+    # Rent requirements
+    min_rent = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    max_rent = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+
+    # Deposit requirements
+    min_deposit = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    max_deposit = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+
+    # Availability
+    min_availability_days = models.PositiveIntegerField(null=True, blank=True)
+
+    # Property requirements — null means no requirement
+    utilities_included = models.BooleanField(null=True, blank=True)
+    pets_allowed = models.BooleanField(null=True, blank=True)
+    furnished_status = models.CharField(
+        max_length=24, choices=FurnishedStatus.choices, null=True, blank=True
+    )
+
+    # Required amenities (list of amenity codes)
+    required_amenities = models.JSONField(default=list, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.name} — {self.company.company_name}"
+
+
 class FeedbackSubmission(models.Model):
     """Feedback message submitted from the Help page."""
 
@@ -92,7 +170,8 @@ class PropertyListing(models.Model):
         ARCHIVED = "archived", "Archived"
 
     class ApprovalStatus(models.TextChoices):
-        PENDING = "pending", "Pending"
+        NOT_SUBMITTED = "not_submitted", "Not Submitted"
+        PENDING = "pending", "Pending Approval"
         APPROVED = "approved", "Approved"
         REJECTED = "rejected", "Rejected"
 
@@ -140,7 +219,14 @@ class PropertyListing(models.Model):
     approval_status = models.CharField(
         max_length=16,
         choices=ApprovalStatus.choices,
-        default=ApprovalStatus.APPROVED,
+        default=ApprovalStatus.NOT_SUBMITTED,
+    )
+    approved_by_company = models.ForeignKey(
+        "ManagementCompany",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="approved_listings",
     )
     published_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -182,6 +268,56 @@ class PropertyListing(models.Model):
         return self.title
 
 
+class ApprovalRequest(models.Model):
+    """A subleaser's request for a management company to approve their listing."""
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        APPROVED = "approved", "Approved"
+        REJECTED = "rejected", "Rejected"
+
+    listing = models.ForeignKey(
+        PropertyListing,
+        on_delete=models.CASCADE,
+        related_name="approval_requests",
+    )
+    management_company = models.ForeignKey(
+        ManagementCompany,
+        on_delete=models.CASCADE,
+        related_name="approval_requests",
+    )
+    guideline = models.ForeignKey(
+        Guideline,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="approval_requests",
+    )
+    subleaser_notes = models.TextField(blank=True)
+    status = models.CharField(
+        max_length=16,
+        choices=Status.choices,
+        default=Status.PENDING,
+        db_index=True,
+    )
+    reviewer_notes = models.TextField(blank=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        indexes = [
+            models.Index(
+                fields=["management_company", "status", "-created_at"],
+                name="approval_company_status_idx",
+            ),
+        ]
+
+    def __str__(self):
+        return f"ApprovalRequest #{self.pk} — {self.listing} → {self.management_company}"
+
+
 class ListingAmenity(models.Model):
     code = models.CharField(max_length=60, unique=True, db_index=True)
     label = models.CharField(max_length=100)
@@ -214,6 +350,11 @@ class ListingMedia(models.Model):
         IMAGE = "image", "Image"
         VIDEO = "video", "Video"
 
+    class UploadStatus(models.TextChoices):
+        PENDING = "pending", "Pending"
+        UPLOADED = "uploaded", "Uploaded"
+        FAILED = "failed", "Failed"
+
     listing = models.ForeignKey(PropertyListing, on_delete=models.CASCADE, related_name="media")
     media_type = models.CharField(max_length=16, choices=MediaType.choices, default=MediaType.IMAGE)
     file_url = models.URLField(blank=True)
@@ -222,6 +363,22 @@ class ListingMedia(models.Model):
     display_order = models.IntegerField(default=0)
     is_primary = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
+
+    # S3 storage location
+    storage_key = models.CharField(max_length=512, blank=True, db_index=True)
+    is_private = models.BooleanField(default=False)
+
+    # File metadata
+    original_filename = models.CharField(max_length=255, blank=True)
+    content_type = models.CharField(max_length=100, blank=True)
+    file_size = models.PositiveBigIntegerField(null=True, blank=True)
+
+    # Upload state
+    upload_status = models.CharField(
+        max_length=16,
+        choices=UploadStatus.choices,
+        default=UploadStatus.PENDING,
+    )
 
     class Meta:
         ordering = ("display_order", "id")
@@ -235,11 +392,25 @@ class ListingMedia(models.Model):
 
 
 class PropertyBooking(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        CONFIRMED = "confirmed", "Confirmed"
+        DECLINED = "declined", "Declined"
+        CANCELLED = "cancelled", "Cancelled"
+
     sublessee = models.ForeignKey(User, on_delete=models.CASCADE, related_name="property_bookings")
     listing = models.ForeignKey(PropertyListing, on_delete=models.CASCADE, related_name="bookings")
     start_date = models.DateField()
     end_date = models.DateField()
     monthly_rent_snapshot = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    security_deposit_snapshot = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING, db_index=True)
+    deposit_paid_at = models.DateTimeField(null=True, blank=True)
     booked_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
     class Meta:
