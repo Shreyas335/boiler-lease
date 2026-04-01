@@ -1,4 +1,5 @@
 import { Box, Button, Card, CardContent, Chip, Stack, Typography, type ChipProps } from "@mui/material";
+import VerifiedIcon from "@mui/icons-material/Verified";
 import FavoriteBorderRoundedIcon from "@mui/icons-material/FavoriteBorderRounded";
 import FavoriteRoundedIcon from "@mui/icons-material/FavoriteRounded";
 import { Link as RouterLink } from "react-router-dom";
@@ -138,6 +139,15 @@ export default function PropertySummaryCard({
               </Button>
             </Stack>
           </Stack>
+
+          {listing.approved_by_company_name && (
+            <Stack direction="row" spacing={0.5} alignItems="center">
+              <VerifiedIcon fontSize="small" color="success" />
+              <Typography variant="caption" color="success.main" sx={{ fontWeight: 600 }}>
+                Approved by {listing.approved_by_company_name}
+              </Typography>
+            </Stack>
+          )}
 
           {footerText && (
             <Typography variant="body2" color="text.secondary">

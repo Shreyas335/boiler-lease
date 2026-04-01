@@ -4,11 +4,15 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
 from .models import (
+    ApprovalRequest,
+    CompanyDocument,
     FavoriteListing,
     FeedbackSubmission,
+    Guideline,
     ListingAmenity,
     ListingAmenityMap,
     ListingMedia,
+    ManagementCompany,
     PropertyBooking,
     PropertyListing,
     TransactionRecord,
@@ -17,6 +21,9 @@ from .models import (
 
 
 class UserSerializer(serializers.ModelSerializer):
+    company_name = serializers.SerializerMethodField()
+    company_status = serializers.SerializerMethodField()
+
     class Meta:
         model = User
         fields = (
@@ -28,6 +35,8 @@ class UserSerializer(serializers.ModelSerializer):
             "last_name",
             "email_verified",
             "two_factor_enabled",
+            "company_name",
+            "company_status",
         )
         read_only_fields = (
             "id",
@@ -38,7 +47,25 @@ class UserSerializer(serializers.ModelSerializer):
             "last_name",
             "email_verified",
             "two_factor_enabled",
+            "company_name",
+            "company_status",
         )
+
+    def get_company_name(self, obj):
+        if obj.user_type == User.UserType.MANAGEMENT:
+            try:
+                return obj.management_company.company_name
+            except Exception:
+                return None
+        return None
+
+    def get_company_status(self, obj):
+        if obj.user_type == User.UserType.MANAGEMENT:
+            try:
+                return obj.management_company.status
+            except Exception:
+                return None
+        return None
 
 
 class AccountUpdateSerializer(serializers.ModelSerializer):
@@ -53,7 +80,8 @@ class AccountUpdateSerializer(serializers.ModelSerializer):
 
     def validate_username(self, value):
         user = self.instance
-        if value and User.objects.exclude(pk=user.pk).filter(username=value).exists():
+        value = value.lower()
+        if value and User.objects.exclude(pk=user.pk).filter(username__iexact=value).exists():
             raise serializers.ValidationError("A user with this username already exists.")
         return value
 
@@ -97,10 +125,11 @@ class PasswordChangeSerializer(serializers.Serializer):
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, min_length=8)
     password_confirm = serializers.CharField(write_only=True)
+    company_name = serializers.CharField(write_only=True, required=False, allow_blank=True)
 
     class Meta:
         model = User
-        fields = ("username", "email", "password", "password_confirm", "user_type", "first_name", "last_name")
+        fields = ("username", "email", "password", "password_confirm", "user_type", "first_name", "last_name", "company_name")
 
     def validate(self, data):
         # Validate required fields
@@ -108,28 +137,36 @@ class RegisterSerializer(serializers.ModelSerializer):
         for field in required_fields:
             if not data.get(field):
                 raise serializers.ValidationError({field: f"{field.replace('_', ' ').title()} is required."})
-        
+
         # Validate password match
         if data["password"] != data["password_confirm"]:
             raise serializers.ValidationError({"password_confirm": "Passwords do not match."})
-        
+
         # Validate email uniqueness
         if User.objects.filter(email=data["email"]).exists():
             raise serializers.ValidationError({"email": "A user with this email already exists."})
-        
-        # Validate username uniqueness
-        if User.objects.filter(username=data["username"]).exists():
+
+        # Normalize username to lowercase
+        data["username"] = data["username"].lower()
+
+        # Validate username uniqueness (case-insensitive)
+        if User.objects.filter(username__iexact=data["username"]).exists():
             raise serializers.ValidationError({"username": "A user with this username already exists."})
-        
+
         # Validate user type
         valid_types = [choice[0] for choice in User.UserType.choices]
         if data["user_type"] not in valid_types:
             raise serializers.ValidationError({"user_type": f"Must be one of: {', '.join(valid_types)}"})
-        
+
+        # company_name required for management users
+        if data["user_type"] == User.UserType.MANAGEMENT and not data.get("company_name"):
+            raise serializers.ValidationError({"company_name": "Company name is required for management accounts."})
+
         return data
 
     def create(self, validated_data):
         validated_data.pop("password_confirm")
+        validated_data.pop("company_name", None)
         password = validated_data.pop("password")
         user = User(**validated_data)
         user.set_password(password)
@@ -307,6 +344,7 @@ class ListingAmenitySerializer(serializers.ModelSerializer):
 class PropertyListingSerializer(serializers.ModelSerializer):
     amenities = serializers.SerializerMethodField()
     media = serializers.SerializerMethodField()
+    approved_by_company_name = serializers.SerializerMethodField()
 
     class Meta:
         model = PropertyListing
@@ -345,6 +383,7 @@ class PropertyListingSerializer(serializers.ModelSerializer):
             "virtual_tour_url",
             "status",
             "approval_status",
+            "approved_by_company_name",
             "published_at",
             "created_at",
             "updated_at",
@@ -359,6 +398,11 @@ class PropertyListingSerializer(serializers.ModelSerializer):
     def get_media(self, obj):
         finalized = obj.media.filter(upload_status=ListingMedia.UploadStatus.UPLOADED)
         return ListingMediaSerializer(finalized, many=True).data
+
+    def get_approved_by_company_name(self, obj):
+        if obj.approved_by_company_id:
+            return obj.approved_by_company.company_name
+        return None
 
 
 class PropertyListingSummarySerializer(serializers.ModelSerializer):
@@ -560,7 +604,6 @@ class PropertyListingCreateSerializer(serializers.ModelSerializer):
             "contact_email",
             "contact_phone",
             "virtual_tour_url",
-            "status",
             "amenity_codes",
         )
         extra_kwargs = {
@@ -606,6 +649,7 @@ class PropertyListingCreateSerializer(serializers.ModelSerializer):
         owner = self.context["request"].user
         if not validated_data.get("contact_email"):
             validated_data["contact_email"] = owner.email
+        validated_data["status"] = PropertyListing.ListingStatus.DRAFT
         listing = PropertyListing.objects.create(owner=owner, **validated_data)
 
         if amenity_codes:
@@ -725,6 +769,7 @@ class PropertyListingBrowseSerializer(serializers.ModelSerializer):
     """Read-only serializer for browsing properties. Optimized for list view with nested media and amenities."""
     amenities = serializers.SerializerMethodField()
     media = ListingMediaSerializer(many=True, read_only=True)
+    approved_by_company_name = serializers.SerializerMethodField()
 
     class Meta:
         model = PropertyListing
@@ -751,6 +796,7 @@ class PropertyListingBrowseSerializer(serializers.ModelSerializer):
             "availability_end_date",
             "lease_term_min_months",
             "lease_term_max_months",
+            "approved_by_company_name",
             "amenities",
             "media",
         )
@@ -759,6 +805,11 @@ class PropertyListingBrowseSerializer(serializers.ModelSerializer):
     def get_amenities(self, obj):
         amenities = ListingAmenity.objects.filter(listing_links__listing=obj, is_active=True).distinct()
         return ListingAmenitySerializer(amenities, many=True).data
+
+    def get_approved_by_company_name(self, obj):
+        if obj.approved_by_company_id:
+            return obj.approved_by_company.company_name
+        return None
 
 
 class PasswordResetRequestSerializer(serializers.Serializer):
@@ -802,3 +853,135 @@ class TransactionRecordSerializer(serializers.ModelSerializer):
             "created_at",
         )
         read_only_fields = fields
+
+
+class ManagementCompanySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ManagementCompany
+        fields = ("id", "company_name", "status", "rejection_reason", "reviewed_at", "created_at")
+        read_only_fields = ("id", "status", "rejection_reason", "reviewed_at", "created_at")
+
+
+class PublicGuidelineSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Guideline
+        fields = (
+            "id", "name",
+            "min_rent", "max_rent",
+            "min_deposit", "max_deposit",
+            "min_availability_days",
+            "utilities_included", "pets_allowed",
+            "furnished_status", "required_amenities",
+        )
+
+
+class PublicManagementCompanySerializer(serializers.ModelSerializer):
+    guidelines = PublicGuidelineSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = ManagementCompany
+        fields = ("id", "company_name", "guidelines")
+
+
+class GuidelineSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Guideline
+        fields = (
+            "id", "name",
+            "min_rent", "max_rent",
+            "min_deposit", "max_deposit",
+            "min_availability_days",
+            "utilities_included", "pets_allowed",
+            "furnished_status", "required_amenities",
+            "created_at", "updated_at",
+        )
+        read_only_fields = ("id", "created_at", "updated_at")
+
+
+class CompanyDocumentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CompanyDocument
+        fields = ("id", "document_type", "original_filename", "uploaded_at")
+        read_only_fields = fields
+
+
+class CompanyDocumentUploadSerializer(serializers.Serializer):
+    file = serializers.FileField()
+    document_type = serializers.ChoiceField(choices=CompanyDocument.DocumentType.choices)
+
+
+class ApprovalRequestCreateSerializer(serializers.Serializer):
+    management_company_id = serializers.IntegerField()
+    guideline_id = serializers.IntegerField()
+    subleaser_notes = serializers.CharField(required=False, allow_blank=True, default="")
+
+    def validate_management_company_id(self, value):
+        if not ManagementCompany.objects.filter(pk=value, status=ManagementCompany.Status.APPROVED).exists():
+            raise serializers.ValidationError("Management company not found or not approved.")
+        return value
+
+    def validate(self, attrs):
+        company_id = attrs["management_company_id"]
+        guideline_id = attrs["guideline_id"]
+        if not Guideline.objects.filter(pk=guideline_id, company_id=company_id).exists():
+            raise serializers.ValidationError({"guideline_id": "Guideline not found for this company."})
+        return attrs
+
+
+class ApprovalRequestSummarySerializer(serializers.ModelSerializer):
+    listing_title = serializers.CharField(source="listing.title", read_only=True)
+    listing_rent = serializers.DecimalField(source="listing.monthly_rent", max_digits=10, decimal_places=2, read_only=True)
+    listing_city = serializers.CharField(source="listing.city", read_only=True)
+    management_company_name = serializers.CharField(source="management_company.company_name", read_only=True)
+    guideline_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ApprovalRequest
+        fields = (
+            "id",
+            "listing_id",
+            "listing_title",
+            "listing_rent",
+            "listing_city",
+            "management_company_id",
+            "management_company_name",
+            "guideline_name",
+            "status",
+            "subleaser_notes",
+            "reviewer_notes",
+            "reviewed_at",
+            "created_at",
+        )
+
+    def get_guideline_name(self, obj):
+        return obj.guideline.name if obj.guideline else None
+
+
+class ApprovalRequestDetailSerializer(serializers.ModelSerializer):
+    listing = PropertyListingSerializer(read_only=True)
+    management_company_name = serializers.CharField(source="management_company.company_name", read_only=True)
+    guideline = PublicGuidelineSerializer(read_only=True)
+    compliance_results = serializers.SerializerMethodField()
+    subleaser_email = serializers.EmailField(source="listing.owner.email", read_only=True)
+
+    class Meta:
+        model = ApprovalRequest
+        fields = (
+            "id",
+            "listing",
+            "management_company_name",
+            "guideline",
+            "compliance_results",
+            "subleaser_email",
+            "subleaser_notes",
+            "reviewer_notes",
+            "status",
+            "reviewed_at",
+            "created_at",
+        )
+
+    def get_compliance_results(self, obj):
+        check_fn = self.context.get("check_compliance")
+        if check_fn and obj.guideline:
+            return check_fn(obj.listing, obj.guideline)
+        return []

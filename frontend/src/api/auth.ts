@@ -24,6 +24,7 @@ export async function register(params: {
   user_type: string;
   first_name?: string;
   last_name?: string;
+  company_name?: string;
 }): Promise<User> {
   // Ensure CSRF token is fetched before register
   await fetchCsrfToken();

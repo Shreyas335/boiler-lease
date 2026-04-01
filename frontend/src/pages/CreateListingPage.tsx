@@ -32,7 +32,6 @@ import { getListingWarnings, validateListingForm } from "../utils/listingFormVal
 
 const PROPERTY_TYPES = ["apartment", "house", "condo", "studio", "other"];
 const FURNISHED_OPTIONS = ["furnished", "unfurnished", "partially_furnished"];
-const STATUS_OPTIONS = ["draft", "published", "unpublished"];
 
 const INITIAL_FORM: CreatePropertyListingPayload = {
   title: "",
@@ -53,7 +52,6 @@ const INITIAL_FORM: CreatePropertyListingPayload = {
   postal_code: "",
   country_code: "US",
   parking_available: false,
-  status: "draft",
   amenity_codes: [],
 };
 
@@ -199,7 +197,6 @@ export default function CreateListingPage() {
         }
       }
 
-      setPageMessage({ type: "success", text: "Listing created successfully." });
       navigate("/my-listings");
     } catch (error) {
       const axiosError = error as AxiosError<Record<string, unknown>>;
@@ -412,21 +409,6 @@ export default function CreateListingPage() {
                     error={Boolean(fieldErrors.lease_term_max_months)}
                     helperText={fieldErrors.lease_term_max_months}
                   />
-                </Grid>
-                <Grid size={{ xs: 12, md: 3 }}>
-                  <TextField
-                    select
-                    fullWidth
-                    label="Status"
-                    value={form.status}
-                    onChange={(e) => handleChange("status", e.target.value)}
-                  >
-                    {STATUS_OPTIONS.map((status) => (
-                      <MenuItem key={status} value={status}>
-                        {status}
-                      </MenuItem>
-                    ))}
-                  </TextField>
                 </Grid>
               </Grid>
 
