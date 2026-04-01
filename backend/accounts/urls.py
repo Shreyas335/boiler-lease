@@ -50,4 +50,10 @@ urlpatterns = [
     path("company/approval-requests/", views.company_approval_request_list),
     path("company/approval-requests/<int:pk>/", views.company_approval_request_detail),
     path("company/approval-requests/<int:pk>/review/", views.company_review_approval_request),
+    path("profiles/me/", views.my_profile),
+    path("profiles/me/picture/", views.upload_profile_picture),
+    path("profiles/blocked/", views.blocked_users_list),
+    path("profiles/<int:user_id>/", views.user_profile),
+    path("profiles/<int:user_id>/rate/", views.rate_user),
+    path("profiles/<int:user_id>/block/", views.block_user_toggle),
 ]
