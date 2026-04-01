@@ -1147,13 +1147,14 @@ def stripe_webhook(request):
     except Exception:
         return Response({"detail": "Invalid webhook payload/signature."}, status=status.HTTP_400_BAD_REQUEST)
 
-    event_type = event.get("type")
-    obj = event.get("data", {}).get("object", {})
+    # construct_event returns StripeObject, not dict — use attributes, not .get()
+    event_type = event.type
+    obj = event.data.object
 
     if event_type == "checkout.session.completed":
-        session_id = obj.get("id")
-        payment_intent_id = obj.get("payment_intent") or ""
-        amount_total = obj.get("amount_total")
+        session_id = obj.id
+        payment_intent_id = getattr(obj, "payment_intent", None) or ""
+        amount_total = getattr(obj, "amount_total", None)
 
         txn = TransactionRecord.objects.filter(stripe_checkout_session_id=session_id).first()
         if txn:
@@ -1177,7 +1178,7 @@ def stripe_webhook(request):
                     ).update(deposit_paid_at=timezone.now())
 
     elif event_type == "checkout.session.expired":
-        session_id = obj.get("id")
+        session_id = obj.id
         txn = TransactionRecord.objects.filter(stripe_checkout_session_id=session_id).first()
         if txn and txn.status == TransactionRecord.Status.PENDING:
             txn.status = TransactionRecord.Status.CANCELED
