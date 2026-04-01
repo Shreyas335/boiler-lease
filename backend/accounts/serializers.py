@@ -839,6 +839,8 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
 
 
 class TransactionRecordSerializer(serializers.ModelSerializer):
+    listing_title = serializers.SerializerMethodField()
+
     class Meta:
         model = TransactionRecord
         fields = (
@@ -846,6 +848,7 @@ class TransactionRecordSerializer(serializers.ModelSerializer):
             "amount",
             "currency",
             "booking_reference",
+            "listing_title",
             "status",
             "stripe_payment_intent_id",
             "stripe_checkout_session_id",
@@ -853,6 +856,28 @@ class TransactionRecordSerializer(serializers.ModelSerializer):
             "created_at",
         )
         read_only_fields = fields
+
+    def get_listing_title(self, obj):
+        ref = (obj.booking_reference or "").strip()
+        if not ref:
+            return None
+        try:
+            bid = int(ref)
+        except ValueError:
+            return None
+        titles = self.context.get("listing_titles_by_booking_id")
+        if titles is not None:
+            return titles.get(bid)
+        request = self.context.get("request")
+        user = getattr(request, "user", None) if request else None
+        if not user or not user.is_authenticated:
+            return None
+        booking = (
+            PropertyBooking.objects.filter(pk=bid, sublessee=user)
+            .select_related("listing")
+            .first()
+        )
+        return booking.listing.title if booking else None
 
 
 class ManagementCompanySerializer(serializers.ModelSerializer):
