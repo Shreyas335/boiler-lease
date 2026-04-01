@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Box,
@@ -22,14 +22,16 @@ import {
   uploadListingMedia,
   type CreatePropertyListingPayload,
   type ListingAmenity,
+  type ListingMedia,
 } from "../api/listings";
 import { useAuth } from "../contexts/AuthContext";
 import AddressAutocomplete, { type AddressComponents } from "../components/AddressAutocomplete";
+import PhotoManager, { type PendingPhoto } from "../components/PhotoManager";
 import { getListingWarnings, validateListingForm } from "../utils/listingFormValidation";
+
 
 const PROPERTY_TYPES = ["apartment", "house", "condo", "studio", "other"];
 const FURNISHED_OPTIONS = ["furnished", "unfurnished", "partially_furnished"];
-const STATUS_OPTIONS = ["draft", "published", "unpublished"];
 
 const INITIAL_FORM: CreatePropertyListingPayload = {
   title: "",
@@ -50,7 +52,6 @@ const INITIAL_FORM: CreatePropertyListingPayload = {
   postal_code: "",
   country_code: "US",
   parking_available: false,
-  status: "draft",
   amenity_codes: [],
 };
 
@@ -71,10 +72,10 @@ export default function CreateListingPage() {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [addressInput, setAddressInput] = useState("");
   const [isAddressVerified, setIsAddressVerified] = useState(false);
-  const [pendingImages, setPendingImages] = useState<
-    { id: string; file: File; previewUrl: string; isPrimary: boolean }[]
-  >([]);
-  const pendingImagesRef = useRef(pendingImages);
+  // Photo state — for create, there's no listingId yet and no existing media
+  const [existingMedia, setExistingMedia] = useState<ListingMedia[]>([]);
+  const [newPhotos, setNewPhotos] = useState<PendingPhoto[]>([]);
+  const [uploading, setUploading] = useState(false);
 
   useEffect(() => {
     async function loadAmenities() {
@@ -91,18 +92,17 @@ export default function CreateListingPage() {
     }
   }, [user]);
 
-  const isDirty = useMemo(() => JSON.stringify(form) !== JSON.stringify(INITIAL_FORM), [form]);
-  const warnings = useMemo(() => getListingWarnings(form), [form]);
-
-  useEffect(() => {
-    pendingImagesRef.current = pendingImages;
-  }, [pendingImages]);
-
   useEffect(() => {
     return () => {
-      pendingImagesRef.current.forEach((image) => URL.revokeObjectURL(image.previewUrl));
+      newPhotos.forEach((p) => URL.revokeObjectURL(p.previewUrl));
     };
   }, []);
+
+  const isDirty = useMemo(
+    () => JSON.stringify(form) !== JSON.stringify(INITIAL_FORM) || newPhotos.length > 0,
+    [form, newPhotos],
+  );
+  const warnings = useMemo(() => getListingWarnings(form), [form]);
 
   if (!user || user.user_type !== "subleaser") {
     return (
@@ -132,7 +132,6 @@ export default function CreateListingPage() {
 
   function handleAddressInputChange(value: string) {
     setAddressInput(value);
-    // If user manually edits, mark as unverified
     setIsAddressVerified(false);
     setFieldErrors((prev) => ({ ...prev, address: "" }));
   }
@@ -170,28 +169,35 @@ export default function CreateListingPage() {
     setSubmitting(true);
     try {
       const listing = await createListing(form);
-      let uploadFailures = 0;
-      if (pendingImages.length > 0) {
-        for (let index = 0; index < pendingImages.length; index += 1) {
-          const image = pendingImages[index];
+
+      // Upload photos if any were selected
+      const toUpload = newPhotos.filter((p) => p.status === "queued" || p.status === "error");
+      if (toUpload.length > 0) {
+        setUploading(true);
+        let uploadFailures = 0;
+
+        for (let i = 0; i < toUpload.length; i++) {
+          const photo = toUpload[i];
           try {
-            await uploadListingMedia(listing.id, image.file, image.isPrimary, index);
+            await uploadListingMedia(listing.id, photo.file, i, i === 0);
           } catch {
             uploadFailures += 1;
           }
         }
+
+        setUploading(false);
+
+        if (uploadFailures > 0) {
+          setPageMessage({
+            type: "error",
+            text: "Listing created, but some photos failed to upload. You can retry in Edit Listing.",
+          });
+          navigate(`/listings/${listing.id}/edit`, { state: { listing } });
+          return;
+        }
       }
 
-      if (uploadFailures > 0) {
-        setPageMessage({
-          type: "error",
-          text: "Listing created, but some photos failed to upload. You can retry in Edit Listing.",
-        });
-        navigate(`/listings/${listing.id}/edit`, { state: { listing } });
-      } else {
-        setPageMessage({ type: "success", text: "Listing created successfully." });
-        navigate("/my-listings");
-      }
+      navigate("/my-listings");
     } catch (error) {
       const axiosError = error as AxiosError<Record<string, unknown>>;
       const data = axiosError.response?.data || {};
@@ -212,50 +218,6 @@ export default function CreateListingPage() {
       return;
     }
     navigate("/my-listings");
-  }
-
-  function handleImageSelect(event: React.ChangeEvent<HTMLInputElement>) {
-    const files = event.target.files ? Array.from(event.target.files) : [];
-    if (!files.length) return;
-
-    setPendingImages((prev) => {
-      const hasPrimary = prev.some((image) => image.isPrimary);
-      let primaryAssigned = hasPrimary;
-      const next = files.map((file, index) => {
-        const isPrimary = !primaryAssigned && index === 0;
-        if (isPrimary) primaryAssigned = true;
-        return {
-          id: `${Date.now()}-${index}`,
-          file,
-          previewUrl: URL.createObjectURL(file),
-          isPrimary,
-        };
-      });
-      return [...prev, ...next];
-    });
-
-    event.target.value = "";
-  }
-
-  function handleRemoveImage(id: string) {
-    setPendingImages((prev) => {
-      const match = prev.find((image) => image.id === id);
-      if (match) URL.revokeObjectURL(match.previewUrl);
-      const next = prev.filter((image) => image.id !== id);
-      if (next.length > 0 && !next.some((image) => image.isPrimary)) {
-        next[0].isPrimary = true;
-      }
-      return [...next];
-    });
-  }
-
-  function handlePrimaryChange(id: string) {
-    setPendingImages((prev) =>
-      prev.map((image) => ({
-        ...image,
-        isPrimary: image.id === id,
-      })),
-    );
   }
 
   return (
@@ -448,21 +410,6 @@ export default function CreateListingPage() {
                     helperText={fieldErrors.lease_term_max_months}
                   />
                 </Grid>
-                <Grid size={{ xs: 12, md: 3 }}>
-                  <TextField
-                    select
-                    fullWidth
-                    label="Status"
-                    value={form.status}
-                    onChange={(e) => handleChange("status", e.target.value)}
-                  >
-                    {STATUS_OPTIONS.map((status) => (
-                      <MenuItem key={status} value={status}>
-                        {status}
-                      </MenuItem>
-                    ))}
-                  </TextField>
-                </Grid>
               </Grid>
 
               <Typography variant="h6">Location and Contact</Typography>
@@ -478,7 +425,6 @@ export default function CreateListingPage() {
                   />
                 </Grid>
 
-                {/* Show parsed address fields as read-only when verified */}
                 {isAddressVerified && (
                   <>
                     <Grid size={{ xs: 12, md: 6 }}>
@@ -653,69 +599,20 @@ export default function CreateListingPage() {
                 ))}
               </Grid>
 
-              <Typography variant="h6">Photos</Typography>
-              <Stack spacing={2}>
-                <Button variant="outlined" component="label">
-                  Upload photos
-                  <input
-                    hidden
-                    accept="image/*"
-                    multiple
-                    type="file"
-                    onChange={handleImageSelect}
-                  />
-                </Button>
-                {pendingImages.length === 0 ? (
-                  <Typography variant="body2" color="text.secondary">
-                    Add photos to help your listing stand out. You can set a primary image.
-                  </Typography>
-                ) : (
-                  <Grid container spacing={2}>
-                    {pendingImages.map((image) => (
-                      <Grid key={image.id} size={{ xs: 12, sm: 6, md: 4 }}>
-                        <Card variant="outlined" sx={{ borderRadius: 2 }}>
-                          <CardContent>
-                            <Box
-                              component="img"
-                              src={image.previewUrl}
-                              alt={image.file.name}
-                              sx={{
-                                width: "100%",
-                                height: 160,
-                                objectFit: "cover",
-                                borderRadius: 1,
-                                mb: 1,
-                              }}
-                            />
-                            <Stack spacing={1}>
-                              <FormControlLabel
-                                control={
-                                  <Checkbox
-                                    checked={image.isPrimary}
-                                    onChange={() => handlePrimaryChange(image.id)}
-                                  />
-                                }
-                                label="Primary photo"
-                              />
-                              <Button
-                                size="small"
-                                color="error"
-                                variant="outlined"
-                                onClick={() => handleRemoveImage(image.id)}
-                              >
-                                Remove
-                              </Button>
-                            </Stack>
-                          </CardContent>
-                        </Card>
-                      </Grid>
-                    ))}
-                  </Grid>
-                )}
-              </Stack>
+              {/* Photos */}
+              <PhotoManager
+                listingId={null}
+                existingMedia={existingMedia}
+                onExistingMediaChange={setExistingMedia}
+                newPhotos={newPhotos}
+                onNewPhotosChange={setNewPhotos}
+                uploading={uploading}
+                onUploadingChange={setUploading}
+                onError={(msg) => setPageMessage({ type: "error", text: msg })}
+              />
 
               <Stack direction="row" spacing={2}>
-                <Button type="submit" variant="contained" disabled={submitting}>
+                <Button type="submit" variant="contained" disabled={submitting || uploading}>
                   {submitting ? "Saving..." : "Create listing"}
                 </Button>
                 <Button type="button" variant="outlined" color="inherit" onClick={handleCancel}>
