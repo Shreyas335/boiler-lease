@@ -4,15 +4,19 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
 from .models import (
+    Conversation,
+    ConversationDeletion,
     FavoriteListing,
     FeedbackSubmission,
     ListingAmenity,
     ListingAmenityMap,
     ListingMedia,
+    Message,
     PropertyBooking,
     PropertyListing,
     TransactionRecord,
     User,
+    UserBlock,
 )
 
 
@@ -28,6 +32,7 @@ class UserSerializer(serializers.ModelSerializer):
             "last_name",
             "email_verified",
             "two_factor_enabled",
+            "message_notifications_enabled",
         )
         read_only_fields = (
             "id",
@@ -44,11 +49,12 @@ class UserSerializer(serializers.ModelSerializer):
 class AccountUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ("username", "first_name", "last_name")
+        fields = ("username", "first_name", "last_name", "message_notifications_enabled")
         extra_kwargs = {
             "username": {"required": False},
             "first_name": {"required": False},
             "last_name": {"required": False},
+            "message_notifications_enabled": {"required": False},
         }
 
     def validate_username(self, value):
@@ -307,11 +313,13 @@ class ListingAmenitySerializer(serializers.ModelSerializer):
 class PropertyListingSerializer(serializers.ModelSerializer):
     amenities = serializers.SerializerMethodField()
     media = serializers.SerializerMethodField()
+    owner_id = serializers.IntegerField(source="owner.id", read_only=True)
 
     class Meta:
         model = PropertyListing
         fields = (
             "id",
+            "owner_id",
             "title",
             "description",
             "property_type",
@@ -797,4 +805,112 @@ class TransactionRecordSerializer(serializers.ModelSerializer):
             "paid_at",
             "created_at",
         )
+        read_only_fields = fields
+
+
+# ─── Messaging serializers ────────────────────────────────────────────────────
+
+class ConversationParticipantSerializer(serializers.ModelSerializer):
+    full_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = User
+        fields = ("id", "username", "first_name", "last_name", "full_name", "user_type")
+
+    def get_full_name(self, obj):
+        return obj.get_full_name() or obj.username
+
+
+class MessageSerializer(serializers.ModelSerializer):
+    sender_id = serializers.IntegerField(source="sender.id", read_only=True)
+    sender_username = serializers.CharField(source="sender.username", read_only=True)
+
+    class Meta:
+        model = Message
+        fields = ("id", "conversation", "sender_id", "sender_username", "content", "created_at", "is_read")
+        read_only_fields = ("id", "conversation", "sender_id", "sender_username", "created_at", "is_read")
+
+
+class ConversationSerializer(serializers.ModelSerializer):
+    other_participant = serializers.SerializerMethodField()
+    listing_summary = serializers.SerializerMethodField()
+    last_message = serializers.SerializerMethodField()
+    unread_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Conversation
+        fields = (
+            "id",
+            "other_participant",
+            "listing_summary",
+            "last_message",
+            "unread_count",
+            "created_at",
+            "updated_at",
+        )
+
+    def get_other_participant(self, obj):
+        user = self.context["request"].user
+        other = obj.get_other_participant(user)
+        return ConversationParticipantSerializer(other).data
+
+    def get_listing_summary(self, obj):
+        if not obj.listing_id:
+            return None
+        return {
+            "id": obj.listing.id,
+            "title": obj.listing.title,
+            "city": obj.listing.city,
+            "state": obj.listing.state,
+        }
+
+    def get_last_message(self, obj):
+        msg = obj.messages.order_by("-created_at").first()
+        if not msg:
+            return None
+        return {
+            "content": msg.content[:100],
+            "created_at": msg.created_at,
+            "sender_id": msg.sender_id,
+        }
+
+    def get_unread_count(self, obj):
+        user = self.context["request"].user
+        return obj.messages.filter(is_read=False).exclude(sender=user).count()
+
+
+class CreateConversationSerializer(serializers.Serializer):
+    recipient_id = serializers.IntegerField()
+    listing_id = serializers.IntegerField(required=False, allow_null=True)
+    initial_message = serializers.CharField(max_length=4000)
+
+    def validate_recipient_id(self, value):
+        user = self.context["request"].user
+        if value == user.pk:
+            raise serializers.ValidationError("You cannot message yourself.")
+        if not User.objects.filter(pk=value).exists():
+            raise serializers.ValidationError("User not found.")
+        return value
+
+    def validate_listing_id(self, value):
+        if value is not None and not PropertyListing.objects.filter(pk=value, deleted_at__isnull=True).exists():
+            raise serializers.ValidationError("Listing not found.")
+        return value
+
+
+class SendMessageSerializer(serializers.Serializer):
+    content = serializers.CharField(max_length=4000, allow_blank=False)
+
+    def validate_content(self, value):
+        if not value.strip():
+            raise serializers.ValidationError("Message content cannot be blank.")
+        return value.strip()
+
+
+class UserBlockSerializer(serializers.ModelSerializer):
+    blocked_user = ConversationParticipantSerializer(source="blocked", read_only=True)
+
+    class Meta:
+        model = UserBlock
+        fields = ("id", "blocked_user", "created_at")
         read_only_fields = fields
