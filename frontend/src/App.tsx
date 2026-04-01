@@ -29,6 +29,7 @@ import SubmitApprovalPage from "./pages/SubmitApprovalPage";
 import ManagementApprovalQueuePage from "./pages/ManagementApprovalQueuePage";
 import ApprovalRequestDetailPage from "./pages/ApprovalRequestDetailPage";
 import PaymentHistoryPage from "./pages/PaymentHistoryPage";
+import ListingDepositHistoryPage from "./pages/ListingDepositHistoryPage";
 
 function App() {
   return (
@@ -73,6 +74,14 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <CreateListingPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/listings/:id/deposits"
+                element={
+                  <ProtectedRoute>
+                    <ListingDepositHistoryPage />
                   </ProtectedRoute>
                 }
               />

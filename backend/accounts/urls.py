@@ -23,6 +23,7 @@ urlpatterns = [
     path("listings/", views.create_property_listing),
     path("listings/<int:listing_id>/media/", views.upload_listing_media),
     path("listings/<int:listing_id>/media/<int:media_id>/primary/", views.set_listing_media_primary),
+    path("listings/<int:listing_id>/transactions/", views.listing_owner_transactions),
     path("listings/<int:listing_id>/", views.property_listing_detail),
     path("listings/mine/", views.my_property_listings),
     path("listings/amenities/", views.listing_amenities),
