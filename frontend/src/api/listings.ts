@@ -8,6 +8,8 @@ export interface ListingAmenity {
 
 export interface PropertyListing {
   id: number;
+  /** Present on full listing payloads from the API (e.g. detail, mine, create). */
+  owner?: number;
   title: string;
   description: string;
   property_type: string;
@@ -169,6 +171,26 @@ export async function setPrimaryListingMedia(
 
 export async function getMyListings(): Promise<PropertyListing[]> {
   const { data } = await api.get<PropertyListing[]>("/listings/mine/");
+  return data;
+}
+
+/** Security deposit payments received for bookings on this listing (subleaser only). */
+export interface OwnerListingTransaction {
+  id: number;
+  amount: string;
+  currency: string;
+  booking_id: number | null;
+  paid_at: string | null;
+  status: string;
+  sublessee_display: string;
+}
+
+export async function fetchListingOwnerTransactions(
+  listingId: number,
+): Promise<OwnerListingTransaction[]> {
+  const { data } = await api.get<OwnerListingTransaction[]>(
+    `/listings/${listingId}/transactions/`,
+  );
   return data;
 }
 
