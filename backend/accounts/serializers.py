@@ -354,6 +354,11 @@ class PropertyListingSerializer(serializers.ModelSerializer):
     amenities = serializers.SerializerMethodField()
     media = serializers.SerializerMethodField()
     approved_by_company_name = serializers.SerializerMethodField()
+    approved_by_company_user_id = serializers.SerializerMethodField()
+    owner_id = serializers.IntegerField(source="owner.id", read_only=True)
+    owner_username = serializers.CharField(source="owner.username", read_only=True)
+    owner_first_name = serializers.CharField(source="owner.first_name", read_only=True)
+    owner_last_name = serializers.CharField(source="owner.last_name", read_only=True)
 
     class Meta:
         model = PropertyListing
@@ -393,6 +398,11 @@ class PropertyListingSerializer(serializers.ModelSerializer):
             "status",
             "approval_status",
             "approved_by_company_name",
+            "approved_by_company_user_id",
+            "owner_id",
+            "owner_username",
+            "owner_first_name",
+            "owner_last_name",
             "published_at",
             "created_at",
             "updated_at",
@@ -411,6 +421,11 @@ class PropertyListingSerializer(serializers.ModelSerializer):
     def get_approved_by_company_name(self, obj):
         if obj.approved_by_company_id:
             return obj.approved_by_company.company_name
+        return None
+
+    def get_approved_by_company_user_id(self, obj):
+        if obj.approved_by_company_id:
+            return obj.approved_by_company.user_id
         return None
 
 
@@ -775,6 +790,11 @@ class PropertyListingBrowseSerializer(serializers.ModelSerializer):
     amenities = serializers.SerializerMethodField()
     media = ListingMediaSerializer(many=True, read_only=True)
     approved_by_company_name = serializers.SerializerMethodField()
+    approved_by_company_user_id = serializers.SerializerMethodField()
+    owner_id = serializers.IntegerField(source="owner.id", read_only=True)
+    owner_username = serializers.CharField(source="owner.username", read_only=True)
+    owner_first_name = serializers.CharField(source="owner.first_name", read_only=True)
+    owner_last_name = serializers.CharField(source="owner.last_name", read_only=True)
 
     class Meta:
         model = PropertyListing
@@ -802,6 +822,11 @@ class PropertyListingBrowseSerializer(serializers.ModelSerializer):
             "lease_term_min_months",
             "lease_term_max_months",
             "approved_by_company_name",
+            "approved_by_company_user_id",
+            "owner_id",
+            "owner_username",
+            "owner_first_name",
+            "owner_last_name",
             "amenities",
             "media",
         )
@@ -814,6 +839,11 @@ class PropertyListingBrowseSerializer(serializers.ModelSerializer):
     def get_approved_by_company_name(self, obj):
         if obj.approved_by_company_id:
             return obj.approved_by_company.company_name
+        return None
+
+    def get_approved_by_company_user_id(self, obj):
+        if obj.approved_by_company_id:
+            return obj.approved_by_company.user_id
         return None
 
 
