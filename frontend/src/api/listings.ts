@@ -42,6 +42,11 @@ export interface PropertyListing {
   status: string;
   approval_status: string;
   approved_by_company_name: string | null;
+  approved_by_company_user_id: number | null;
+  owner_id: number;
+  owner_username: string;
+  owner_first_name: string;
+  owner_last_name: string;
   published_at: string | null;
   created_at: string;
   updated_at: string;
