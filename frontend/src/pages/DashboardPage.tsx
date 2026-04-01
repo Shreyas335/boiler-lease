@@ -12,7 +12,7 @@ import {
   Tooltip,
   type ChipProps,
 } from "@mui/material";
-import { Link as RouterLink } from "react-router-dom";
+import { Link as RouterLink, useNavigate, useSearchParams } from "react-router-dom";
 import HomeWorkRoundedIcon from "@mui/icons-material/HomeWorkRounded";
 import PersonSearchRoundedIcon from "@mui/icons-material/PersonSearchRounded";
 import BusinessRoundedIcon from "@mui/icons-material/BusinessRounded";
@@ -44,9 +44,12 @@ const USER_TYPE_CONFIG: Record<
 
 export default function DashboardPage() {
   const { user } = useAuth();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [recentBookings, setRecentBookings] = useState<BookingRecord[]>([]);
   const [bookingsLoading, setBookingsLoading] = useState(false);
   const [bookingsError, setBookingsError] = useState<string | null>(null);
+  const [depositNotice, setDepositNotice] = useState<"success" | "canceled" | null>(null);
   const userType = user?.user_type;
 
   function getBookingStatusMeta(status: BookingRecord["status"]): {
@@ -104,6 +107,15 @@ export default function DashboardPage() {
     };
   }, [userType]);
 
+  useEffect(() => {
+    if (userType !== "sublessee") return;
+    const d = searchParams.get("deposit");
+    if (d === "success" || d === "canceled") {
+      setDepositNotice(d);
+      navigate("/dashboard", { replace: true });
+    }
+  }, [searchParams, navigate, userType]);
+
   if (!user) return null;
 
   const config = USER_TYPE_CONFIG[user.user_type] || USER_TYPE_CONFIG.sublessee;
@@ -136,6 +148,26 @@ export default function DashboardPage() {
             <RouterLink to="/company/verify" style={{ fontWeight: 600 }}>
               Re-upload Documents
             </RouterLink>
+          </Alert>
+        )}
+        {user.user_type === "sublessee" && depositNotice === "success" && (
+          <Alert
+            severity="success"
+            onClose={() => setDepositNotice(null)}
+            sx={{ mb: 3 }}
+          >
+            Your security deposit payment went through. If your booking does not show as paid yet, wait a few seconds
+            and refresh—confirmation arrives via Stripe. View details in{" "}
+            <RouterLink to="/payments/history" style={{ fontWeight: 600 }}>
+              payment history
+            </RouterLink>
+            .
+          </Alert>
+        )}
+        {user.user_type === "sublessee" && depositNotice === "canceled" && (
+          <Alert severity="info" onClose={() => setDepositNotice(null)} sx={{ mb: 3 }}>
+            Checkout was canceled; no charge was made. You can pay the deposit again from your booking when you are
+            ready.
           </Alert>
         )}
         <Box sx={{ mb: 4 }}>
@@ -227,6 +259,9 @@ export default function DashboardPage() {
               </Button>
               <Button component={RouterLink} to="/favorites" variant="outlined">
                 Favorites
+              </Button>
+              <Button component={RouterLink} to="/payments/history" variant="outlined">
+                Payment history
               </Button>
             </>
           )}
