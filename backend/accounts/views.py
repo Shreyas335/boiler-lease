@@ -1666,12 +1666,38 @@ def my_profile(request):
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def upload_profile_picture(request):
-    url = request.data.get("url", "").strip()
-    if not url:
-        return Response({"detail": "url is required."}, status=status.HTTP_400_BAD_REQUEST)
-    request.user.profile_picture_url = url
+    from django.core.files.storage import storages
+
+    file = request.FILES.get("file")
+    if not file:
+        return Response({"detail": "file is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+    allowed_types = ["image/jpeg", "image/png", "image/webp", "image/gif"]
+    content_type = file.content_type or "application/octet-stream"
+    if content_type not in allowed_types:
+        return Response(
+            {"detail": f"Unsupported file type. Allowed: {', '.join(allowed_types)}"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    if file.size > 5 * 1024 * 1024:
+        return Response({"detail": "File too large. Maximum size is 5 MB."}, status=status.HTTP_400_BAD_REQUEST)
+
+    ext = file.name.rsplit(".", 1)[-1] if "." in file.name else "jpg"
+    storage_key = f"profile-pictures/{request.user.pk}/{uuid.uuid4().hex}.{ext}"
+
+    try:
+        storage = storages["listing_media_public"]
+    except KeyError:
+        return Response({"detail": "Storage backend not configured."}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+    saved_name = storage.save(storage_key, file)
+    base = getattr(settings, "LISTING_MEDIA_PUBLIC_BASE_URL", "")
+    file_url = f"{base}/{saved_name}" if base else storage.url(saved_name)
+
+    request.user.profile_picture_url = file_url
     request.user.save(update_fields=["profile_picture_url"])
-    return Response({"profile_picture_url": request.user.profile_picture_url})
+    return Response({"profile_picture_url": file_url})
 
 
 @api_view(["GET"])
