@@ -18,26 +18,38 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
-from .email_verification import send_2fa_code_email, send_password_reset_email, send_verification_email
+from .email_verification import (
+    send_2fa_code_email,
+    send_new_message_notification,
+    send_password_reset_email,
+    send_verification_email,
+)
 
 from .models import (
+    Conversation,
+    ConversationDeletion,
     FavoriteListing,
     ListingAmenity,
     ListingAmenityMap,
     ListingMedia,
+    Message,
     PasswordResetToken,
     PropertyBooking,
     PropertyListing,
     TransactionRecord,
     User,
+    UserBlock,
 )
-from .pagination import PropertyListingPagination
+from .pagination import MessagePagination, PropertyListingPagination
 
 from .serializers import (
     AccountUpdateSerializer,
+    ConversationSerializer,
+    CreateConversationSerializer,
     FavoriteListingSerializer,
     FeedbackSubmissionSerializer,
     LoginSerializer,
+    MessageSerializer,
     PasswordChangeSerializer,
     PasswordResetConfirmSerializer,
     PasswordResetRequestSerializer,
@@ -51,7 +63,9 @@ from .serializers import (
     RegisterSerializer,
     ListingMediaSerializer,
     ListingMediaUploadSerializer,
+    SendMessageSerializer,
     TransactionRecordSerializer,
+    UserBlockSerializer,
     UserSerializer,
     TwoFactorVerifyLoginSerializer,
 )
@@ -1250,3 +1264,263 @@ def my_favorite_listings(request):
         context={"user": request.user, "favorite_listing_ids": favorite_listing_ids},
     )
     return Response(serializer.data)
+
+
+# ─── Messaging views ──────────────────────────────────────────────────────────
+
+def _block_exists(user_a, user_b):
+    """Return True if either user has blocked the other."""
+    return UserBlock.objects.filter(
+        Q(blocker=user_a, blocked=user_b) | Q(blocker=user_b, blocked=user_a)
+    ).exists()
+
+
+def _broadcast_new_message(msg, recipient):
+    """Push new message to WebSocket clients via channel layer (best-effort)."""
+    try:
+        from channels.layers import get_channel_layer
+        from asgiref.sync import async_to_sync
+
+        channel_layer = get_channel_layer()
+        if channel_layer is None:
+            return
+
+        message_data = MessageSerializer(msg).data
+        # Convert DRF ReturnDict / datetime objects to plain JSON-serialisable dict.
+        import json
+        from rest_framework.renderers import JSONRenderer
+        message_json = json.loads(JSONRenderer().render(message_data))
+
+        group = f"conversation_{msg.conversation_id}"
+        async_to_sync(channel_layer.group_send)(
+            group,
+            {"type": "chat.message", "message": message_json},
+        )
+
+        # Also notify the recipient's personal group so their unread badge updates.
+        unread_count = Message.objects.filter(
+            is_read=False,
+            conversation__in=Conversation.objects.filter(
+                Q(participant_1=recipient) | Q(participant_2=recipient)
+            ).exclude(
+                pk__in=ConversationDeletion.objects.filter(user=recipient).values_list(
+                    "conversation_id", flat=True
+                )
+            ),
+        ).exclude(sender=recipient).count()
+
+        async_to_sync(channel_layer.group_send)(
+            f"user_{recipient.id}",
+            {"type": "unread.update", "unread_count": unread_count},
+        )
+    except Exception:
+        pass  # Never let broadcast failures break message delivery
+
+
+def _get_conversation_for_user(conversation_id, user):
+    """Return conversation if user is a participant, else None."""
+    return Conversation.objects.filter(
+        pk=conversation_id
+    ).filter(
+        Q(participant_1=user) | Q(participant_2=user)
+    ).first()
+
+
+@api_view(["GET", "POST"])
+@permission_classes([IsAuthenticated])
+def list_conversations(request):
+    user = request.user
+
+    if request.method == "GET":
+        conversations = (
+            Conversation.objects.filter(Q(participant_1=user) | Q(participant_2=user))
+            .exclude(deletions__user=user)
+            .select_related("participant_1", "participant_2", "listing")
+            .order_by("-updated_at")
+        )
+        serializer = ConversationSerializer(conversations, many=True, context={"request": request})
+        return Response(serializer.data)
+
+    # POST — create or retrieve a conversation and send an initial message
+    serializer = CreateConversationSerializer(data=request.data, context={"request": request})
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    recipient_id = serializer.validated_data["recipient_id"]
+    listing_id = serializer.validated_data.get("listing_id")
+    initial_message = serializer.validated_data["initial_message"]
+
+    recipient = User.objects.get(pk=recipient_id)
+
+    if _block_exists(user, recipient):
+        return Response({"detail": "You cannot message this user."}, status=status.HTTP_403_FORBIDDEN)
+
+    # Normalize participant order so the UniqueConstraint fires correctly
+    p1, p2 = (user, recipient) if user.pk < recipient.pk else (recipient, user)
+
+    listing = None
+    if listing_id:
+        listing = PropertyListing.objects.filter(pk=listing_id, deleted_at__isnull=True).first()
+
+    conversation, created = Conversation.objects.get_or_create(
+        participant_1=p1,
+        participant_2=p2,
+        listing=listing,
+    )
+
+    # If the sender previously deleted this conversation, resurface it
+    ConversationDeletion.objects.filter(conversation=conversation, user=user).delete()
+    # Also resurface for recipient so it appears in their inbox
+    ConversationDeletion.objects.filter(conversation=conversation, user=recipient).delete()
+
+    msg = Message.objects.create(conversation=conversation, sender=user, content=initial_message)
+    # Touch updated_at
+    Conversation.objects.filter(pk=conversation.pk).update(updated_at=msg.created_at)
+    conversation.refresh_from_db()
+
+    _broadcast_new_message(msg, recipient)
+
+    if recipient.message_notifications_enabled:
+        try:
+            send_new_message_notification(recipient, user, conversation, initial_message)
+        except Exception:
+            pass
+
+    out_serializer = ConversationSerializer(conversation, context={"request": request})
+    return Response(out_serializer.data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+
+@api_view(["GET", "DELETE"])
+@permission_classes([IsAuthenticated])
+def conversation_detail(request, conversation_id):
+    user = request.user
+    conversation = _get_conversation_for_user(conversation_id, user)
+    if not conversation:
+        return Response({"detail": "Conversation not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == "GET":
+        serializer = ConversationSerializer(conversation, context={"request": request})
+        return Response(serializer.data)
+
+    # DELETE — soft-delete for this user only
+    ConversationDeletion.objects.get_or_create(conversation=conversation, user=user)
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+@api_view(["GET", "POST"])
+@permission_classes([IsAuthenticated])
+def conversation_messages(request, conversation_id):
+    user = request.user
+    conversation = _get_conversation_for_user(conversation_id, user)
+    if not conversation:
+        return Response({"detail": "Conversation not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    # Disallow access if current user has deleted the conversation (unless they're posting)
+    if request.method == "GET":
+        if ConversationDeletion.objects.filter(conversation=conversation, user=user).exists():
+            return Response({"detail": "Conversation not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        paginator = MessagePagination()
+        messages_qs = conversation.messages.select_related("sender").order_by("created_at")
+        page = paginator.paginate_queryset(messages_qs, request)
+        serializer = MessageSerializer(page, many=True)
+        return paginator.get_paginated_response(serializer.data)
+
+    # POST — send a new message
+    send_serializer = SendMessageSerializer(data=request.data)
+    if not send_serializer.is_valid():
+        return Response(send_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    recipient = conversation.get_other_participant(user)
+
+    if _block_exists(user, recipient):
+        return Response({"detail": "Cannot send message."}, status=status.HTTP_403_FORBIDDEN)
+
+    msg = Message.objects.create(
+        conversation=conversation,
+        sender=user,
+        content=send_serializer.validated_data["content"],
+    )
+    # Touch updated_at and resurface for both parties
+    Conversation.objects.filter(pk=conversation.pk).update(updated_at=msg.created_at)
+    ConversationDeletion.objects.filter(conversation=conversation, user__in=[user, recipient]).delete()
+
+    _broadcast_new_message(msg, recipient)
+
+    if recipient.message_notifications_enabled:
+        try:
+            send_new_message_notification(recipient, user, conversation, msg.content)
+        except Exception:
+            pass
+
+    return Response(MessageSerializer(msg).data, status=status.HTTP_201_CREATED)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def mark_messages_read(request, conversation_id):
+    user = request.user
+    conversation = _get_conversation_for_user(conversation_id, user)
+    if not conversation:
+        return Response({"detail": "Conversation not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    count = Message.objects.filter(
+        conversation=conversation, is_read=False
+    ).exclude(sender=user).update(is_read=True)
+    return Response({"marked_read": count})
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def unread_message_count(request):
+    user = request.user
+    deleted_conv_ids = ConversationDeletion.objects.filter(user=user).values_list("conversation_id", flat=True)
+    count = Message.objects.filter(
+        is_read=False,
+        conversation__in=Conversation.objects.filter(
+            Q(participant_1=user) | Q(participant_2=user)
+        ).exclude(pk__in=deleted_conv_ids),
+    ).exclude(sender=user).count()
+    return Response({"unread_count": count})
+
+
+@api_view(["GET", "POST"])
+@permission_classes([IsAuthenticated])
+def blocks(request):
+    user = request.user
+
+    if request.method == "GET":
+        user_blocks = UserBlock.objects.filter(blocker=user).select_related("blocked")
+        serializer = UserBlockSerializer(user_blocks, many=True)
+        return Response(serializer.data)
+
+    # POST — block a user
+    blocked_user_id = request.data.get("blocked_user_id")
+    if not blocked_user_id:
+        return Response({"detail": "blocked_user_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+    if blocked_user_id == user.pk:
+        return Response({"detail": "You cannot block yourself."}, status=status.HTTP_400_BAD_REQUEST)
+
+    blocked_user = User.objects.filter(pk=blocked_user_id).first()
+    if not blocked_user:
+        return Response({"detail": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    _, created = UserBlock.objects.get_or_create(blocker=user, blocked=blocked_user)
+    return Response({"detail": "User blocked."}, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+
+@api_view(["GET", "DELETE"])
+@permission_classes([IsAuthenticated])
+def block_detail(request, user_id):
+    user = request.user
+
+    if request.method == "GET":
+        is_blocked = UserBlock.objects.filter(blocker=user, blocked__pk=user_id).exists()
+        return Response({"is_blocked": is_blocked})
+
+    # DELETE — unblock
+    deleted, _ = UserBlock.objects.filter(blocker=user, blocked__pk=user_id).delete()
+    if not deleted:
+        return Response({"detail": "Block not found."}, status=status.HTTP_404_NOT_FOUND)
+    return Response(status=status.HTTP_204_NO_CONTENT)

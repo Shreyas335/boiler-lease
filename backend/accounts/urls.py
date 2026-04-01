@@ -39,4 +39,12 @@ urlpatterns = [
     path("payments/webhook/", views.stripe_webhook),
     path("favorites/", views.my_favorite_listings),
     path("favorites/<int:listing_id>/", views.favorite_listing_toggle),
+    # Messaging
+    path("messaging/conversations/", views.list_conversations),
+    path("messaging/conversations/<int:conversation_id>/", views.conversation_detail),
+    path("messaging/conversations/<int:conversation_id>/messages/", views.conversation_messages),
+    path("messaging/conversations/<int:conversation_id>/read/", views.mark_messages_read),
+    path("messaging/unread-count/", views.unread_message_count),
+    path("messaging/blocks/", views.blocks),
+    path("messaging/blocks/<int:user_id>/", views.block_detail),
 ]
