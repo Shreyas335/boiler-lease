@@ -72,3 +72,26 @@ def send_password_reset_email(user, raw_token):
         recipient_list=[user.email],
         fail_silently=False,
     )
+
+
+def send_new_message_notification(recipient, sender, conversation, message_content_preview):
+    """Send email notification to recipient when they receive a new message."""
+    inbox_url = f"{settings.FRONTEND_URL}/messages/{conversation.pk}"
+    sender_display = sender.get_full_name() or sender.username
+    preview = message_content_preview[:120]
+    subject = f"New message from {sender_display} — Boiler Lease"
+    message = (
+        f"Hi {recipient.get_full_name() or recipient.username},\n\n"
+        f"You have a new message from {sender_display}:\n\n"
+        f'"{preview}"\n\n'
+        f"View the conversation here: {inbox_url}\n\n"
+        "To turn off these notifications, go to Account Settings.\n\n"
+        "— Boiler Lease"
+    )
+    send_mail(
+        subject=subject,
+        message=message,
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        recipient_list=[recipient.email],
+        fail_silently=True,
+    )
