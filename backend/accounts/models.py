@@ -491,3 +491,18 @@ class UserRating(models.Model):
 
     def __str__(self):
         return f'{self.rater} rated {self.rated_user}: {self.score}'
+
+
+class UserBlock(models.Model):
+    blocker = models.ForeignKey(User, on_delete=models.CASCADE, related_name='blocks_given')
+    blocked_user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='blocks_received')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['blocker', 'blocked_user'], name='one_block_per_user_pair'),
+            models.CheckConstraint(check=~models.Q(blocker=models.F('blocked_user')), name='cannot_block_self'),
+        ]
+
+    def __str__(self):
+        return f'{self.blocker} blocked {self.blocked_user}'
