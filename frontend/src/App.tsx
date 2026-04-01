@@ -28,6 +28,7 @@ import ManagementCompanyDetailPage from "./pages/ManagementCompanyDetailPage";
 import SubmitApprovalPage from "./pages/SubmitApprovalPage";
 import ManagementApprovalQueuePage from "./pages/ManagementApprovalQueuePage";
 import ApprovalRequestDetailPage from "./pages/ApprovalRequestDetailPage";
+import PaymentHistoryPage from "./pages/PaymentHistoryPage";
 
 function App() {
   return (
@@ -113,6 +114,14 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <FavoritesPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/payments/history"
+                element={
+                  <ProtectedRoute>
+                    <PaymentHistoryPage />
                   </ProtectedRoute>
                 }
               />
