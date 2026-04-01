@@ -10,6 +10,7 @@ from django.core.cache import cache
 from django.conf import settings
 from django.db.models.functions import Coalesce
 from django.http import HttpResponseRedirect
+from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt, ensure_csrf_cookie
 from django.db.models import Q, Prefetch
@@ -64,6 +65,7 @@ from .serializers import (
     RegisterSerializer,
     ListingMediaSerializer,
     ListingMediaUploadSerializer,
+    OwnerListingTransactionSerializer,
     TransactionRecordSerializer,
     UserSerializer,
     TwoFactorVerifyLoginSerializer,
@@ -1061,6 +1063,37 @@ def my_payment_history(request):
             "listing_titles_by_booking_id": titles_by_booking_id,
         },
     )
+    return Response(serializer.data)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def listing_owner_transactions(request, listing_id):
+    """Succeeded transactions linked to bookings on this listing (owner / subleaser only)."""
+    if request.user.user_type != User.UserType.SUBLEASER:
+        return Response(
+            {"detail": "Only subleasers can view listing transaction records."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    listing = get_object_or_404(
+        PropertyListing,
+        pk=listing_id,
+        owner=request.user,
+        deleted_at__isnull=True,
+    )
+    booking_ids = PropertyBooking.objects.filter(listing=listing).values_list("id", flat=True)
+    ref_strings = {str(bid) for bid in booking_ids}
+    if not ref_strings:
+        return Response([])
+    transactions = (
+        TransactionRecord.objects.filter(
+            status=TransactionRecord.Status.SUCCEEDED,
+            booking_reference__in=ref_strings,
+        )
+        .select_related("user")
+        .order_by("-paid_at", "-created_at")
+    )
+    serializer = OwnerListingTransactionSerializer(transactions, many=True)
     return Response(serializer.data)
 
 

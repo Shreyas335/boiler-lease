@@ -26,6 +26,7 @@ import {
   EditOutlined,
   KingBedOutlined,
   LocationOnOutlined,
+  PaymentsOutlined,
   ShowerOutlined,
   SquareFootOutlined,
 } from "@mui/icons-material";
@@ -341,6 +342,15 @@ export default function MyListingsPage() {
                           )}
                         </Stack>
                         <Stack direction="row" spacing={0}>
+                          <IconButton
+                            size="small"
+                            color="primary"
+                            component={RouterLink}
+                            to={`/listings/${listing.id}/deposits`}
+                            title="Deposit payments"
+                          >
+                            <PaymentsOutlined fontSize="small" />
+                          </IconButton>
                           <IconButton
                             size="small"
                             color="primary"
