@@ -41,6 +41,7 @@ export interface PropertyListing {
   virtual_tour_url: string;
   status: string;
   approval_status: string;
+  approved_by_company_name: string | null;
   published_at: string | null;
   created_at: string;
   updated_at: string;
@@ -60,6 +61,7 @@ export interface PropertyListingSummary {
   availability_end_date: string;
   status: string;
   approval_status: string;
+  approved_by_company_name?: string | null;
   created_at: string;
   primary_photo_url: string;
   is_favorited: boolean;
@@ -124,7 +126,6 @@ export interface CreatePropertyListingPayload {
   contact_email?: string;
   contact_phone?: string;
   virtual_tour_url?: string;
-  status: string;
   amenity_codes?: string[];
 }
 
@@ -356,5 +357,32 @@ export async function getFavorites(sortBy: FavoriteSortBy, order: SortOrder): Pr
   const { data } = await api.get<FavoriteRecord[]>("/favorites/", {
     params: { sort_by: sortBy, order },
   });
+  return data;
+}
+
+export interface ApprovalRequestSummary {
+  id: number;
+  listing_id: number;
+  listing_title: string;
+  listing_rent: string;
+  listing_city: string;
+  management_company_id: number;
+  management_company_name: string;
+  guideline_name: string | null;
+  status: "pending" | "approved" | "rejected";
+  subleaser_notes: string;
+  reviewer_notes: string;
+  reviewed_at: string | null;
+  created_at: string;
+}
+
+export async function submitApprovalRequest(
+  listingId: number,
+  payload: { management_company_id: number; guideline_id: number; subleaser_notes?: string },
+): Promise<ApprovalRequestSummary> {
+  const { data } = await api.post<ApprovalRequestSummary>(
+    `/listings/${listingId}/request-approval/`,
+    payload,
+  );
   return data;
 }
