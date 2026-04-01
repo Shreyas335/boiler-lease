@@ -85,20 +85,56 @@ def _make_2fa_temp_token(user):
     return token
 
 def _user_for_identity_verification_session(obj):
-    """Resolve User from Stripe Verification webhook object"""
+    """Resolve User from Stripe VerificationSession (webhook payload or API object)."""
     if not obj:
         return None
-    meta = obj.get("metadata") or {}
-    uid = meta.get("user_id")
+    meta = getattr(obj, "metadata", None)
+    if meta is None and isinstance(obj, dict):
+        meta = obj.get("metadata")
+    meta = meta or {}
+    uid = None
+    if isinstance(meta, dict):
+        uid = meta.get("user_id")
+    elif hasattr(meta, "get"):
+        uid = meta.get("user_id")
     if uid is not None:
         try:
             return User.objects.filter(pk=int(uid)).first()
         except (ValueError, TypeError):
             return None
-    session_id = obj.get("id")
+    session_id = getattr(obj, "id", None)
+    if session_id is None and isinstance(obj, dict):
+        session_id = obj.get("id")
     if session_id:
         return User.objects.filter(stripe_identity_session_id=session_id).first()
     return None
+
+
+def _identity_verification_last_error_present(obj):
+    err = getattr(obj, "last_error", None)
+    if err is None and isinstance(obj, dict):
+        err = obj.get("last_error")
+    if not err:
+        return False
+    if isinstance(err, dict):
+        return bool(err)
+    return True
+
+
+def _user_must_verify_identity(user):
+    if user.user_type not in (User.UserType.SUBLESSEE, User.UserType.SUBLEASER):
+        return False
+    return user.identity_verification_status != User.IdentityVerificationStatus.VERIFIED
+
+
+def _identity_verification_required_response():
+    return Response(
+        {
+            "detail": "Identity verification is required before this action.",
+            "code": "identity_verification_required",
+        },
+        status=status.HTTP_403_FORBIDDEN,
+    )
 
 def _hash_token(token):
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
@@ -472,6 +508,8 @@ def create_property_listing(request):
             {"detail": "Only subleasers can create property listings."},
             status=status.HTTP_403_FORBIDDEN,
         )
+    if _user_must_verify_identity(request.user):
+        return _identity_verification_required_response()
 
     serializer = PropertyListingCreateSerializer(data=request.data, context={"request": request})
     if not serializer.is_valid():
@@ -955,6 +993,8 @@ def create_booking(request):
             {"detail": "Only sublessees can book properties."},
             status=status.HTTP_403_FORBIDDEN,
         )
+    if _user_must_verify_identity(request.user):
+        return _identity_verification_required_response()
 
     serializer = PropertyBookingCreateSerializer(
         data=request.data,
@@ -1133,7 +1173,8 @@ def start_identity_verification_session(request):
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
     stripe.api_key = settings.STRIPE_SECRET_KEY
-    return_url = f"{settings.FRONTEND_URL}/dashboard"
+    base = settings.FRONTEND_URL.rstrip("/")
+    return_url = f"{base}/dashboard?identity_return=1"
     session = stripe.identity.VerificationSession.create(
         type="document",
         metadata={"user_id": str(user.id)},
@@ -1143,6 +1184,64 @@ def start_identity_verification_session(request):
     user.identity_verification_status = User.IdentityVerificationStatus.PENDING
     user.save(update_fields=["stripe_identity_session_id", "identity_verification_status"])
     return Response({"url": session.url}, status=status.HTTP_201_CREATED)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def sync_identity_verification_status(request):
+    """Pull latest VerificationSession status from Stripe (e.g. after user returns from hosted flow)."""
+    user = request.user
+    if user.user_type not in (User.UserType.SUBLESSEE, User.UserType.SUBLEASER):
+        return Response(
+            {"detail": "Identity verification is not used for this account type."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    if user.identity_verification_status == User.IdentityVerificationStatus.VERIFIED:
+        return Response(
+            {
+                "identity_verification_status": user.identity_verification_status,
+                "synced": False,
+            }
+        )
+    sid = (user.stripe_identity_session_id or "").strip()
+    if not sid or not settings.STRIPE_SECRET_KEY:
+        return Response(
+            {
+                "identity_verification_status": user.identity_verification_status,
+                "synced": False,
+            }
+        )
+    stripe.api_key = settings.STRIPE_SECRET_KEY
+    try:
+        session = stripe.identity.VerificationSession.retrieve(sid)
+    except stripe.error.StripeError:
+        return Response(
+            {"detail": "Could not load verification status from Stripe."},
+            status=status.HTTP_502_BAD_GATEWAY,
+        )
+    vs_status = getattr(session, "status", None) or ""
+    last_error = getattr(session, "last_error", None)
+    if vs_status == "verified":
+        new_status = User.IdentityVerificationStatus.VERIFIED
+    elif vs_status == "canceled":
+        new_status = User.IdentityVerificationStatus.FAILED
+    elif vs_status == "requires_input":
+        new_status = (
+            User.IdentityVerificationStatus.FAILED
+            if last_error
+            else User.IdentityVerificationStatus.PENDING
+        )
+    else:
+        new_status = User.IdentityVerificationStatus.PENDING
+    if new_status != user.identity_verification_status:
+        user.identity_verification_status = new_status
+        user.save(update_fields=["identity_verification_status"])
+    return Response(
+        {
+            "identity_verification_status": user.identity_verification_status,
+            "synced": True,
+        }
+    )
 
 
 @api_view(["POST"])
@@ -1159,6 +1258,8 @@ def create_deposit_checkout_session(request):
             {"detail": "Please verify your email before making a payment."},
             status=status.HTTP_400_BAD_REQUEST,
         )
+    if _user_must_verify_identity(request.user):
+        return _identity_verification_required_response()
     if not settings.STRIPE_SECRET_KEY:
         return Response(
             {"detail": "Stripe is not configured on the server."},
@@ -1302,10 +1403,15 @@ def stripe_webhook(request):
         if user:
             user.identity_verification_status = User.IdentityVerificationStatus.FAILED
             user.save(update_fields=["identity_verification_status"])
+    elif event_type == "identity.verification_session.processing":
+        user = _user_for_identity_verification_session(obj)
+        if user:
+            user.identity_verification_status = User.IdentityVerificationStatus.PENDING
+            user.save(update_fields=["identity_verification_status"])
     elif event_type == "identity.verification_session.requires_input":
         user = _user_for_identity_verification_session(obj)
         if user:
-            if obj.get("last_error"):
+            if _identity_verification_last_error_present(obj):
                 user.identity_verification_status = User.IdentityVerificationStatus.FAILED
             else:
                 user.identity_verification_status = User.IdentityVerificationStatus.PENDING
@@ -1650,6 +1756,8 @@ def submit_approval_request(request, listing_id):
     """Subleaser submits a listing for approval by a management company."""
     if request.user.user_type != User.UserType.SUBLEASER:
         return Response({"detail": "Only subleasers can submit approval requests."}, status=status.HTTP_403_FORBIDDEN)
+    if _user_must_verify_identity(request.user):
+        return _identity_verification_required_response()
 
     try:
         listing = PropertyListing.objects.get(pk=listing_id, owner=request.user, deleted_at__isnull=True)

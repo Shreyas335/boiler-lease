@@ -14,9 +14,10 @@ import {
   Typography,
 } from "@mui/material";
 import SearchIcon from "@mui/icons-material/Search";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link as RouterLink, useNavigate, useParams } from "react-router-dom";
 import { getPropertyListingDetail, submitApprovalRequest, type PropertyListing } from "../api/listings";
 import { getManagementCompanies, getManagementCompany, type PublicManagementCompany, type PublicGuideline } from "../api/company";
+import { useAuth } from "../contexts/AuthContext";
 
 function formatMoney(value: string | null) {
   if (!value) return "-";
@@ -27,6 +28,7 @@ function formatMoney(value: string | null) {
 export default function SubmitApprovalPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { user } = useAuth();
 
   const [listing, setListing] = useState<PropertyListing | null>(null);
   const [listingLoading, setListingLoading] = useState(true);
@@ -86,6 +88,10 @@ export default function SubmitApprovalPage() {
 
   async function handleSubmit() {
     if (!listing || !selectedCompany || !selectedGuideline) return;
+    if (user?.identity_verification_status !== "verified") {
+      setSubmitError("Identity verification is required before submitting for approval.");
+      return;
+    }
     setSubmitting(true);
     setSubmitError(null);
     try {
@@ -96,9 +102,11 @@ export default function SubmitApprovalPage() {
       });
       navigate("/my-listings");
     } catch (err: unknown) {
+      const data = (err as { response?: { data?: { detail?: string } } })?.response?.data;
       const msg =
-        (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
-        "Failed to submit approval request.";
+        typeof data?.detail === "string"
+          ? data.detail
+          : "Failed to submit approval request.";
       setSubmitError(msg);
     } finally {
       setSubmitting(false);
@@ -123,6 +131,8 @@ export default function SubmitApprovalPage() {
     );
   }
 
+  const identityBlocked = user?.identity_verification_status !== "verified";
+
   return (
     <Box sx={{ py: 6, px: 2 }}>
       <Container maxWidth="md">
@@ -132,6 +142,16 @@ export default function SubmitApprovalPage() {
         <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
           Select a management company and a guideline, then submit your listing for review.
         </Typography>
+
+        {identityBlocked && (
+          <Alert severity="warning" sx={{ mb: 3 }}>
+            Verify your identity before submitting for approval.{" "}
+            <RouterLink to="/dashboard" style={{ fontWeight: 600 }}>
+              Go to Dashboard
+            </RouterLink>
+            .
+          </Alert>
+        )}
 
         {/* Listing summary */}
         <Card sx={{ mb: 3 }}>
@@ -301,7 +321,7 @@ export default function SubmitApprovalPage() {
         <Stack direction="row" spacing={2}>
           <Button
             variant="contained"
-            disabled={!selectedCompany || !selectedGuideline || submitting}
+            disabled={!selectedCompany || !selectedGuideline || submitting || identityBlocked}
             onClick={handleSubmit}
           >
             {submitting ? "Submitting…" : "Submit for Approval"}

@@ -48,6 +48,7 @@ class UserSerializer(serializers.ModelSerializer):
             "last_name",
             "email_verified",
             "two_factor_enabled",
+            "identity_verification_status",
             "company_name",
             "company_status",
         )
