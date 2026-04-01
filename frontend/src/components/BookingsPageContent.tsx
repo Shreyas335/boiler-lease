@@ -1,6 +1,19 @@
 import { useEffect, useState } from "react";
 import type { AxiosError } from "axios";
-import { Alert, Box, Container, FormControl, InputLabel, MenuItem, Select, Stack, Typography, type ChipProps } from "@mui/material";
+import {
+  Alert,
+  Box,
+  Button,
+  Container,
+  FormControl,
+  InputLabel,
+  MenuItem,
+  Select,
+  Stack,
+  Typography,
+  type ChipProps,
+} from "@mui/material";
+import { Link as RouterLink, useNavigate } from "react-router-dom";
 import {
   addFavorite,
   cancelBooking,
@@ -32,6 +45,8 @@ export default function BookingsPageContent({
   allowCancelBookings = false,
 }: BookingsPageContentProps) {
   const { user } = useAuth();
+  const navigate = useNavigate();
+  const identityVerified = user?.identity_verification_status === "verified";
   const [bookings, setBookings] = useState<BookingRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -212,6 +227,19 @@ export default function BookingsPageContent({
 
         {successMessage && <Alert severity="success" sx={{ mb: 2 }}>{successMessage}</Alert>}
         {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+        {!identityVerified && (
+          <Alert
+            severity="warning"
+            sx={{ mb: 2 }}
+            action={
+              <Button component={RouterLink} to="/dashboard" color="inherit" size="small">
+                Verify identity
+              </Button>
+            }
+          >
+            Verify your identity before paying a security deposit.
+          </Alert>
+        )}
 
         {loading ? (
           <Typography>{loadingText}</Typography>
@@ -221,7 +249,9 @@ export default function BookingsPageContent({
           <Stack spacing={2}>
             {bookings.map((booking) => {
               const statusMeta = getBookingStatusMeta(booking.status);
-              const showPay = canPaySecurityDeposit(booking);
+              const wantsPay = canPaySecurityDeposit(booking);
+              const showPayDeposit = wantsPay && identityVerified;
+              const showPayBlocked = wantsPay && !identityVerified;
               const showCancel = allowCancelBookings && booking.is_cancelable;
 
               return (
@@ -233,24 +263,30 @@ export default function BookingsPageContent({
                   statusLabel={statusMeta.label}
                   statusColor={statusMeta.color}
                   actionButton={
-                    showPay
+                    showPayDeposit
                       ? {
                           label: payBusyId === booking.id ? "Redirecting..." : "Pay security deposit",
                           onClick: () => void handlePayDeposit(booking.id),
                           disabled: payBusyId === booking.id,
                           color: "primary",
                         }
-                      : showCancel
+                      : showPayBlocked
                         ? {
-                            label: cancelBusyId === booking.id ? "Cancelling..." : "Cancel Booking",
-                            onClick: () => handleCancelBooking(booking.id),
-                            disabled: cancelBusyId === booking.id,
-                            color: "error",
+                            label: "Verify identity to pay deposit",
+                            onClick: () => navigate("/dashboard"),
+                            color: "primary",
                           }
-                        : undefined
+                        : showCancel
+                          ? {
+                              label: cancelBusyId === booking.id ? "Cancelling..." : "Cancel Booking",
+                              onClick: () => handleCancelBooking(booking.id),
+                              disabled: cancelBusyId === booking.id,
+                              color: "error",
+                            }
+                          : undefined
                   }
                   secondaryActionButton={
-                    showPay && showCancel
+                    wantsPay && showCancel
                       ? {
                           label: cancelBusyId === booking.id ? "Cancelling..." : "Cancel booking",
                           onClick: () => handleCancelBooking(booking.id),
