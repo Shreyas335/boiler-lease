@@ -94,20 +94,27 @@ export default function PaymentHistoryPage() {
               <TableHead>
                 <TableRow>
                   <TableCell>Paid</TableCell>
-                  <TableCell>Description</TableCell>
+                  <TableCell>Title</TableCell>
                   <TableCell align="right">Amount</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
                 {rows.map((tx) => {
-                  const bookingRef = tx.booking_reference?.trim();
-                  const description = bookingRef
-                    ? `Security deposit (booking #${bookingRef})`
-                    : "Security deposit";
+                  const title = tx.listing_title?.trim() || "Security deposit";
+                  const showDepositSubtitle = Boolean(tx.listing_title?.trim());
                   return (
                     <TableRow key={tx.id} hover>
                       <TableCell>{formatDateTime(tx.paid_at)}</TableCell>
-                      <TableCell>{description}</TableCell>
+                      <TableCell>
+                        <Typography variant="subtitle1" sx={{ fontWeight: 600, lineHeight: 1.3 }}>
+                          {title}
+                        </Typography>
+                        {showDepositSubtitle && (
+                          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25 }}>
+                            Security deposit
+                          </Typography>
+                        )}
+                      </TableCell>
                       <TableCell align="right">{formatMoney(tx.amount, tx.currency)}</TableCell>
                     </TableRow>
                   );
