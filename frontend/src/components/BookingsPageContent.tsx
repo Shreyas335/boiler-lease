@@ -110,10 +110,19 @@ export default function BookingsPageContent({
     return null;
   }
 
-  function canPaySecurityDeposit(booking: BookingRecord): boolean {
+  /** Listing has a deposit and booking isn’t closed — deposit may still require approval. */
+  function depositActionEligible(booking: BookingRecord): boolean {
     if (booking.deposit_paid_at) return false;
     if (booking.status === "declined" || booking.status === "cancelled") return false;
     return effectiveDepositAmount(booking) != null;
+  }
+
+  function canPaySecurityDeposit(booking: BookingRecord): boolean {
+    return (
+      depositActionEligible(booking) &&
+      booking.status === "confirmed" &&
+      identityVerified
+    );
   }
 
   async function handlePayDeposit(bookingId: number) {
@@ -249,9 +258,11 @@ export default function BookingsPageContent({
           <Stack spacing={2}>
             {bookings.map((booking) => {
               const statusMeta = getBookingStatusMeta(booking.status);
-              const wantsPay = canPaySecurityDeposit(booking);
-              const showPayDeposit = wantsPay && identityVerified;
-              const showPayBlocked = wantsPay && !identityVerified;
+              const depositEligible = depositActionEligible(booking);
+              const showPayDeposit = canPaySecurityDeposit(booking);
+              const showPayBlockedIdentity =
+                depositEligible && booking.status === "confirmed" && !identityVerified;
+              const showAwaitingApproval = depositEligible && booking.status === "pending";
               const showCancel = allowCancelBookings && booking.is_cancelable;
 
               return (
@@ -270,7 +281,14 @@ export default function BookingsPageContent({
                           disabled: payBusyId === booking.id,
                           color: "primary",
                         }
-                      : showPayBlocked
+                      : showAwaitingApproval
+                        ? {
+                            label: "Awaiting approval",
+                            onClick: () => undefined,
+                            disabled: true,
+                            color: "primary",
+                          }
+                      : showPayBlockedIdentity
                         ? {
                             label: "Verify identity to pay deposit",
                             onClick: () => navigate("/dashboard"),
@@ -286,7 +304,7 @@ export default function BookingsPageContent({
                           : undefined
                   }
                   secondaryActionButton={
-                    wantsPay && showCancel
+                    depositEligible && showCancel
                       ? {
                           label: cancelBusyId === booking.id ? "Cancelling..." : "Cancel booking",
                           onClick: () => handleCancelBooking(booking.id),
