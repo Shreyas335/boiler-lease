@@ -6,6 +6,7 @@ import FavoriteRoundedIcon from "@mui/icons-material/FavoriteRounded";
 import { Link as RouterLink, useNavigate, useParams } from "react-router-dom";
 import { addFavorite, createBooking, getPropertyListingDetail, removeFavorite, type PropertyListing } from "../api/listings";
 import { useAuth } from "../contexts/AuthContext";
+import MessageButton from "../components/MessageButton";
 
 function formatMoney(value: string | null) {
   if (!value) return "-";
@@ -170,6 +171,14 @@ export default function PropertyDetailPage() {
               >
                 {listing.is_favorited ? "Saved" : "Save"}
               </Button>
+            )}
+            {user && listing.owner_id !== user.id && (
+              <MessageButton
+                recipientId={listing.owner_id}
+                recipientName={listing.contact_email || `Listing owner`}
+                listingId={listing.id}
+                listingTitle={listing.title}
+              />
             )}
           </Stack>
         </Stack>
