@@ -6,15 +6,6 @@ export interface ListingAmenity {
   label: string;
 }
 
-export interface ListingMedia {
-  id: number;
-  media_type: string;
-  file_url: string;
-  thumbnail_url: string | null;
-  display_order: number;
-  is_primary: boolean;
-}
-
 export interface PropertyListing {
   id: number;
   title: string;
@@ -144,15 +135,14 @@ export async function createListing(
 export async function uploadListingMedia(
   listingId: number,
   file: File,
-  isPrimary = false,
-  displayOrder?: number,
+  displayOrder: number,
+  isPrimary: boolean,
 ): Promise<ListingMedia> {
   const formData = new FormData();
   formData.append("file", file);
+  formData.append("display_order", String(displayOrder));
   formData.append("is_primary", String(isPrimary));
-  if (displayOrder !== undefined) {
-    formData.append("display_order", String(displayOrder));
-  }
+
   const { data } = await api.post<ListingMedia>(
     `/listings/${listingId}/media/`,
     formData,
@@ -180,6 +170,44 @@ export async function getMyListings(): Promise<PropertyListing[]> {
 
 export async function getListingAmenities(): Promise<ListingAmenity[]> {
   const { data } = await api.get<ListingAmenity[]>("/listings/amenities/");
+  return data;
+}
+
+// --- Media types & helpers ---
+
+export interface ListingMedia {
+  id: number;
+  media_type: string;
+  file_url: string;
+  access_url: string | null;
+  thumbnail_url: string;
+  display_order: number;
+  is_primary: boolean;
+  is_private: boolean;
+  original_filename: string;
+  content_type: string;
+  file_size: number | null;
+  upload_status: string;
+}
+
+export async function deleteListingMedia(mediaId: number): Promise<void> {
+  await api.delete(`/listings/media/${mediaId}/`);
+}
+
+export interface ReorderMediaItem {
+  id: number;
+  display_order: number;
+  is_primary: boolean;
+}
+
+export async function reorderListingMedia(
+  listingId: number,
+  order: ReorderMediaItem[],
+): Promise<ListingMedia[]> {
+  const { data } = await api.patch<ListingMedia[]>("/listings/media/reorder/", {
+    listing_id: listingId,
+    order,
+  });
   return data;
 }
 

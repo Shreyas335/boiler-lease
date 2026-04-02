@@ -212,12 +212,60 @@ class FeedbackSubmissionSerializer(serializers.ModelSerializer):
 
 
 class ListingMediaSerializer(serializers.ModelSerializer):
+    access_url = serializers.SerializerMethodField()
     file_url = serializers.SerializerMethodField()
     thumbnail_url = serializers.SerializerMethodField()
 
     class Meta:
         model = ListingMedia
-        fields = ("id", "media_type", "file_url", "thumbnail_url", "display_order", "is_primary")
+        fields = (
+            "id",
+            "media_type",
+            "file_url",
+            "access_url",
+            "thumbnail_url",
+            "display_order",
+            "is_primary",
+            "is_private",
+            "original_filename",
+            "content_type",
+            "file_size",
+            "upload_status",
+        )
+        read_only_fields = ("id", "access_url", "upload_status")
+
+    def get_access_url(self, obj):
+        """Return the resolved access URL based on storage_key and privacy.
+
+        - Public media: stable public URL built from settings.
+        - Private media: short-lived signed URL via the private storage backend.
+        - Fallback: the legacy file_url field for old rows without a storage_key.
+        """
+        if not obj.storage_key:
+            return obj.file_url or None
+
+        if obj.is_private:
+            return self._get_private_url(obj.storage_key)
+        return self._get_public_url(obj.storage_key)
+
+    @staticmethod
+    def _get_public_url(storage_key):
+        from django.conf import settings
+
+        base = getattr(settings, "LISTING_MEDIA_PUBLIC_BASE_URL", "")
+        if base:
+            return f"{base}/{storage_key}"
+        return None
+
+    @staticmethod
+    def _get_private_url(storage_key):
+        from django.core.files.storage import storages
+
+        try:
+            private_storage = storages["listing_media_private"]
+            return private_storage.url(storage_key)
+        except (KeyError, Exception):
+            return None
 
     def _build_url(self, url: str) -> str:
         if not url:
@@ -258,7 +306,7 @@ class ListingAmenitySerializer(serializers.ModelSerializer):
 
 class PropertyListingSerializer(serializers.ModelSerializer):
     amenities = serializers.SerializerMethodField()
-    media = ListingMediaSerializer(many=True, read_only=True)
+    media = serializers.SerializerMethodField()
 
     class Meta:
         model = PropertyListing
@@ -307,6 +355,10 @@ class PropertyListingSerializer(serializers.ModelSerializer):
     def get_amenities(self, obj):
         amenities = ListingAmenity.objects.filter(listing_links__listing=obj, is_active=True).distinct()
         return ListingAmenitySerializer(amenities, many=True).data
+
+    def get_media(self, obj):
+        finalized = obj.media.filter(upload_status=ListingMedia.UploadStatus.UPLOADED)
+        return ListingMediaSerializer(finalized, many=True).data
 
 
 class PropertyListingSummarySerializer(serializers.ModelSerializer):
