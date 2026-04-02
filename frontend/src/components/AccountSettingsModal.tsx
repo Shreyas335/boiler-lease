@@ -21,6 +21,7 @@ import {
   twoFactorEnable,
   twoFactorDisable,
 } from "../api/auth";
+import { updateMessageNotificationPreference } from "../api/messaging";
 import type { AxiosError } from "axios";
 
 interface AccountSettingsModalProps {
@@ -32,8 +33,10 @@ export default function AccountSettingsModal({ open, onClose }: AccountSettingsM
   const { user, refreshUser } = useAuth();
   const [emailMessage, setEmailMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [twoFactorMessage, setTwoFactorMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [notifMessage, setNotifMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [emailLoading, setEmailLoading] = useState(false);
   const [twoFactorLoading, setTwoFactorLoading] = useState(false);
+  const [notifLoading, setNotifLoading] = useState(false);
 
   async function handleResendVerification() {
     if (!user || user.email_verified) return;
@@ -79,6 +82,29 @@ export default function AccountSettingsModal({ open, onClose }: AccountSettingsM
       });
     } finally {
       setTwoFactorLoading(false);
+    }
+  }
+
+  async function handleNotifToggle(_e: React.ChangeEvent<HTMLInputElement>, checked: boolean) {
+    setNotifMessage(null);
+    setNotifLoading(true);
+    try {
+      await updateMessageNotificationPreference(checked);
+      await refreshUser();
+      setNotifMessage({
+        type: "success",
+        text: checked
+          ? "You'll now receive email notifications for new messages."
+          : "Email notifications for messages have been disabled.",
+      });
+    } catch (err) {
+      const axiosError = err as AxiosError<{ detail?: string }>;
+      setNotifMessage({
+        type: "error",
+        text: axiosError.response?.data?.detail || "Something went wrong. Try again.",
+      });
+    } finally {
+      setNotifLoading(false);
     }
   }
 
@@ -159,7 +185,7 @@ export default function AccountSettingsModal({ open, onClose }: AccountSettingsM
           )}
         </Paper>
 
-        <Paper elevation={0} sx={{ p: 3, border: "1px solid", borderColor: "divider" }}>
+        <Paper elevation={0} sx={{ p: 3, border: "1px solid", borderColor: "divider", mb: 2 }}>
           <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 2 }}>
             <LockRoundedIcon color="action" />
             <Typography variant="subtitle1" fontWeight={600}>
@@ -183,6 +209,33 @@ export default function AccountSettingsModal({ open, onClose }: AccountSettingsM
               />
             }
             label={user.two_factor_enabled ? "2FA is on" : "2FA is off"}
+          />
+        </Paper>
+
+        <Paper elevation={0} sx={{ p: 3, border: "1px solid", borderColor: "divider" }}>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 2 }}>
+            <EmailRoundedIcon color="action" />
+            <Typography variant="subtitle1" fontWeight={600}>
+              Message notifications
+            </Typography>
+          </Box>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            When enabled, we'll send you an email when you receive a new message.
+          </Typography>
+          {notifMessage && (
+            <Alert severity={notifMessage.type} sx={{ mb: 2 }}>
+              {notifMessage.text}
+            </Alert>
+          )}
+          <FormControlLabel
+            control={
+              <Switch
+                checked={user.message_notifications_enabled}
+                onChange={handleNotifToggle}
+                disabled={notifLoading}
+              />
+            }
+            label={user.message_notifications_enabled ? "Notifications on" : "Notifications off"}
           />
         </Paper>
       </DialogContent>
