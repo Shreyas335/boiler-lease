@@ -12,6 +12,11 @@ export default defineConfig({
         target: process.env.PROXY_TARGET || 'http://localhost:8000',
         changeOrigin: true,
       },
+      '/ws': {
+        target: (process.env.PROXY_TARGET || 'http://localhost:8000').replace(/^http/, 'ws'),
+        changeOrigin: true,
+        ws: true,
+      },
     },
   },
 })
