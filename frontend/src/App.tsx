@@ -21,6 +21,8 @@ import CurrentBookingsPage from "./pages/CurrentBookingsPage";
 import PastBookingsPage from "./pages/PastBookingsPage";
 import FavoritesPage from "./pages/FavoritesPage";
 import PropertyDetailPage from "./pages/PropertyDetailPage";
+import InboxPage from "./pages/InboxPage";
+import ConversationPage from "./pages/ConversationPage";
 
 function App() {
   return (
@@ -114,6 +116,22 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <PropertyDetailPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/messages"
+                element={
+                  <ProtectedRoute>
+                    <InboxPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/messages/:id"
+                element={
+                  <ProtectedRoute>
+                    <ConversationPage />
                   </ProtectedRoute>
                 }
               />

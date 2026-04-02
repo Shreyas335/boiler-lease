@@ -8,6 +8,7 @@ export interface ListingAmenity {
 
 export interface PropertyListing {
   id: number;
+  owner_id: number;
   title: string;
   description: string;
   property_type: string;
