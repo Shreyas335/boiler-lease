@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useState, useEffect } from "react";
+import * as identityApi from "../api/identity";
 import {
   Box,
   Container,
@@ -12,7 +13,8 @@ import {
   Tooltip,
   type ChipProps,
 } from "@mui/material";
-import { Link as RouterLink } from "react-router-dom";
+import { Link as RouterLink, useNavigate, useSearchParams } from "react-router-dom";
+import VerifiedIcon from "@mui/icons-material/Verified";
 import HomeWorkRoundedIcon from "@mui/icons-material/HomeWorkRounded";
 import PersonSearchRoundedIcon from "@mui/icons-material/PersonSearchRounded";
 import BusinessRoundedIcon from "@mui/icons-material/BusinessRounded";
@@ -43,11 +45,53 @@ const USER_TYPE_CONFIG: Record<
 };
 
 export default function DashboardPage() {
-  const { user } = useAuth();
+  const { user, refreshUser } = useAuth();
+  const [identityBusy, setIdentityBusy] = useState(false);
+  const [identityNotice, setIdentityNotice] = useState<"verified" | "pending" | "failed" | "sync_error" | null>(
+    null
+  );
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [recentBookings, setRecentBookings] = useState<BookingRecord[]>([]);
   const [bookingsLoading, setBookingsLoading] = useState(false);
   const [bookingsError, setBookingsError] = useState<string | null>(null);
+  const [depositNotice, setDepositNotice] = useState<"success" | "canceled" | null>(null);
   const userType = user?.user_type;
+
+  useEffect(() => {
+    void refreshUser();
+  }, [refreshUser]);
+
+  useEffect(() => {
+    if (searchParams.get("identity_return") !== "1") {
+      return undefined;
+    }
+    if (!user || (user.user_type !== "sublessee" && user.user_type !== "subleaser")) {
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    async function pullStripeStatus() {
+      try {
+        const { identity_verification_status: next } = await identityApi.syncIdentityVerificationStatus();
+        if (cancelled) return;
+        await refreshUser();
+        if (next === "verified") setIdentityNotice("verified");
+        else if (next === "failed") setIdentityNotice("failed");
+        else setIdentityNotice("pending");
+      } catch {
+        if (!cancelled) setIdentityNotice("sync_error");
+      } finally {
+        if (!cancelled) navigate("/dashboard", { replace: true });
+      }
+    }
+
+    void pullStripeStatus();
+    return () => {
+      cancelled = true;
+    };
+  }, [user, searchParams, navigate, refreshUser]);
 
   function getBookingStatusMeta(status: BookingRecord["status"]): {
     label: string;
@@ -104,13 +148,136 @@ export default function DashboardPage() {
     };
   }, [userType]);
 
+  useEffect(() => {
+    if (userType !== "sublessee") return;
+    const d = searchParams.get("deposit");
+    if (d === "success" || d === "canceled") {
+      setDepositNotice(d);
+      navigate("/dashboard", { replace: true });
+    }
+  }, [searchParams, navigate, userType]);
+
   if (!user) return null;
 
   const config = USER_TYPE_CONFIG[user.user_type] || USER_TYPE_CONFIG.sublessee;
 
+  const showIdentityCta =
+    (user.user_type === "sublessee" || user.user_type === "subleaser") &&
+    user.identity_verification_status !== "verified";
+  const identityActionLabel =
+    user.identity_verification_status === "failed"
+      ? "Retry verification"
+      : user.identity_verification_status === "pending"
+        ? "Continue verification"
+        : "Verify identity";
+
+  const startIdentity = async () => {
+    setIdentityBusy(true);
+    try {
+      const { url } = await identityApi.startIdentityVerificationSession();
+      window.location.assign(url);
+    } catch {
+      setIdentityBusy(false);
+    }
+  };
+
+  const refreshIdentityStatus = async () => {
+    setIdentityBusy(true);
+    setIdentityNotice(null);
+    try {
+      const { identity_verification_status: next } = await identityApi.syncIdentityVerificationStatus();
+      await refreshUser();
+      if (next === "verified") setIdentityNotice("verified");
+      else if (next === "failed") setIdentityNotice("failed");
+      else setIdentityNotice("pending");
+    } catch {
+      setIdentityNotice("sync_error");
+    } finally {
+      setIdentityBusy(false);
+    }
+  };
+
   return (
     <Box sx={{ py: 6, px: 2 }}>
       <Container maxWidth="lg">
+        {identityNotice === "verified" && (
+          <Alert severity="success" sx={{ mb: 3 }} onClose={() => setIdentityNotice(null)}>
+            Identity verified. You can list properties, book, and pay deposits as allowed for your account.
+          </Alert>
+        )}
+        {identityNotice === "failed" && (
+          <Alert
+            severity="error"
+            sx={{ mb: 3 }}
+            onClose={() => setIdentityNotice(null)}
+            action={
+              <Button color="inherit" size="small" disabled={identityBusy} onClick={() => void startIdentity()}>
+                Retry verification
+              </Button>
+            }
+          >
+            We couldn&apos;t verify your identity. You can try again with clear document photos.
+          </Alert>
+        )}
+        {identityNotice === "pending" && (
+          <Alert
+            severity="info"
+            sx={{ mb: 3 }}
+            onClose={() => setIdentityNotice(null)}
+            action={
+              <Button
+                color="inherit"
+                size="small"
+                disabled={identityBusy}
+                onClick={() => void refreshIdentityStatus()}
+              >
+                Refresh status
+              </Button>
+            }
+          >
+            Verification is still processing. If you just finished on Stripe, tap Refresh status—it may take a few
+            seconds.
+          </Alert>
+        )}
+        {identityNotice === "sync_error" && (
+          <Alert severity="warning" sx={{ mb: 3 }} onClose={() => setIdentityNotice(null)}>
+            Could not refresh verification status from Stripe. Check your connection, ensure Stripe is configured,
+            then try Refresh status from the verification card below.
+          </Alert>
+        )}
+        {showIdentityCta && (
+          <Alert
+            severity={user.identity_verification_status === "failed" ? "warning" : "info"}
+            sx={{ mb: 3 }}
+            action={
+              <Stack direction="row" spacing={1} alignItems="center">
+                {(user.identity_verification_status === "pending" ||
+                  user.identity_verification_status === "failed") && (
+                  <Button
+                    color="inherit"
+                    size="small"
+                    disabled={identityBusy}
+                    onClick={() => void refreshIdentityStatus()}
+                  >
+                    Refresh status
+                  </Button>
+                )}
+                <Button
+                  color="inherit"
+                  size="small"
+                  disabled={identityBusy}
+                  onClick={() => void startIdentity()}
+                >
+                  {identityBusy ? "Starting…" : identityActionLabel}
+                </Button>
+              </Stack>
+            }
+          >
+            Verify your identity for trust before you list or
+            book. You&apos;ll complete checks on Stripe&apos;s secure page (test mode
+            uses sample documents).
+          </Alert>
+        )}
         {!user.email_verified && (
           <Alert
             severity="warning"
@@ -138,16 +305,37 @@ export default function DashboardPage() {
             </RouterLink>
           </Alert>
         )}
+        {user.user_type === "sublessee" && depositNotice === "success" && (
+          <Alert
+            severity="success"
+            onClose={() => setDepositNotice(null)}
+            sx={{ mb: 3 }}
+          >
+            Your security deposit payment went through. If your booking does not show as paid yet, wait a few seconds
+            and refresh—confirmation arrives via Stripe. View details in{" "}
+            <RouterLink to="/payments/history" style={{ fontWeight: 600 }}>
+              payment history
+            </RouterLink>
+            .
+          </Alert>
+        )}
+        {user.user_type === "sublessee" && depositNotice === "canceled" && (
+          <Alert severity="info" onClose={() => setDepositNotice(null)} sx={{ mb: 3 }}>
+            Checkout was canceled; no charge was made. You can pay the deposit again from your booking when you are
+            ready.
+          </Alert>
+        )}
         <Box sx={{ mb: 4 }}>
           <Typography variant="h4" sx={{ fontWeight: 700, mb: 0.5 }}>
             Welcome back, {user.first_name || user.username}
           </Typography>
-          <Chip
-            label={config.label}
-            color="primary"
-            size="small"
-            sx={{ mt: 1 }}
-          />
+          <Stack direction="row" spacing={1} sx={{ mt: 1, flexWrap: "wrap", gap: 1 }}>
+            <Chip label={config.label} color="primary" size="small" />
+            {(user.user_type === "sublessee" || user.user_type === "subleaser") &&
+              user.identity_verification_status === "verified" && (
+                <Chip icon={<VerifiedIcon fontSize="small" />} label="Identity verified" color="success" size="small" />
+              )}
+          </Stack>
         </Box>
 
         <Card sx={{ mb: 4 }}>
@@ -228,6 +416,9 @@ export default function DashboardPage() {
               <Button component={RouterLink} to="/favorites" variant="outlined">
                 Favorites
               </Button>
+              <Button component={RouterLink} to="/payments/history" variant="outlined">
+                Payment history
+              </Button>
             </>
           )}
           {user.user_type === "subleaser" && (
@@ -245,6 +436,13 @@ export default function DashboardPage() {
                 variant="outlined"
               >
                 My listings
+              </Button>
+              <Button
+                component={RouterLink}
+                to="/booking-requests"
+                variant="outlined"
+              >
+                Booking requests
               </Button>
             </>
           )}
@@ -280,6 +478,18 @@ export default function DashboardPage() {
                     disabled={user.company_status !== "approved"}
                   >
                     Approval Queue
+                  </Button>
+                </span>
+              </Tooltip>
+              <Tooltip title={user.company_status !== "approved" ? "Company verification required" : ""}>
+                <span>
+                  <Button
+                    component={user.company_status === "approved" ? RouterLink : "button"}
+                    to={user.company_status === "approved" ? "/company/bookings" : undefined}
+                    variant="outlined"
+                    disabled={user.company_status !== "approved"}
+                  >
+                    Booking approvals
                   </Button>
                 </span>
               </Tooltip>

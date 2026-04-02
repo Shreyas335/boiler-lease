@@ -15,7 +15,7 @@ import {
   Typography,
 } from "@mui/material";
 import type { AxiosError } from "axios";
-import { useNavigate } from "react-router-dom";
+import { Link as RouterLink, useNavigate } from "react-router-dom";
 import {
   createListing,
   getListingAmenities,
@@ -114,6 +114,8 @@ export default function CreateListingPage() {
     );
   }
 
+  const identityBlocked = user.identity_verification_status !== "verified";
+
   function handleChange<K extends keyof CreatePropertyListingPayload>(key: K, value: CreatePropertyListingPayload[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
     setFieldErrors((prev) => ({ ...prev, [key as string]: "" }));
@@ -160,6 +162,14 @@ export default function CreateListingPage() {
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setPageMessage(null);
+
+    if (identityBlocked) {
+      setPageMessage({
+        type: "error",
+        text: "Verify your identity before creating a listing. Open Dashboard to start verification.",
+      });
+      return;
+    }
 
     if (!validateForm()) {
       setPageMessage({ type: "error", text: "Please fix the highlighted fields." });
@@ -229,6 +239,16 @@ export default function CreateListingPage() {
         <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
           Add complete listing details so sublessees can evaluate your unit clearly.
         </Typography>
+
+        {identityBlocked && (
+          <Alert severity="warning" sx={{ mb: 3 }}>
+            Identity verification is required before you can create a listing.{" "}
+            <RouterLink to="/dashboard" style={{ fontWeight: 600 }}>
+              Go to Dashboard to verify
+            </RouterLink>
+            .
+          </Alert>
+        )}
 
         <Card>
           <CardContent>
@@ -612,7 +632,11 @@ export default function CreateListingPage() {
               />
 
               <Stack direction="row" spacing={2}>
-                <Button type="submit" variant="contained" disabled={submitting || uploading}>
+                <Button
+                  type="submit"
+                  variant="contained"
+                  disabled={submitting || uploading || identityBlocked}
+                >
                   {submitting ? "Saving..." : "Create listing"}
                 </Button>
                 <Button type="button" variant="outlined" color="inherit" onClick={handleCancel}>
