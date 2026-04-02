@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { Link as RouterLink, useNavigate } from "react-router-dom";
 import {
   AppBar,
+  Badge,
   Box,
   Toolbar,
   Typography,
@@ -19,12 +20,13 @@ import AccountCircleRoundedIcon from "@mui/icons-material/AccountCircleRounded";
 import RateReviewRoundedIcon from "@mui/icons-material/RateReviewRounded";
 import AddHomeRoundedIcon from "@mui/icons-material/AddHomeRounded";
 import ApartmentRoundedIcon from "@mui/icons-material/ApartmentRounded";
-import SearchRoundedIcon from "@mui/icons-material/SearchRounded";
+import MessageRoundedIcon from "@mui/icons-material/MessageRounded";
 import EventAvailableRoundedIcon from "@mui/icons-material/EventAvailableRounded";
 import HistoryRoundedIcon from "@mui/icons-material/HistoryRounded";
 import FavoriteRoundedIcon from "@mui/icons-material/FavoriteRounded";
 import { useAuth } from "../contexts/AuthContext";
 import AccountSettingsModal from "./AccountSettingsModal";
+import { getUnreadCount } from "../api/messaging";
 
 interface LayoutProps {
   children: ReactNode;
@@ -34,6 +36,28 @@ export default function Layout({ children }: LayoutProps) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+
+    async function fetchUnread() {
+      try {
+        const { unread_count } = await getUnreadCount();
+        if (!cancelled) setUnreadCount(unread_count);
+      } catch {
+        // ignore
+      }
+    }
+
+    fetchUnread();
+    const interval = setInterval(fetchUnread, 30000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [user]);
 
   async function handleLogout() {
     await logout();
@@ -108,6 +132,19 @@ export default function Layout({ children }: LayoutProps) {
                     sx={{ color: "text.secondary" }}
                   >
                     Browse
+                  </Button>
+                  <Button
+                    component={RouterLink}
+                    to="/messages"
+                    color="inherit"
+                    startIcon={
+                      <Badge badgeContent={unreadCount || 0} color="error" max={99}>
+                        <MessageRoundedIcon />
+                      </Badge>
+                    }
+                    sx={{ color: "text.secondary" }}
+                  >
+                    Messages
                   </Button>
                   {user.user_type === "subleaser" && (
                     <>
