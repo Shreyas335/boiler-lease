@@ -30,6 +30,7 @@ import ManagementApprovalQueuePage from "./pages/ManagementApprovalQueuePage";
 import ApprovalRequestDetailPage from "./pages/ApprovalRequestDetailPage";
 import PaymentHistoryPage from "./pages/PaymentHistoryPage";
 import ListingDepositHistoryPage from "./pages/ListingDepositHistoryPage";
+import BookingRequestsPage from "./pages/BookingRequestsPage";
 
 function App() {
   return (
@@ -98,6 +99,14 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <MyListingsPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/booking-requests"
+                element={
+                  <ProtectedRoute>
+                    <BookingRequestsPage />
                   </ProtectedRoute>
                 }
               />
