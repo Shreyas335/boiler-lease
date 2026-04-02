@@ -31,6 +31,7 @@ import ApprovalRequestDetailPage from "./pages/ApprovalRequestDetailPage";
 import PaymentHistoryPage from "./pages/PaymentHistoryPage";
 import ListingDepositHistoryPage from "./pages/ListingDepositHistoryPage";
 import BookingRequestsPage from "./pages/BookingRequestsPage";
+import CompanyBookingRequestsPage from "./pages/CompanyBookingRequestsPage";
 
 function App() {
   return (
@@ -188,6 +189,14 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <SubmitApprovalPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/company/bookings"
+                element={
+                  <ProtectedRoute>
+                    <CompanyBookingRequestsPage />
                   </ProtectedRoute>
                 }
               />
