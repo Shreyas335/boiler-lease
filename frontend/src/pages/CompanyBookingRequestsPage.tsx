@@ -12,7 +12,7 @@ import {
   type ChipProps,
 } from "@mui/material";
 import {
-  getManageableBookings,
+  getCompanyManageableBookings,
   updateBookingStatus,
   type ManagedBookingRecord,
 } from "../api/listings";
@@ -34,7 +34,7 @@ function getBookingStatusMeta(status: ManagedBookingRecord["status"]): {
   return { label: "Pending", color: "warning" };
 }
 
-export default function BookingRequestsPage() {
+export default function CompanyBookingRequestsPage() {
   const { user } = useAuth();
   const [bookings, setBookings] = useState<ManagedBookingRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -42,8 +42,10 @@ export default function BookingRequestsPage() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [busyBookingId, setBusyBookingId] = useState<number | null>(null);
 
+  const canAccess = user?.user_type === "management" && user.company_status === "approved";
+
   useEffect(() => {
-    if (user?.user_type !== "subleaser") {
+    if (!canAccess) {
       setLoading(false);
       return undefined;
     }
@@ -58,7 +60,7 @@ export default function BookingRequestsPage() {
         if (isMounted) {
           setError(null);
         }
-        const data = await getManageableBookings();
+        const data = await getCompanyManageableBookings();
         if (isMounted) {
           setBookings(data);
         }
@@ -82,7 +84,7 @@ export default function BookingRequestsPage() {
       isMounted = false;
       window.clearInterval(intervalId);
     };
-  }, [user]);
+  }, [canAccess]);
 
   async function handleStatusUpdate(
     bookingId: number,
@@ -99,7 +101,9 @@ export default function BookingRequestsPage() {
         ),
       );
       setSuccessMessage(
-        `Booking ${nextStatus === "confirmed" ? "approved" : "declined"} successfully.`,
+        nextStatus === "confirmed"
+          ? "Booking approved. The sublessee can now pay the security deposit."
+          : "Booking declined.",
       );
     } catch {
       setError("Unable to update booking status. Please try again.");
@@ -108,12 +112,22 @@ export default function BookingRequestsPage() {
     }
   }
 
-  if (!user || user.user_type !== "subleaser") {
+  if (!user || user.user_type !== "management") {
     return (
       <Box sx={{ py: 6, px: 2 }}>
         <Container maxWidth="md">
-          <Alert severity="error">
-            Only subleasers can view booking requests.
+          <Alert severity="error">Only management companies can view this page.</Alert>
+        </Container>
+      </Box>
+    );
+  }
+
+  if (user.company_status !== "approved") {
+    return (
+      <Box sx={{ py: 6, px: 2 }}>
+        <Container maxWidth="md">
+          <Alert severity="warning">
+            Your company must be approved before you can manage booking requests.
           </Alert>
         </Container>
       </Box>
@@ -126,12 +140,11 @@ export default function BookingRequestsPage() {
         <Stack spacing={2}>
           <Box>
             <Typography variant="h4" sx={{ fontWeight: 700 }}>
-              Booking Requests
+              Booking approvals
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              For your listings that are not under a management company, approve or decline bookings here. If a listing
-              was approved by a management company, that company approves bookings instead—sublessees pay the deposit
-              only after approval.
+              For listings your company approved, review booking requests here. Sublessees can pay the security deposit
+              only after you approve.
             </Typography>
           </Box>
 
@@ -141,7 +154,7 @@ export default function BookingRequestsPage() {
           {loading ? (
             <Typography>Loading booking requests...</Typography>
           ) : bookings.length === 0 ? (
-            <Alert severity="info">No booking requests yet.</Alert>
+            <Alert severity="info">No booking requests for your company&apos;s listings yet.</Alert>
           ) : (
             <Stack spacing={2}>
               {bookings.map((booking) => {

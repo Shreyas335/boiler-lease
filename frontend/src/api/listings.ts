@@ -344,6 +344,11 @@ export async function getManageableBookings(): Promise<ManagedBookingRecord[]> {
   return data;
 }
 
+export async function getCompanyManageableBookings(): Promise<ManagedBookingRecord[]> {
+  const { data } = await api.get<ManagedBookingRecord[]>("/company/bookings/");
+  return data;
+}
+
 export async function updateBookingStatus(
   bookingId: number,
   status: "confirmed" | "declined",

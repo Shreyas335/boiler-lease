@@ -163,6 +163,19 @@ def _can_manage_booking_requests(request):
     return request.user.user_type == User.UserType.SUBLEASER
 
 
+def _can_user_update_booking_status(request, booking):
+    """Subleaser approves bookings on their own listings without a company; management approves for company-approved listings."""
+    listing = booking.listing
+    if listing.approved_by_company_id:
+        if request.user.user_type != User.UserType.MANAGEMENT or not _is_approved_management(request):
+            return False
+        try:
+            return listing.approved_by_company_id == request.user.management_company.pk
+        except ManagementCompany.DoesNotExist:
+            return False
+    return request.user.user_type == User.UserType.SUBLEASER and listing.owner_id == request.user.pk
+
+
 def _sort_order_prefix(order):
     return "" if str(order).lower() == "asc" else "-"
 
@@ -1051,6 +1064,7 @@ def cancel_booking(request, booking_id):
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def manageable_bookings(request):
+    """Subleaser: bookings on their listings that are not tied to a management company booking-approval flow."""
     if not _can_manage_booking_requests(request):
         return Response(
             {"detail": "Only subleasers can manage booking requests."},
@@ -1060,6 +1074,7 @@ def manageable_bookings(request):
     bookings = (
         PropertyBooking.objects.filter(
             listing__owner=request.user,
+            listing__approved_by_company__isnull=True,
             listing__deleted_at__isnull=True,
         )
         .select_related("listing", "sublessee")
@@ -1070,26 +1085,45 @@ def manageable_bookings(request):
     return Response(serializer.data)
 
 
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def company_manageable_bookings(request):
+    """Management company: bookings on listings this company approved (approve before sublessee can pay deposit)."""
+    if not _is_approved_management(request):
+        return Response(
+            {"detail": "Only approved management companies can view these booking requests."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    company = request.user.management_company
+    bookings = (
+        PropertyBooking.objects.filter(
+            listing__approved_by_company=company,
+            listing__deleted_at__isnull=True,
+        )
+        .select_related("listing", "sublessee", "listing__owner")
+        .prefetch_related("listing__media")
+        .order_by("status", "-booked_at")
+    )
+    serializer = ManagedPropertyBookingSerializer(bookings, many=True)
+    return Response(serializer.data)
+
+
 @api_view(["PATCH"])
 @permission_classes([IsAuthenticated])
 def update_booking_status(request, booking_id):
-    if not _can_manage_booking_requests(request):
-        return Response(
-            {"detail": "Only subleasers can manage booking requests."},
-            status=status.HTTP_403_FORBIDDEN,
-        )
-
     booking = (
-        PropertyBooking.objects.filter(
-            pk=booking_id,
-            listing__owner=request.user,
-            listing__deleted_at__isnull=True,
-        )
+        PropertyBooking.objects.filter(pk=booking_id, listing__deleted_at__isnull=True)
         .select_related("listing", "sublessee")
         .first()
     )
     if not booking:
         return Response({"detail": "Booking not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    if not _can_user_update_booking_status(request, booking):
+        return Response(
+            {"detail": "You do not have permission to update this booking."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
 
     serializer = PropertyBookingStatusUpdateSerializer(instance=booking, data=request.data, partial=True)
     if not serializer.is_valid():
@@ -1354,6 +1388,14 @@ def create_deposit_checkout_session(request):
                 {"detail": "Security deposit for this booking has already been paid."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        if booking.status != PropertyBooking.Status.CONFIRMED:
+            return Response(
+                {
+                    "detail": "You can pay the security deposit only after your booking has been approved.",
+                    "code": "booking_not_approved_for_deposit",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         dep = booking.security_deposit_snapshot or booking.listing.security_deposit
         if dep is None or dep <= 0:
             return Response(
@@ -1443,6 +1485,7 @@ def stripe_webhook(request):
                         pk=bid,
                         sublessee_id=txn.user_id,
                         deposit_paid_at__isnull=True,
+                        status=PropertyBooking.Status.CONFIRMED,
                     ).update(deposit_paid_at=timezone.now())
 
     elif event_type == "checkout.session.expired":
