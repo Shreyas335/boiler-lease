@@ -9,4 +9,5 @@ export interface User {
   last_name: string;
   email_verified: boolean;
   two_factor_enabled: boolean;
+  message_notifications_enabled: boolean;
 }
