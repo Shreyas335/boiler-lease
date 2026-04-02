@@ -32,6 +32,9 @@ import PaymentHistoryPage from "./pages/PaymentHistoryPage";
 import ListingDepositHistoryPage from "./pages/ListingDepositHistoryPage";
 import BookingRequestsPage from "./pages/BookingRequestsPage";
 import CompanyBookingRequestsPage from "./pages/CompanyBookingRequestsPage";
+import ProfilePage from "./pages/ProfilePage";
+import EditProfilePage from "./pages/EditProfilePage";
+import PrivacySettingsPage from "./pages/PrivacySettingsPage";
 
 function App() {
   return (
@@ -213,6 +216,30 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <ApprovalRequestDetailPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/profile/edit"
+                element={
+                  <ProtectedRoute>
+                    <EditProfilePage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/profile/:id"
+                element={
+                  <ProtectedRoute>
+                    <ProfilePage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/settings/privacy"
+                element={
+                  <ProtectedRoute>
+                    <PrivacySettingsPage />
                   </ProtectedRoute>
                 }
               />

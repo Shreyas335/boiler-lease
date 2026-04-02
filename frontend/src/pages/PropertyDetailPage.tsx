@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import axios from "axios";
-import { Alert, Box, Button, Card, CardContent, Chip, Container, Grid, Stack, TextField, Typography } from "@mui/material";
+import { Alert, Avatar, Box, Button, Card, CardContent, Chip, Container, Grid, Stack, TextField, Typography } from "@mui/material";
 import VerifiedIcon from "@mui/icons-material/Verified";
+import PersonIcon from "@mui/icons-material/Person";
 import FavoriteBorderRoundedIcon from "@mui/icons-material/FavoriteBorderRounded";
 import FavoriteRoundedIcon from "@mui/icons-material/FavoriteRounded";
 import { Link as RouterLink, useNavigate, useParams } from "react-router-dom";
@@ -237,6 +238,49 @@ export default function PropertyDetailPage() {
                   <Typography variant="body2"><strong>Parking:</strong> {listing.parking_available ? `Yes${listing.parking_details ? ` (${listing.parking_details})` : ""}` : "No"}</Typography>
                   <Typography variant="body2"><strong>Amenities:</strong> {listing.amenities.length > 0 ? listing.amenities.map((a) => a.label).join(", ") : "None listed"}</Typography>
                 </Stack>
+              </CardContent>
+            </Card>
+
+            <Card sx={{ mb: 2 }}>
+              <CardContent>
+                <Typography variant="h6" sx={{ mb: 1 }}>Posted by</Typography>
+                <Stack
+                  direction="row"
+                  spacing={1.5}
+                  alignItems="center"
+                  component={RouterLink}
+                  to={`/profile/${listing.owner_id}`}
+                  sx={{ textDecoration: "none", color: "inherit", "&:hover": { opacity: 0.8 } }}
+                >
+                  <Avatar sx={{ width: 36, height: 36, bgcolor: "primary.main" }}>
+                    <PersonIcon fontSize="small" />
+                  </Avatar>
+                  <Box>
+                    <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                      {listing.owner_first_name && listing.owner_last_name
+                        ? `${listing.owner_first_name} ${listing.owner_last_name}`
+                        : listing.owner_username}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      @{listing.owner_username}
+                    </Typography>
+                  </Box>
+                </Stack>
+                {listing.approved_by_company_name && listing.approved_by_company_user_id && (
+                  <Stack
+                    direction="row"
+                    spacing={0.5}
+                    alignItems="center"
+                    component={RouterLink}
+                    to={`/profile/${listing.approved_by_company_user_id}`}
+                    sx={{ mt: 1.5, textDecoration: "none", color: "success.main", "&:hover": { opacity: 0.8 } }}
+                  >
+                    <VerifiedIcon fontSize="small" />
+                    <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                      {listing.approved_by_company_name}
+                    </Typography>
+                  </Stack>
+                )}
               </CardContent>
             </Card>
 

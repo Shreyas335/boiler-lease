@@ -22,6 +22,8 @@ import PersonAddRoundedIcon from "@mui/icons-material/PersonAddRounded";
 import LogoutRoundedIcon from "@mui/icons-material/LogoutRounded";
 import SettingsRoundedIcon from "@mui/icons-material/SettingsRounded";
 import AccountCircleRoundedIcon from "@mui/icons-material/AccountCircleRounded";
+import PersonRoundedIcon from "@mui/icons-material/PersonRounded";
+import LockRoundedIcon from "@mui/icons-material/LockRounded";
 import RateReviewRoundedIcon from "@mui/icons-material/RateReviewRounded";
 import AddHomeRoundedIcon from "@mui/icons-material/AddHomeRounded";
 import ApartmentRoundedIcon from "@mui/icons-material/ApartmentRounded";
@@ -191,6 +193,7 @@ export default function Layout({ children }: LayoutProps) {
                     sx={{ ml: 1 }}
                   >
                     <Avatar
+                      src={user.profile_picture_url || undefined}
                       sx={{
                         width: 34,
                         height: 34,
@@ -199,7 +202,7 @@ export default function Layout({ children }: LayoutProps) {
                         fontWeight: 600,
                       }}
                     >
-                      {(user.first_name?.[0] || user.username[0]).toUpperCase()}
+                      {!user.profile_picture_url && (user.first_name?.[0] || user.username[0]).toUpperCase()}
                     </Avatar>
                   </IconButton>
 
@@ -233,6 +236,15 @@ export default function Layout({ children }: LayoutProps) {
                     <Divider />
                     <MenuItem
                       component={RouterLink}
+                      to={`/profile/${user.id}`}
+                    >
+                      <ListItemIcon>
+                        <PersonRoundedIcon fontSize="small" />
+                      </ListItemIcon>
+                      <ListItemText>My Profile</ListItemText>
+                    </MenuItem>
+                    <MenuItem
+                      component={RouterLink}
                       to="/account"
                     >
                       <ListItemIcon>
@@ -250,6 +262,15 @@ export default function Layout({ children }: LayoutProps) {
                         <SettingsRoundedIcon fontSize="small" />
                       </ListItemIcon>
                       <ListItemText>Settings</ListItemText>
+                    </MenuItem>
+                    <MenuItem
+                      component={RouterLink}
+                      to="/settings/privacy"
+                    >
+                      <ListItemIcon>
+                        <LockRoundedIcon fontSize="small" />
+                      </ListItemIcon>
+                      <ListItemText>Privacy</ListItemText>
                     </MenuItem>
                     <MenuItem
                       component={RouterLink}

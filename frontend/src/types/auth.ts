@@ -20,4 +20,7 @@ export interface User {
   identity_verification_status: IdentityVerificationStatus;
   company_name: string | null;
   company_status: CompanyStatus | null;
+  bio: string;
+  profile_picture_url: string;
+  contact_phone: string;
 }
