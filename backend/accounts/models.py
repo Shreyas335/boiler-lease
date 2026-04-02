@@ -29,6 +29,11 @@ class User(AbstractUser):
     two_factor_enabled = models.BooleanField(default=False)
     totp_secret = models.CharField(max_length=32, null=True, blank=True)
 
+    # Profile fields
+    bio = models.TextField(blank=True, default="")
+    profile_picture_url = models.URLField(blank=True, default="")
+    contact_phone = models.CharField(max_length=30, blank=True, default="")
+
     class Meta:
         db_table = "accounts_user"
 
@@ -469,3 +474,35 @@ class PasswordResetToken(models.Model):
     @property
     def is_usable(self):
         return self.used_at is None and not self.is_expired
+
+
+class UserRating(models.Model):
+    rater = models.ForeignKey(User, on_delete=models.CASCADE, related_name='ratings_given')
+    rated_user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='ratings_received')
+    score = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(5)])
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['rater', 'rated_user'], name='one_rating_per_user_pair'),
+            models.CheckConstraint(check=~models.Q(rater=models.F('rated_user')), name='cannot_rate_self'),
+        ]
+
+    def __str__(self):
+        return f'{self.rater} rated {self.rated_user}: {self.score}'
+
+
+class UserBlock(models.Model):
+    blocker = models.ForeignKey(User, on_delete=models.CASCADE, related_name='blocks_given')
+    blocked_user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='blocks_received')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['blocker', 'blocked_user'], name='one_block_per_user_pair'),
+            models.CheckConstraint(check=~models.Q(blocker=models.F('blocked_user')), name='cannot_block_self'),
+        ]
+
+    def __str__(self):
+        return f'{self.blocker} blocked {self.blocked_user}'
