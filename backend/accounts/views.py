@@ -10,6 +10,7 @@ from django.core.cache import cache
 from django.conf import settings
 from django.db.models.functions import Coalesce
 from django.http import HttpResponseRedirect
+from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt, ensure_csrf_cookie
 from django.db.models import Q, Prefetch
@@ -52,10 +53,12 @@ from .serializers import (
     GuidelineSerializer,
     LoginSerializer,
     ManagementCompanySerializer,
+    ManagedPropertyBookingSerializer,
     PasswordChangeSerializer,
     PasswordResetConfirmSerializer,
     PasswordResetRequestSerializer,
     PropertyBookingCreateSerializer,
+    PropertyBookingStatusUpdateSerializer,
     PropertyListingBrowseSerializer,
     PropertyListingUpdateSerializer,
     PropertyBookingSerializer,
@@ -66,6 +69,7 @@ from .serializers import (
     RegisterSerializer,
     ListingMediaSerializer,
     ListingMediaUploadSerializer,
+    OwnerListingTransactionSerializer,
     TransactionRecordSerializer,
     UserSerializer,
     TwoFactorVerifyLoginSerializer,
@@ -88,6 +92,57 @@ def _make_2fa_temp_token(user):
         raise
     return token
 
+def _user_for_identity_verification_session(obj):
+    """Resolve User from Stripe VerificationSession (webhook payload or API object)."""
+    if not obj:
+        return None
+    meta = getattr(obj, "metadata", None)
+    if meta is None and isinstance(obj, dict):
+        meta = obj.get("metadata")
+    meta = meta or {}
+    uid = None
+    if isinstance(meta, dict):
+        uid = meta.get("user_id")
+    elif hasattr(meta, "get"):
+        uid = meta.get("user_id")
+    if uid is not None:
+        try:
+            return User.objects.filter(pk=int(uid)).first()
+        except (ValueError, TypeError):
+            return None
+    session_id = getattr(obj, "id", None)
+    if session_id is None and isinstance(obj, dict):
+        session_id = obj.get("id")
+    if session_id:
+        return User.objects.filter(stripe_identity_session_id=session_id).first()
+    return None
+
+
+def _identity_verification_last_error_present(obj):
+    err = getattr(obj, "last_error", None)
+    if err is None and isinstance(obj, dict):
+        err = obj.get("last_error")
+    if not err:
+        return False
+    if isinstance(err, dict):
+        return bool(err)
+    return True
+
+
+def _user_must_verify_identity(user):
+    if user.user_type not in (User.UserType.SUBLESSEE, User.UserType.SUBLEASER):
+        return False
+    return user.identity_verification_status != User.IdentityVerificationStatus.VERIFIED
+
+
+def _identity_verification_required_response():
+    return Response(
+        {
+            "detail": "Identity verification is required before this action.",
+            "code": "identity_verification_required",
+        },
+        status=status.HTTP_403_FORBIDDEN,
+    )
 
 def _hash_token(token):
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
@@ -108,6 +163,23 @@ def _is_approved_management(request):
         return request.user.management_company.status == ManagementCompany.Status.APPROVED
     except ManagementCompany.DoesNotExist:
         return False
+
+
+def _can_manage_booking_requests(request):
+    return request.user.user_type == User.UserType.SUBLEASER
+
+
+def _can_user_update_booking_status(request, booking):
+    """Subleaser approves bookings on their own listings without a company; management approves for company-approved listings."""
+    listing = booking.listing
+    if listing.approved_by_company_id:
+        if request.user.user_type != User.UserType.MANAGEMENT or not _is_approved_management(request):
+            return False
+        try:
+            return listing.approved_by_company_id == request.user.management_company.pk
+        except ManagementCompany.DoesNotExist:
+            return False
+    return request.user.user_type == User.UserType.SUBLEASER and listing.owner_id == request.user.pk
 
 
 def _get_blocked_user_ids(user):
@@ -467,6 +539,8 @@ def create_property_listing(request):
             {"detail": "Only subleasers can create property listings."},
             status=status.HTTP_403_FORBIDDEN,
         )
+    if _user_must_verify_identity(request.user):
+        return _identity_verification_required_response()
 
     serializer = PropertyListingCreateSerializer(data=request.data, context={"request": request})
     if not serializer.is_valid():
@@ -956,6 +1030,8 @@ def create_booking(request):
             {"detail": "Only sublessees can book properties."},
             status=status.HTTP_403_FORBIDDEN,
         )
+    if _user_must_verify_identity(request.user):
+        return _identity_verification_required_response()
 
     serializer = PropertyBookingCreateSerializer(
         data=request.data,
@@ -1010,6 +1086,79 @@ def cancel_booking(request, booking_id):
 
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
+def manageable_bookings(request):
+    """Subleaser: bookings on their listings that are not tied to a management company booking-approval flow."""
+    if not _can_manage_booking_requests(request):
+        return Response(
+            {"detail": "Only subleasers can manage booking requests."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    bookings = (
+        PropertyBooking.objects.filter(
+            listing__owner=request.user,
+            listing__approved_by_company__isnull=True,
+            listing__deleted_at__isnull=True,
+        )
+        .select_related("listing", "sublessee")
+        .prefetch_related("listing__media")
+        .order_by("status", "-booked_at")
+    )
+    serializer = ManagedPropertyBookingSerializer(bookings, many=True)
+    return Response(serializer.data)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def company_manageable_bookings(request):
+    """Management company: bookings on listings this company approved (approve before sublessee can pay deposit)."""
+    if not _is_approved_management(request):
+        return Response(
+            {"detail": "Only approved management companies can view these booking requests."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    company = request.user.management_company
+    bookings = (
+        PropertyBooking.objects.filter(
+            listing__approved_by_company=company,
+            listing__deleted_at__isnull=True,
+        )
+        .select_related("listing", "sublessee", "listing__owner")
+        .prefetch_related("listing__media")
+        .order_by("status", "-booked_at")
+    )
+    serializer = ManagedPropertyBookingSerializer(bookings, many=True)
+    return Response(serializer.data)
+
+
+@api_view(["PATCH"])
+@permission_classes([IsAuthenticated])
+def update_booking_status(request, booking_id):
+    booking = (
+        PropertyBooking.objects.filter(pk=booking_id, listing__deleted_at__isnull=True)
+        .select_related("listing", "sublessee")
+        .first()
+    )
+    if not booking:
+        return Response({"detail": "Booking not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    if not _can_user_update_booking_status(request, booking):
+        return Response(
+            {"detail": "You do not have permission to update this booking."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    serializer = PropertyBookingStatusUpdateSerializer(instance=booking, data=request.data, partial=True)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    serializer.save()
+    response_serializer = ManagedPropertyBookingSerializer(booking)
+    return Response(response_serializer.data, status=status.HTTP_200_OK)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
 def my_past_bookings(request):
     if not _is_sublessee(request):
         return Response(
@@ -1048,20 +1197,172 @@ def my_past_bookings(request):
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def my_payment_history(request):
+    """List completed (succeeded) payment transactions for the sublessee."""
     if not _is_sublessee(request):
         return Response(
             {"detail": "Only sublessees can view payment history."},
             status=status.HTTP_403_FORBIDDEN,
         )
-    transactions = TransactionRecord.objects.filter(user=request.user).order_by("-created_at")
-    serializer = TransactionRecordSerializer(transactions, many=True)
+    transactions = list(
+        TransactionRecord.objects.filter(
+            user=request.user,
+            status=TransactionRecord.Status.SUCCEEDED,
+        ).order_by("-paid_at", "-created_at")
+    )
+    booking_ids = []
+    for txn in transactions:
+        ref = (txn.booking_reference or "").strip()
+        if not ref:
+            continue
+        try:
+            booking_ids.append(int(ref))
+        except ValueError:
+            pass
+    titles_by_booking_id = {}
+    if booking_ids:
+        for b in PropertyBooking.objects.filter(
+            pk__in=booking_ids,
+            sublessee=request.user,
+        ).select_related("listing"):
+            titles_by_booking_id[b.pk] = b.listing.title
+    serializer = TransactionRecordSerializer(
+        transactions,
+        many=True,
+        context={
+            "request": request,
+            "listing_titles_by_booking_id": titles_by_booking_id,
+        },
+    )
+    return Response(serializer.data)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def listing_owner_transactions(request, listing_id):
+    """Succeeded transactions linked to bookings on this listing (owner / subleaser only)."""
+    if request.user.user_type != User.UserType.SUBLEASER:
+        return Response(
+            {"detail": "Only subleasers can view listing transaction records."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    listing = get_object_or_404(
+        PropertyListing,
+        pk=listing_id,
+        owner=request.user,
+        deleted_at__isnull=True,
+    )
+    booking_ids = PropertyBooking.objects.filter(listing=listing).values_list("id", flat=True)
+    ref_strings = {str(bid) for bid in booking_ids}
+    if not ref_strings:
+        return Response([])
+    transactions = (
+        TransactionRecord.objects.filter(
+            status=TransactionRecord.Status.SUCCEEDED,
+            booking_reference__in=ref_strings,
+        )
+        .select_related("user")
+        .order_by("-paid_at", "-created_at")
+    )
+    serializer = OwnerListingTransactionSerializer(transactions, many=True)
     return Response(serializer.data)
 
 
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
+def start_identity_verification_session(request):
+    """Stripe Identity"""
+    user = request.user
+    if user.user_type not in (User.UserType.SUBLESSEE, User.UserType.SUBLEASER):
+        return Response(
+            {"detail": "Identity verification is not required for this account type."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    if user.identity_verification_status == User.IdentityVerificationStatus.VERIFIED:
+        return Response(
+            {"detail": "Your identity is already verified."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if not settings.STRIPE_SECRET_KEY:
+        return Response(
+            {"detail": "Stripe is not configured on the server."},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+    stripe.api_key = settings.STRIPE_SECRET_KEY
+    base = settings.FRONTEND_URL.rstrip("/")
+    return_url = f"{base}/dashboard?identity_return=1"
+    session = stripe.identity.VerificationSession.create(
+        type="document",
+        metadata={"user_id": str(user.id)},
+        return_url=return_url,
+    )
+    user.stripe_identity_session_id = session.id
+    user.identity_verification_status = User.IdentityVerificationStatus.PENDING
+    user.save(update_fields=["stripe_identity_session_id", "identity_verification_status"])
+    return Response({"url": session.url}, status=status.HTTP_201_CREATED)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def sync_identity_verification_status(request):
+    """Pull latest VerificationSession status from Stripe (e.g. after user returns from hosted flow)."""
+    user = request.user
+    if user.user_type not in (User.UserType.SUBLESSEE, User.UserType.SUBLEASER):
+        return Response(
+            {"detail": "Identity verification is not used for this account type."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    if user.identity_verification_status == User.IdentityVerificationStatus.VERIFIED:
+        return Response(
+            {
+                "identity_verification_status": user.identity_verification_status,
+                "synced": False,
+            }
+        )
+    sid = (user.stripe_identity_session_id or "").strip()
+    if not sid or not settings.STRIPE_SECRET_KEY:
+        return Response(
+            {
+                "identity_verification_status": user.identity_verification_status,
+                "synced": False,
+            }
+        )
+    stripe.api_key = settings.STRIPE_SECRET_KEY
+    try:
+        session = stripe.identity.VerificationSession.retrieve(sid)
+    except stripe.error.StripeError:
+        return Response(
+            {"detail": "Could not load verification status from Stripe."},
+            status=status.HTTP_502_BAD_GATEWAY,
+        )
+    vs_status = getattr(session, "status", None) or ""
+    last_error = getattr(session, "last_error", None)
+    if vs_status == "verified":
+        new_status = User.IdentityVerificationStatus.VERIFIED
+    elif vs_status == "canceled":
+        new_status = User.IdentityVerificationStatus.FAILED
+    elif vs_status == "requires_input":
+        new_status = (
+            User.IdentityVerificationStatus.FAILED
+            if last_error
+            else User.IdentityVerificationStatus.PENDING
+        )
+    else:
+        new_status = User.IdentityVerificationStatus.PENDING
+    if new_status != user.identity_verification_status:
+        user.identity_verification_status = new_status
+        user.save(update_fields=["identity_verification_status"])
+    return Response(
+        {
+            "identity_verification_status": user.identity_verification_status,
+            "synced": True,
+        }
+    )
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
 def create_deposit_checkout_session(request):
-    """Create a Stripe Checkout Session for a security deposit (placeholder amount until booking-linked)."""
+    """Stripe Checkout for security deposit; optional booking_id uses snapshotted listing deposit."""
     if not _is_sublessee(request):
         return Response(
             {"detail": "Only sublessees can start deposit payments."},
@@ -1072,6 +1373,8 @@ def create_deposit_checkout_session(request):
             {"detail": "Please verify your email before making a payment."},
             status=status.HTTP_400_BAD_REQUEST,
         )
+    if _user_must_verify_identity(request.user):
+        return _identity_verification_required_response()
     if not settings.STRIPE_SECRET_KEY:
         return Response(
             {"detail": "Stripe is not configured on the server."},
@@ -1080,15 +1383,65 @@ def create_deposit_checkout_session(request):
 
     stripe.api_key = settings.STRIPE_SECRET_KEY
 
-    # TODO: set from booking / listing security_deposit when bookings integrate with checkout.
+    booking_ref = ""
     amount_cents = 5000
+    raw_bid = request.data.get("booking_id")
+    if raw_bid is not None:
+        try:
+            bid = int(raw_bid)
+        except (TypeError, ValueError):
+            return Response({"detail": "Invalid booking_id."}, status=status.HTTP_400_BAD_REQUEST)
+        booking = (
+            PropertyBooking.objects.filter(pk=bid, sublessee=request.user)
+            .select_related("listing")
+            .first()
+        )
+        if not booking:
+            return Response({"detail": "Booking not found."}, status=status.HTTP_404_NOT_FOUND)
+        if booking.status in (
+            PropertyBooking.Status.DECLINED,
+            PropertyBooking.Status.CANCELLED,
+        ):
+            return Response(
+                {"detail": "Cannot pay a deposit for this booking."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if booking.deposit_paid_at is not None:
+            return Response(
+                {"detail": "Security deposit for this booking has already been paid."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if booking.status != PropertyBooking.Status.CONFIRMED:
+            return Response(
+                {
+                    "detail": "You can pay the security deposit only after your booking has been approved.",
+                    "code": "booking_not_approved_for_deposit",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        dep = booking.security_deposit_snapshot or booking.listing.security_deposit
+        if dep is None or dep <= 0:
+            return Response(
+                {"detail": "No security deposit amount for this booking."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        amount_cents = int(dep * 100)
+        booking_ref = str(bid)
+
     txn = TransactionRecord.objects.create(
         user=request.user,
         amount=amount_cents / 100,
         currency="usd",
-        booking_reference="",
+        booking_reference=booking_ref,
         status=TransactionRecord.Status.PENDING,
     )
+
+    session_metadata = {
+        "transaction_id": str(txn.id),
+        "user_id": str(request.user.id),
+    }
+    if booking_ref:
+        session_metadata["booking_id"] = booking_ref
 
     session = stripe.checkout.Session.create(
         mode="payment",
@@ -1103,12 +1456,9 @@ def create_deposit_checkout_session(request):
                 "quantity": 1,
             }
         ],
-        metadata={
-            "transaction_id": str(txn.id),
-            "user_id": str(request.user.id),
-        },
-        success_url=f"{settings.FRONTEND_URL}/dashboard",
-        cancel_url=f"{settings.FRONTEND_URL}/dashboard",
+        metadata=session_metadata,
+        success_url=f"{settings.FRONTEND_URL}/dashboard?deposit=success",
+        cancel_url=f"{settings.FRONTEND_URL}/dashboard?deposit=canceled",
     )
     txn.stripe_checkout_session_id = session.id
     txn.save(update_fields=["stripe_checkout_session_id"])
@@ -1131,13 +1481,13 @@ def stripe_webhook(request):
     except Exception:
         return Response({"detail": "Invalid webhook payload/signature."}, status=status.HTTP_400_BAD_REQUEST)
 
-    event_type = event.get("type")
-    obj = event.get("data", {}).get("object", {})
+    event_type = event.type
+    obj = event.data.object
 
     if event_type == "checkout.session.completed":
-        session_id = obj.get("id")
-        payment_intent_id = obj.get("payment_intent") or ""
-        amount_total = obj.get("amount_total")
+        session_id = obj.id
+        payment_intent_id = getattr(obj, "payment_intent", None) or ""
+        amount_total = getattr(obj, "amount_total", None)
 
         txn = TransactionRecord.objects.filter(stripe_checkout_session_id=session_id).first()
         if txn:
@@ -1147,13 +1497,49 @@ def stripe_webhook(request):
             txn.paid_at = timezone.now()
             txn.stripe_payment_intent_id = payment_intent_id
             txn.save(update_fields=["amount", "status", "paid_at", "stripe_payment_intent_id"])
+            ref = (txn.booking_reference or "").strip()
+            if ref:
+                try:
+                    bid = int(ref)
+                except ValueError:
+                    bid = None
+                if bid is not None:
+                    PropertyBooking.objects.filter(
+                        pk=bid,
+                        sublessee_id=txn.user_id,
+                        deposit_paid_at__isnull=True,
+                        status=PropertyBooking.Status.CONFIRMED,
+                    ).update(deposit_paid_at=timezone.now())
 
     elif event_type == "checkout.session.expired":
-        session_id = obj.get("id")
+        session_id = obj.id
         txn = TransactionRecord.objects.filter(stripe_checkout_session_id=session_id).first()
         if txn and txn.status == TransactionRecord.Status.PENDING:
             txn.status = TransactionRecord.Status.CANCELED
             txn.save(update_fields=["status"])
+    elif event_type == "identity.verification_session.verified":
+        user = _user_for_identity_verification_session(obj)
+        if user:
+            user.identity_verification_status = User.IdentityVerificationStatus.VERIFIED
+            user.save(update_fields=["identity_verification_status"])
+    elif event_type == "identity.verification_session.canceled":
+        user = _user_for_identity_verification_session(obj)
+        if user:
+            user.identity_verification_status = User.IdentityVerificationStatus.FAILED
+            user.save(update_fields=["identity_verification_status"])
+    elif event_type == "identity.verification_session.processing":
+        user = _user_for_identity_verification_session(obj)
+        if user:
+            user.identity_verification_status = User.IdentityVerificationStatus.PENDING
+            user.save(update_fields=["identity_verification_status"])
+    elif event_type == "identity.verification_session.requires_input":
+        user = _user_for_identity_verification_session(obj)
+        if user:
+            if _identity_verification_last_error_present(obj):
+                user.identity_verification_status = User.IdentityVerificationStatus.FAILED
+            else:
+                user.identity_verification_status = User.IdentityVerificationStatus.PENDING
+            user.save(update_fields=["identity_verification_status"])
 
     return Response({"received": True}, status=status.HTTP_200_OK)
 
@@ -1503,6 +1889,8 @@ def submit_approval_request(request, listing_id):
     """Subleaser submits a listing for approval by a management company."""
     if request.user.user_type != User.UserType.SUBLEASER:
         return Response({"detail": "Only subleasers can submit approval requests."}, status=status.HTTP_403_FORBIDDEN)
+    if _user_must_verify_identity(request.user):
+        return _identity_verification_required_response()
 
     try:
         listing = PropertyListing.objects.get(pk=listing_id, owner=request.user, deleted_at__isnull=True)

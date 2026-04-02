@@ -1,5 +1,19 @@
 import { useEffect, useState } from "react";
-import { Alert, Box, Container, FormControl, InputLabel, MenuItem, Select, Stack, Typography, type ChipProps } from "@mui/material";
+import type { AxiosError } from "axios";
+import {
+  Alert,
+  Box,
+  Button,
+  Container,
+  FormControl,
+  InputLabel,
+  MenuItem,
+  Select,
+  Stack,
+  Typography,
+  type ChipProps,
+} from "@mui/material";
+import { Link as RouterLink, useNavigate } from "react-router-dom";
 import {
   addFavorite,
   cancelBooking,
@@ -9,6 +23,7 @@ import {
   type PropertyListingSummary,
   type SortOrder,
 } from "../api/listings";
+import { createDepositCheckoutSession } from "../api/payments";
 import PropertySummaryCard from "./PropertySummaryCard";
 import { useAuth } from "../contexts/AuthContext";
 
@@ -30,6 +45,8 @@ export default function BookingsPageContent({
   allowCancelBookings = false,
 }: BookingsPageContentProps) {
   const { user } = useAuth();
+  const navigate = useNavigate();
+  const identityVerified = user?.identity_verification_status === "verified";
   const [bookings, setBookings] = useState<BookingRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -37,6 +54,7 @@ export default function BookingsPageContent({
   const [order, setOrder] = useState<SortOrder>("desc");
   const [favoriteBusyId, setFavoriteBusyId] = useState<number | null>(null);
   const [cancelBusyId, setCancelBusyId] = useState<number | null>(null);
+  const [payBusyId, setPayBusyId] = useState<number | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -82,6 +100,49 @@ export default function BookingsPageContent({
 
   function buildFooterText(booking: BookingRecord) {
     return `Booked on ${new Date(booking.booked_at).toLocaleDateString()} | Stay ${booking.start_date} to ${booking.end_date} | Status ${booking.status_label}`;
+  }
+
+  function effectiveDepositAmount(booking: BookingRecord): number | null {
+    const snap = booking.security_deposit_snapshot;
+    if (snap != null && snap !== "" && Number(snap) > 0) return Number(snap);
+    const list = booking.listing.security_deposit;
+    if (list != null && list !== "" && Number(list) > 0) return Number(list);
+    return null;
+  }
+
+  /** Listing has a deposit and booking isn’t closed — deposit may still require approval. */
+  function depositActionEligible(booking: BookingRecord): boolean {
+    if (booking.deposit_paid_at) return false;
+    if (booking.status === "declined" || booking.status === "cancelled") return false;
+    return effectiveDepositAmount(booking) != null;
+  }
+
+  function canPaySecurityDeposit(booking: BookingRecord): boolean {
+    return (
+      depositActionEligible(booking) &&
+      booking.status === "confirmed" &&
+      identityVerified
+    );
+  }
+
+  async function handlePayDeposit(bookingId: number) {
+    try {
+      setPayBusyId(bookingId);
+      setError(null);
+      const { checkout_url } = await createDepositCheckoutSession(bookingId);
+      window.location.assign(checkout_url);
+    } catch (e) {
+      const ax = e as AxiosError<{ detail?: string | string[] }>;
+      const d = ax.response?.data?.detail;
+      const msg =
+        typeof d === "string"
+          ? d
+          : Array.isArray(d) && typeof d[0] === "string"
+            ? d[0]
+            : "Unable to start deposit checkout.";
+      setError(msg);
+      setPayBusyId(null);
+    }
   }
 
   async function toggleFavorite(listing: PropertyListingSummary) {
@@ -175,6 +236,19 @@ export default function BookingsPageContent({
 
         {successMessage && <Alert severity="success" sx={{ mb: 2 }}>{successMessage}</Alert>}
         {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+        {!identityVerified && (
+          <Alert
+            severity="warning"
+            sx={{ mb: 2 }}
+            action={
+              <Button component={RouterLink} to="/dashboard" color="inherit" size="small">
+                Verify identity
+              </Button>
+            }
+          >
+            Verify your identity before paying a security deposit.
+          </Alert>
+        )}
 
         {loading ? (
           <Typography>{loadingText}</Typography>
@@ -184,6 +258,12 @@ export default function BookingsPageContent({
           <Stack spacing={2}>
             {bookings.map((booking) => {
               const statusMeta = getBookingStatusMeta(booking.status);
+              const depositEligible = depositActionEligible(booking);
+              const showPayDeposit = canPaySecurityDeposit(booking);
+              const showPayBlockedIdentity =
+                depositEligible && booking.status === "confirmed" && !identityVerified;
+              const showAwaitingApproval = depositEligible && booking.status === "pending";
+              const showCancel = allowCancelBookings && booking.is_cancelable;
 
               return (
                 <PropertySummaryCard
@@ -194,11 +274,41 @@ export default function BookingsPageContent({
                   statusLabel={statusMeta.label}
                   statusColor={statusMeta.color}
                   actionButton={
-                    allowCancelBookings && booking.is_cancelable
+                    showPayDeposit
                       ? {
-                          label: cancelBusyId === booking.id ? "Cancelling..." : "Cancel Booking",
+                          label: payBusyId === booking.id ? "Redirecting..." : "Pay security deposit",
+                          onClick: () => void handlePayDeposit(booking.id),
+                          disabled: payBusyId === booking.id,
+                          color: "primary",
+                        }
+                      : showAwaitingApproval
+                        ? {
+                            label: "Awaiting approval",
+                            onClick: () => undefined,
+                            disabled: true,
+                            color: "primary",
+                          }
+                      : showPayBlockedIdentity
+                        ? {
+                            label: "Verify identity to pay deposit",
+                            onClick: () => navigate("/dashboard"),
+                            color: "primary",
+                          }
+                        : showCancel
+                          ? {
+                              label: cancelBusyId === booking.id ? "Cancelling..." : "Cancel Booking",
+                              onClick: () => handleCancelBooking(booking.id),
+                              disabled: cancelBusyId === booking.id,
+                              color: "error",
+                            }
+                          : undefined
+                  }
+                  secondaryActionButton={
+                    depositEligible && showCancel
+                      ? {
+                          label: cancelBusyId === booking.id ? "Cancelling..." : "Cancel booking",
                           onClick: () => handleCancelBooking(booking.id),
-                          disabled: cancelBusyId === booking.id,
+                          disabled: cancelBusyId === booking.id || payBusyId === booking.id,
                           color: "error",
                         }
                       : undefined

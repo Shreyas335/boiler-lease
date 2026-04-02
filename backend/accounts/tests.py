@@ -250,6 +250,7 @@ class AccountEndpointTests(APITestCase):
             username="subleaser1",
             email="subleaser1@example.com",
             user_type=User.UserType.SUBLEASER,
+            identity_verification_status=User.IdentityVerificationStatus.VERIFIED,
         )
         self.client.force_authenticate(user=user)
 
@@ -275,11 +276,27 @@ class AccountEndpointTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
         self.assertEqual(PropertyListing.objects.count(), 0)
 
+    def test_subleaser_unverified_cannot_create_listing(self):
+        user = self._create_user(
+            username="subleaser_unverified",
+            email="subleaser_unverified@example.com",
+            user_type=User.UserType.SUBLEASER,
+            identity_verification_status=User.IdentityVerificationStatus.UNVERIFIED,
+        )
+        self.client.force_authenticate(user=user)
+
+        response = self.client.post("/api/listings/", self._valid_listing_payload(), format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(response.data.get("code"), "identity_verification_required")
+        self.assertEqual(PropertyListing.objects.count(), 0)
+
     def test_create_listing_with_incomplete_details_returns_errors(self):
         user = self._create_user(
             username="subleaser2",
             email="subleaser2@example.com",
             user_type=User.UserType.SUBLEASER,
+            identity_verification_status=User.IdentityVerificationStatus.VERIFIED,
         )
         self.client.force_authenticate(user=user)
         payload = self._valid_listing_payload()
@@ -299,6 +316,7 @@ class AccountEndpointTests(APITestCase):
             username="subleaser3",
             email="subleaser3@example.com",
             user_type=User.UserType.SUBLEASER,
+            identity_verification_status=User.IdentityVerificationStatus.VERIFIED,
         )
         self.client.force_authenticate(user=user)
         payload = self._valid_listing_payload()
@@ -315,11 +333,13 @@ class AccountEndpointTests(APITestCase):
             username="subleaser4",
             email="subleaser4@example.com",
             user_type=User.UserType.SUBLEASER,
+            identity_verification_status=User.IdentityVerificationStatus.VERIFIED,
         )
         other_owner = self._create_user(
             username="subleaser5",
             email="subleaser5@example.com",
             user_type=User.UserType.SUBLEASER,
+            identity_verification_status=User.IdentityVerificationStatus.VERIFIED,
         )
         PropertyListing.objects.create(
             owner=owner,

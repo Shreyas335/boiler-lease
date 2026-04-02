@@ -91,6 +91,13 @@ export default function PropertyDetailPage() {
 
   async function handleBookingSubmit() {
     if (!listing) return;
+    if (user?.user_type === "sublessee" && user.identity_verification_status !== "verified") {
+      setBookingMessage({
+        type: "error",
+        text: "Identity verification is required before booking. Use Dashboard to verify first.",
+      });
+      return;
+    }
 
     const validationError = validateBookingForm();
     if (validationError) {
@@ -145,6 +152,9 @@ export default function PropertyDetailPage() {
       </Box>
     );
   }
+
+  const bookingIdentityBlocked =
+    user?.user_type === "sublessee" && user.identity_verification_status !== "verified";
 
   return (
     <Box sx={{ py: 6, px: 2 }}>
@@ -289,6 +299,16 @@ export default function PropertyDetailPage() {
 
                     {bookingMessage && <Alert severity={bookingMessage.type}>{bookingMessage.text}</Alert>}
 
+                    {bookingIdentityBlocked && (
+                      <Alert severity="warning">
+                        Verify your identity before booking.{" "}
+                        <RouterLink to="/dashboard" style={{ fontWeight: 600 }}>
+                          Open Dashboard to verify
+                        </RouterLink>
+                        .
+                      </Alert>
+                    )}
+
                     <TextField
                       label="Start date"
                       type="date"
@@ -300,6 +320,7 @@ export default function PropertyDetailPage() {
                         max: listing.availability_end_date,
                       }}
                       fullWidth
+                      disabled={bookingIdentityBlocked}
                     />
                     <TextField
                       label="End date"
@@ -312,6 +333,7 @@ export default function PropertyDetailPage() {
                         max: listing.availability_end_date,
                       }}
                       fullWidth
+                      disabled={bookingIdentityBlocked}
                     />
 
                     <Typography variant="body2" color="text.secondary">
@@ -322,7 +344,7 @@ export default function PropertyDetailPage() {
                       <Button
                         variant="contained"
                         onClick={handleBookingSubmit}
-                        disabled={bookingBusy}
+                        disabled={bookingBusy || bookingIdentityBlocked}
                       >
                         {bookingBusy ? "Booking..." : "Book"}
                       </Button>

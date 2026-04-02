@@ -8,6 +8,8 @@ export interface ListingAmenity {
 
 export interface PropertyListing {
   id: number;
+  /** Present on full listing payloads from the API (e.g. detail, mine, create). */
+  owner?: number;
   title: string;
   description: string;
   property_type: string;
@@ -61,6 +63,7 @@ export interface PropertyListingSummary {
   city: string;
   state: string;
   monthly_rent: string;
+  security_deposit: string | null;
   availability_start_date: string;
   availability_end_date: string;
   status: string;
@@ -78,10 +81,17 @@ export interface BookingRecord {
   end_date: string;
   booked_at: string;
   monthly_rent_snapshot: string | null;
+  security_deposit_snapshot: string | null;
+  deposit_paid_at: string | null;
   status: "pending" | "confirmed" | "declined" | "cancelled";
   status_label: string;
   price: string;
   is_cancelable: boolean;
+}
+
+export interface ManagedBookingRecord extends BookingRecord {
+  sublessee_name: string;
+  sublessee_email: string;
 }
 
 export interface CreateBookingPayload {
@@ -171,6 +181,26 @@ export async function setPrimaryListingMedia(
 
 export async function getMyListings(): Promise<PropertyListing[]> {
   const { data } = await api.get<PropertyListing[]>("/listings/mine/");
+  return data;
+}
+
+/** Security deposit payments received for bookings on this listing (subleaser only). */
+export interface OwnerListingTransaction {
+  id: number;
+  amount: string;
+  currency: string;
+  booking_id: number | null;
+  paid_at: string | null;
+  status: string;
+  sublessee_display: string;
+}
+
+export async function fetchListingOwnerTransactions(
+  listingId: number,
+): Promise<OwnerListingTransaction[]> {
+  const { data } = await api.get<OwnerListingTransaction[]>(
+    `/listings/${listingId}/transactions/`,
+  );
   return data;
 }
 
@@ -311,6 +341,27 @@ export async function getCurrentBookings(sortBy: BookingSortBy, order: SortOrder
 
 export async function createBooking(payload: CreateBookingPayload): Promise<BookingRecord> {
   const { data } = await api.post<BookingRecord>("/bookings/", payload);
+  return data;
+}
+
+export async function getManageableBookings(): Promise<ManagedBookingRecord[]> {
+  const { data } = await api.get<ManagedBookingRecord[]>("/bookings/manage/");
+  return data;
+}
+
+export async function getCompanyManageableBookings(): Promise<ManagedBookingRecord[]> {
+  const { data } = await api.get<ManagedBookingRecord[]>("/company/bookings/");
+  return data;
+}
+
+export async function updateBookingStatus(
+  bookingId: number,
+  status: "confirmed" | "declined",
+): Promise<ManagedBookingRecord> {
+  const { data } = await api.patch<ManagedBookingRecord>(
+    `/bookings/${bookingId}/status/`,
+    { status },
+  );
   return data;
 }
 

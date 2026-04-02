@@ -5,6 +5,7 @@ import {
   Button,
   Card,
   CardContent,
+  Chip,
   Container,
   Dialog,
   DialogActions,
@@ -14,6 +15,8 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
+import VerifiedIcon from "@mui/icons-material/Verified";
+import { Link as RouterLink } from "react-router-dom";
 import type { AxiosError } from "axios";
 import { useNavigate } from "react-router-dom";
 import {
@@ -40,7 +43,7 @@ function getFieldError(
 }
 
 export default function AccountPage() {
-  const { refreshUser, logout } = useAuth();
+  const { refreshUser, logout, user: authUser } = useAuth();
   const navigate = useNavigate();
   const [profile, setProfile] = useState<User | null>(null);
   const [form, setForm] = useState<UpdateAccountPayload>({
@@ -81,6 +84,7 @@ export default function AccountPage() {
           first_name: data.first_name,
           last_name: data.last_name,
         });
+        await refreshUser();
       } catch {
         setPageMessage({ type: "error", text: "Unable to load your account details." });
       } finally {
@@ -89,7 +93,7 @@ export default function AccountPage() {
     }
 
     loadAccount();
-  }, []);
+  }, [refreshUser]);
 
   function handleChange(field: keyof UpdateAccountPayload, value: string) {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -217,6 +221,63 @@ export default function AccountPage() {
         <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
           Review and update your profile information.
         </Typography>
+
+        {((authUser ?? profile)?.user_type === "sublessee" ||
+          (authUser ?? profile)?.user_type === "subleaser") && (
+          <Card sx={{ mb: 3 }}>
+            <CardContent sx={{ p: 3 }}>
+              <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1.5 }}>
+                Identity verification
+              </Typography>
+              {(authUser ?? profile)!.identity_verification_status === "verified" && (
+                <Stack direction="row" spacing={1} alignItems="center">
+                  <Chip
+                    icon={<VerifiedIcon fontSize="small" />}
+                    label="Verified"
+                    color="success"
+                    size="small"
+                  />
+                  <Typography variant="body2" color="text.secondary">
+                    Your identity is verified. You can list or book according to your account type.
+                  </Typography>
+                </Stack>
+              )}
+              {(authUser ?? profile)!.identity_verification_status === "pending" && (
+                <Alert severity="info">
+                  Verification in progress. If you already finished on Stripe, open{" "}
+                  <RouterLink to="/dashboard" style={{ fontWeight: 600 }}>
+                    Dashboard
+                  </RouterLink>{" "}
+                  and use &quot;Refresh status&quot;.
+                </Alert>
+              )}
+              {(authUser ?? profile)!.identity_verification_status === "failed" && (
+                <Alert
+                  severity="warning"
+                  action={
+                    <Button component={RouterLink} to="/dashboard" color="inherit" size="small">
+                      Retry on Dashboard
+                    </Button>
+                  }
+                >
+                  Verification didn&apos;t succeed. You can try again from your dashboard.
+                </Alert>
+              )}
+              {(authUser ?? profile)!.identity_verification_status === "unverified" && (
+                <Alert
+                  severity="info"
+                  action={
+                    <Button component={RouterLink} to="/dashboard" color="inherit" size="small">
+                      Verify on Dashboard
+                    </Button>
+                  }
+                >
+                  Verify your identity before listing a property or booking and paying deposits.
+                </Alert>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         <Card>
           <CardContent sx={{ p: 3 }}>
