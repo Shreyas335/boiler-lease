@@ -38,6 +38,7 @@ class UserSerializer(serializers.ModelSerializer):
             "last_name",
             "email_verified",
             "two_factor_enabled",
+            "identity_verification_status",
             "company_name",
             "company_status",
             "bio",
@@ -53,6 +54,7 @@ class UserSerializer(serializers.ModelSerializer):
             "last_name",
             "email_verified",
             "two_factor_enabled",
+            "identity_verification_status",
             "company_name",
             "company_status",
             "bio",
@@ -364,6 +366,7 @@ class PropertyListingSerializer(serializers.ModelSerializer):
         model = PropertyListing
         fields = (
             "id",
+            "owner",
             "title",
             "description",
             "property_type",
@@ -441,6 +444,7 @@ class PropertyListingSummarySerializer(serializers.ModelSerializer):
             "city",
             "state",
             "monthly_rent",
+            "security_deposit",
             "availability_start_date",
             "availability_end_date",
             "status",
@@ -488,6 +492,8 @@ class PropertyBookingSerializer(serializers.ModelSerializer):
             "end_date",
             "booked_at",
             "monthly_rent_snapshot",
+            "security_deposit_snapshot",
+            "deposit_paid_at",
             "status",
             "status_label",
             "price",
@@ -505,6 +511,46 @@ class PropertyBookingSerializer(serializers.ModelSerializer):
             PropertyBooking.Status.PENDING,
             PropertyBooking.Status.CONFIRMED,
         )
+
+
+class ManagedPropertyBookingSerializer(PropertyBookingSerializer):
+    sublessee_name = serializers.SerializerMethodField()
+    sublessee_email = serializers.EmailField(source="sublessee.email", read_only=True)
+
+    class Meta(PropertyBookingSerializer.Meta):
+        fields = PropertyBookingSerializer.Meta.fields + (
+            "sublessee_name",
+            "sublessee_email",
+        )
+
+    def get_sublessee_name(self, obj):
+        full_name = obj.sublessee.get_full_name().strip()
+        return full_name or obj.sublessee.username
+
+
+class PropertyBookingStatusUpdateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PropertyBooking
+        fields = ("status",)
+
+    def validate_status(self, value):
+        allowed_statuses = {
+            PropertyBooking.Status.CONFIRMED,
+            PropertyBooking.Status.DECLINED,
+        }
+        if value not in allowed_statuses:
+            raise serializers.ValidationError(
+                "Bookings can only be updated to Confirmed or Declined."
+            )
+        return value
+
+    def validate(self, attrs):
+        booking = self.instance
+        if booking.status != PropertyBooking.Status.PENDING:
+            raise serializers.ValidationError(
+                {"status": ["Only pending bookings can be approved or declined."]}
+            )
+        return attrs
 
 
 class PropertyBookingCreateSerializer(serializers.ModelSerializer):
@@ -570,6 +616,7 @@ class PropertyBookingCreateSerializer(serializers.ModelSerializer):
             start_date=validated_data["start_date"],
             end_date=validated_data["end_date"],
             monthly_rent_snapshot=listing.monthly_rent,
+            security_deposit_snapshot=listing.security_deposit,
             status=PropertyBooking.Status.PENDING,
         )
 
@@ -874,6 +921,8 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
 
 
 class TransactionRecordSerializer(serializers.ModelSerializer):
+    listing_title = serializers.SerializerMethodField()
+
     class Meta:
         model = TransactionRecord
         fields = (
@@ -881,6 +930,7 @@ class TransactionRecordSerializer(serializers.ModelSerializer):
             "amount",
             "currency",
             "booking_reference",
+            "listing_title",
             "status",
             "stripe_payment_intent_id",
             "stripe_checkout_session_id",
@@ -888,6 +938,60 @@ class TransactionRecordSerializer(serializers.ModelSerializer):
             "created_at",
         )
         read_only_fields = fields
+
+    def get_listing_title(self, obj):
+        ref = (obj.booking_reference or "").strip()
+        if not ref:
+            return None
+        try:
+            bid = int(ref)
+        except ValueError:
+            return None
+        titles = self.context.get("listing_titles_by_booking_id")
+        if titles is not None:
+            return titles.get(bid)
+        request = self.context.get("request")
+        user = getattr(request, "user", None) if request else None
+        if not user or not user.is_authenticated:
+            return None
+        booking = (
+            PropertyBooking.objects.filter(pk=bid, sublessee=user)
+            .select_related("listing")
+            .first()
+        )
+        return booking.listing.title if booking else None
+
+
+class OwnerListingTransactionSerializer(serializers.ModelSerializer):
+    """Succeeded deposit charges for a listing, for the listing owner (subleaser)."""
+
+    booking_id = serializers.SerializerMethodField()
+    sublessee_display = serializers.SerializerMethodField()
+
+    class Meta:
+        model = TransactionRecord
+        fields = (
+            "id",
+            "amount",
+            "currency",
+            "booking_id",
+            "paid_at",
+            "status",
+            "sublessee_display",
+        )
+        read_only_fields = fields
+
+    def get_booking_id(self, obj):
+        ref = (obj.booking_reference or "").strip()
+        try:
+            return int(ref)
+        except ValueError:
+            return None
+
+    def get_sublessee_display(self, obj):
+        u = obj.user
+        name = f"{u.first_name or ''} {u.last_name or ''}".strip()
+        return name or u.username
 
 
 class ManagementCompanySerializer(serializers.ModelSerializer):

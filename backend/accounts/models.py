@@ -12,6 +12,12 @@ class User(AbstractUser):
         SUBLEASER = "subleaser", "Subleaser"
         MANAGEMENT = "management", "Management Company"
 
+    class IdentityVerificationStatus(models.TextChoices):
+        UNVERIFIED = "unverified", "Unverified"
+        PENDING = "pending", "Pending"
+        VERIFIED = "verified", "Verified"
+        FAILED = "failed", "Failed"
+
     email = models.EmailField(unique=True)
 
     user_type = models.CharField(
@@ -28,6 +34,14 @@ class User(AbstractUser):
     # Two-factor authentication (TOTP)
     two_factor_enabled = models.BooleanField(default=False)
     totp_secret = models.CharField(max_length=32, null=True, blank=True)
+
+    # Stripe Identity
+    identity_verification_status = models.CharField(
+        max_length=20,
+        choices=IdentityVerificationStatus.choices,
+        default=IdentityVerificationStatus.UNVERIFIED,
+    )
+    stripe_identity_session_id = models.CharField(max_length=255, blank=True)
 
     # Profile fields
     bio = models.TextField(blank=True, default="")
@@ -394,7 +408,14 @@ class PropertyBooking(models.Model):
     start_date = models.DateField()
     end_date = models.DateField()
     monthly_rent_snapshot = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    security_deposit_snapshot = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING, db_index=True)
+    deposit_paid_at = models.DateTimeField(null=True, blank=True)
     booked_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
     class Meta:
