@@ -34,6 +34,8 @@ from .models import (
     PropertyListing,
     TransactionRecord,
     User,
+    UserBlock,
+    UserRating,
 )
 from .guidelines import validate_guideline_data
 from .pagination import PropertyListingPagination
@@ -67,6 +69,10 @@ from .serializers import (
     TransactionRecordSerializer,
     UserSerializer,
     TwoFactorVerifyLoginSerializer,
+    BlockedUserSerializer,
+    UserProfileSerializer,
+    UserProfileUpdateSerializer,
+    UserRatingSerializer,
 )
 
 
@@ -102,6 +108,12 @@ def _is_approved_management(request):
         return request.user.management_company.status == ManagementCompany.Status.APPROVED
     except ManagementCompany.DoesNotExist:
         return False
+
+
+def _get_blocked_user_ids(user):
+    blocked_by_me = set(UserBlock.objects.filter(blocker=user).values_list('blocked_user_id', flat=True))
+    blocked_me = set(UserBlock.objects.filter(blocked_user=user).values_list('blocker_id', flat=True))
+    return blocked_by_me | blocked_me
 
 
 def _sort_order_prefix(order):
@@ -718,6 +730,12 @@ def browse_property_listings(request):
         Prefetch('amenity_links__amenity', queryset=ListingAmenity.objects.filter(is_active=True))
     )
 
+    # Exclude listings from blocked users
+    if request.user.is_authenticated:
+        blocked_ids = _get_blocked_user_ids(request.user)
+        if blocked_ids:
+            queryset = queryset.exclude(owner_id__in=blocked_ids)
+
     # Apply search filter (search across title, description, city, state, postal_code)
     search_query = request.query_params.get('search', '').strip()
     if search_query:
@@ -946,6 +964,11 @@ def create_booking(request):
     if not serializer.is_valid():
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+    listing = serializer.validated_data['listing']
+    blocked_ids = _get_blocked_user_ids(request.user)
+    if listing.owner_id in blocked_ids:
+        return Response({'detail': 'Cannot book this listing.'}, status=status.HTTP_403_FORBIDDEN)
+
     booking = serializer.save()
     response_serializer = PropertyBookingSerializer(
         booking,
@@ -1150,6 +1173,11 @@ def property_listing_detail(request, listing_id):
             {"detail": "Property listing not found."}, status=status.HTTP_404_NOT_FOUND
         )
 
+    if request.user.is_authenticated:
+        blocked_ids = _get_blocked_user_ids(request.user)
+        if listing.owner_id in blocked_ids:
+            return Response({'detail': 'Property listing not found.'}, status=status.HTTP_404_NOT_FOUND)
+
     # GET: Retrieve listing
     if request.method == "GET":
         # Check if sublessee can access this listing
@@ -1271,6 +1299,10 @@ def my_favorite_listings(request):
     sort_by = request.query_params.get("sort_by", "date_saved")
     order = request.query_params.get("order", "desc")
     favorites = _sort_favorites(favorites, sort_by, order)
+
+    blocked_ids = _get_blocked_user_ids(request.user)
+    if blocked_ids:
+        favorites = favorites.exclude(listing__owner_id__in=blocked_ids)
 
     favorite_listing_ids = set(favorites.values_list("listing_id", flat=True))
     serializer = FavoriteListingSerializer(
@@ -1616,3 +1648,108 @@ def company_review_approval_request(request, pk):
             pass
 
     return Response(ApprovalRequestSummarySerializer(approval_request).data)
+
+
+@api_view(["GET", "PATCH"])
+@permission_classes([IsAuthenticated])
+def my_profile(request):
+    if request.method == "GET":
+        serializer = UserProfileSerializer(request.user, context={"request": request})
+        return Response(serializer.data)
+    serializer = UserProfileUpdateSerializer(request.user, data=request.data, partial=True)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    serializer.save()
+    return Response(UserProfileSerializer(request.user, context={"request": request}).data)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def upload_profile_picture(request):
+    from django.core.files.storage import storages
+
+    file = request.FILES.get("file")
+    if not file:
+        return Response({"detail": "file is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+    allowed_types = ["image/jpeg", "image/png", "image/webp", "image/gif"]
+    content_type = file.content_type or "application/octet-stream"
+    if content_type not in allowed_types:
+        return Response(
+            {"detail": f"Unsupported file type. Allowed: {', '.join(allowed_types)}"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    if file.size > 5 * 1024 * 1024:
+        return Response({"detail": "File too large. Maximum size is 5 MB."}, status=status.HTTP_400_BAD_REQUEST)
+
+    ext = file.name.rsplit(".", 1)[-1] if "." in file.name else "jpg"
+    storage_key = f"profile-pictures/{request.user.pk}/{uuid.uuid4().hex}.{ext}"
+
+    try:
+        storage = storages["listing_media_public"]
+    except KeyError:
+        return Response({"detail": "Storage backend not configured."}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+    saved_name = storage.save(storage_key, file)
+    base = getattr(settings, "LISTING_MEDIA_PUBLIC_BASE_URL", "")
+    file_url = f"{base}/{saved_name}" if base else storage.url(saved_name)
+
+    request.user.profile_picture_url = file_url
+    request.user.save(update_fields=["profile_picture_url"])
+    return Response({"profile_picture_url": file_url})
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def user_profile(request, user_id):
+    try:
+        user = User.objects.get(pk=user_id)
+    except User.DoesNotExist:
+        return Response({"detail": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+    serializer = UserProfileSerializer(user, context={"request": request})
+    return Response(serializer.data)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def rate_user(request, user_id):
+    if request.user.pk == user_id:
+        return Response({"detail": "You cannot rate yourself."}, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        rated_user = User.objects.get(pk=user_id)
+    except User.DoesNotExist:
+        return Response({"detail": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+    serializer = UserRatingSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    UserRating.objects.update_or_create(
+        rater=request.user,
+        rated_user=rated_user,
+        defaults={"score": serializer.validated_data["score"]},
+    )
+    return Response(UserProfileSerializer(rated_user, context={"request": request}).data)
+
+
+@api_view(["POST", "DELETE"])
+@permission_classes([IsAuthenticated])
+def block_user_toggle(request, user_id):
+    if request.user.pk == user_id:
+        return Response({"detail": "You cannot block yourself."}, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        target = User.objects.get(pk=user_id)
+    except User.DoesNotExist:
+        return Response({"detail": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+    if request.method == "DELETE":
+        UserBlock.objects.filter(blocker=request.user, blocked_user=target).delete()
+        return Response({"blocked": False})
+    UserBlock.objects.get_or_create(blocker=request.user, blocked_user=target)
+    return Response({"blocked": True}, status=status.HTTP_201_CREATED)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def blocked_users_list(request):
+    blocks = UserBlock.objects.filter(blocker=request.user).select_related("blocked_user")
+    serializer = BlockedUserSerializer(blocks, many=True)
+    return Response(serializer.data)

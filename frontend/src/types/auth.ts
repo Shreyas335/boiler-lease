@@ -13,4 +13,7 @@ export interface User {
   two_factor_enabled: boolean;
   company_name: string | null;
   company_status: CompanyStatus | null;
+  bio: string;
+  profile_picture_url: string;
+  contact_phone: string;
 }
