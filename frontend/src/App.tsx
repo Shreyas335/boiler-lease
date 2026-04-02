@@ -28,6 +28,10 @@ import ManagementCompanyDetailPage from "./pages/ManagementCompanyDetailPage";
 import SubmitApprovalPage from "./pages/SubmitApprovalPage";
 import ManagementApprovalQueuePage from "./pages/ManagementApprovalQueuePage";
 import ApprovalRequestDetailPage from "./pages/ApprovalRequestDetailPage";
+import PaymentHistoryPage from "./pages/PaymentHistoryPage";
+import ListingDepositHistoryPage from "./pages/ListingDepositHistoryPage";
+import BookingRequestsPage from "./pages/BookingRequestsPage";
+import CompanyBookingRequestsPage from "./pages/CompanyBookingRequestsPage";
 import ProfilePage from "./pages/ProfilePage";
 import EditProfilePage from "./pages/EditProfilePage";
 import PrivacySettingsPage from "./pages/PrivacySettingsPage";
@@ -79,6 +83,14 @@ function App() {
                 }
               />
               <Route
+                path="/listings/:id/deposits"
+                element={
+                  <ProtectedRoute>
+                    <ListingDepositHistoryPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
                 path="/listings/:id/edit"
                 element={
                   <ProtectedRoute>
@@ -91,6 +103,14 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <MyListingsPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/booking-requests"
+                element={
+                  <ProtectedRoute>
+                    <BookingRequestsPage />
                   </ProtectedRoute>
                 }
               />
@@ -116,6 +136,14 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <FavoritesPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/payments/history"
+                element={
+                  <ProtectedRoute>
+                    <PaymentHistoryPage />
                   </ProtectedRoute>
                 }
               />
@@ -164,6 +192,14 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <SubmitApprovalPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/company/bookings"
+                element={
+                  <ProtectedRoute>
+                    <CompanyBookingRequestsPage />
                   </ProtectedRoute>
                 }
               />

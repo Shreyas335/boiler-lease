@@ -27,11 +27,12 @@ import LockRoundedIcon from "@mui/icons-material/LockRounded";
 import RateReviewRoundedIcon from "@mui/icons-material/RateReviewRounded";
 import AddHomeRoundedIcon from "@mui/icons-material/AddHomeRounded";
 import ApartmentRoundedIcon from "@mui/icons-material/ApartmentRounded";
-import SearchRoundedIcon from "@mui/icons-material/SearchRounded";
 import EventAvailableRoundedIcon from "@mui/icons-material/EventAvailableRounded";
 import HistoryRoundedIcon from "@mui/icons-material/HistoryRounded";
 import FavoriteRoundedIcon from "@mui/icons-material/FavoriteRounded";
+import PaymentsRoundedIcon from "@mui/icons-material/PaymentsRounded";
 import BusinessRoundedIcon from "@mui/icons-material/BusinessRounded";
+import FactCheckRoundedIcon from "@mui/icons-material/FactCheckRounded";
 import { useAuth } from "../contexts/AuthContext";
 import AccountSettingsModal from "./AccountSettingsModal";
 
@@ -130,6 +131,15 @@ export default function Layout({ children }: LayoutProps) {
                       >
                         My Listings
                       </Button>
+                      <Button
+                        component={RouterLink}
+                        to="/booking-requests"
+                        color="inherit"
+                        startIcon={<FactCheckRoundedIcon />}
+                        sx={{ color: "text.secondary" }}
+                      >
+                        Booking Requests
+                      </Button>
                     </>
                   )}
                   {user.user_type === "sublessee" && (
@@ -160,6 +170,15 @@ export default function Layout({ children }: LayoutProps) {
                         sx={{ color: "text.secondary" }}
                       >
                         Favorites
+                      </Button>
+                      <Button
+                        component={RouterLink}
+                        to="/payments/history"
+                        color="inherit"
+                        startIcon={<PaymentsRoundedIcon />}
+                        sx={{ color: "text.secondary" }}
+                      >
+                        Payments
                       </Button>
                     </>
                   )}
