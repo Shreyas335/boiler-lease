@@ -13,8 +13,6 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.0/ref/settings/
 """
 
-from pathlib import Path
-
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -138,6 +136,96 @@ STATIC_URL = "static/"
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
+STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+    },
+}
+
+AWS_ACCESS_KEY_ID = os.environ.get("AWS_ACCESS_KEY_ID", "")
+AWS_SECRET_ACCESS_KEY = os.environ.get("AWS_SECRET_ACCESS_KEY", "")
+AWS_DEFAULT_REGION = os.environ.get("AWS_DEFAULT_REGION", "")
+AWS_S3_PUBLIC_BUCKET_NAME = os.environ.get("AWS_S3_PUBLIC_BUCKET_NAME", "")
+AWS_S3_PRIVATE_BUCKET_NAME = os.environ.get("AWS_S3_PRIVATE_BUCKET_NAME", "")
+AWS_S3_PUBLIC_CUSTOM_DOMAIN = (
+    os.environ.get("AWS_S3_PUBLIC_CUSTOM_DOMAIN", "")
+    .strip()
+    .removeprefix("https://")
+    .removeprefix("http://")
+    .strip("/")
+)
+AWS_S3_ENDPOINT_URL = os.environ.get("AWS_S3_ENDPOINT_URL", "").strip().rstrip("/") or None
+AWS_S3_PRIVATE_URL_EXPIRE_SECONDS = int(os.environ.get("AWS_S3_PRIVATE_URL_EXPIRE_SECONDS", "300"))
+
+LISTING_MEDIA_PUBLIC_PREFIX = "listing-media/public"
+LISTING_MEDIA_PUBLIC_BASE_URL = ""
+LISTING_MEDIA_PRIVATE_PREFIX = "listing-media/private"
+
+if AWS_S3_PUBLIC_BUCKET_NAME:
+    public_media_storage_options = {
+        "access_key": AWS_ACCESS_KEY_ID or None,
+        "secret_key": AWS_SECRET_ACCESS_KEY or None,
+        "bucket_name": AWS_S3_PUBLIC_BUCKET_NAME,
+        "region_name": AWS_DEFAULT_REGION or None,
+        "default_acl": None,
+        "querystring_auth": False,
+        "file_overwrite": False,
+        "location": LISTING_MEDIA_PUBLIC_PREFIX,
+    }
+
+    if AWS_S3_ENDPOINT_URL:
+        public_media_storage_options["endpoint_url"] = AWS_S3_ENDPOINT_URL
+
+    if AWS_S3_PUBLIC_CUSTOM_DOMAIN:
+        public_media_storage_options["custom_domain"] = AWS_S3_PUBLIC_CUSTOM_DOMAIN
+
+    STORAGES["listing_media_public"] = {
+        "BACKEND": "storages.backends.s3.S3Storage",
+        "OPTIONS": public_media_storage_options,
+    }
+
+    if AWS_S3_PUBLIC_CUSTOM_DOMAIN:
+        LISTING_MEDIA_PUBLIC_BASE_URL = (
+            f"https://{AWS_S3_PUBLIC_CUSTOM_DOMAIN}/{LISTING_MEDIA_PUBLIC_PREFIX}"
+        )
+    elif AWS_S3_ENDPOINT_URL:
+        LISTING_MEDIA_PUBLIC_BASE_URL = (
+            f"{AWS_S3_ENDPOINT_URL}/{AWS_S3_PUBLIC_BUCKET_NAME}/{LISTING_MEDIA_PUBLIC_PREFIX}"
+        )
+    elif AWS_DEFAULT_REGION:
+        LISTING_MEDIA_PUBLIC_BASE_URL = (
+            f"https://{AWS_S3_PUBLIC_BUCKET_NAME}.s3.{AWS_DEFAULT_REGION}.amazonaws.com/"
+            f"{LISTING_MEDIA_PUBLIC_PREFIX}"
+        )
+    else:
+        LISTING_MEDIA_PUBLIC_BASE_URL = (
+            f"https://{AWS_S3_PUBLIC_BUCKET_NAME}.s3.amazonaws.com/{LISTING_MEDIA_PUBLIC_PREFIX}"
+        )
+
+if AWS_S3_PRIVATE_BUCKET_NAME:
+    private_media_storage_options = {
+        "access_key": AWS_ACCESS_KEY_ID or None,
+        "secret_key": AWS_SECRET_ACCESS_KEY or None,
+        "bucket_name": AWS_S3_PRIVATE_BUCKET_NAME,
+        "region_name": AWS_DEFAULT_REGION or None,
+        "default_acl": None,
+        "querystring_auth": True,
+        "querystring_expire": AWS_S3_PRIVATE_URL_EXPIRE_SECONDS,
+        "file_overwrite": False,
+        "location": LISTING_MEDIA_PRIVATE_PREFIX,
+    }
+
+    if AWS_S3_ENDPOINT_URL:
+        private_media_storage_options["endpoint_url"] = AWS_S3_ENDPOINT_URL
+
+    STORAGES["listing_media_private"] = {
+        "BACKEND": "storages.backends.s3.S3Storage",
+        "OPTIONS": private_media_storage_options,
+    }
+
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.0/ref/settings/#default-auto-field
 
@@ -200,3 +288,4 @@ BACKEND_URL = os.environ.get("BACKEND_URL", "http://localhost:8000").rstrip("/")
 # Stripe
 STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "")
 STRIPE_PUBLISHABLE_KEY = os.environ.get("STRIPE_PUBLISHABLE_KEY", "")
+STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")

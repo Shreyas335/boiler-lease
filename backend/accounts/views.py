@@ -1,7 +1,9 @@
 import random
 import secrets
 import hashlib
+import uuid
 from datetime import timedelta
+import stripe
 from django.contrib.auth import login, logout
 from django.core.mail import send_mail
 from django.core.cache import cache
@@ -9,7 +11,7 @@ from django.conf import settings
 from django.db.models.functions import Coalesce
 from django.http import HttpResponseRedirect
 from django.utils import timezone
-from django.views.decorators.csrf import ensure_csrf_cookie
+from django.views.decorators.csrf import csrf_exempt, ensure_csrf_cookie
 from django.db.models import Q, Prefetch
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
@@ -436,28 +438,69 @@ def create_property_listing(request):
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def upload_listing_media(request, listing_id):
+    """Accept a file upload, store it in S3, and create a ListingMedia record."""
+    from django.core.files.storage import storages
+
     if request.user.user_type != User.UserType.SUBLEASER:
         return Response(
-            {"detail": "Only subleasers can upload listing media."},
+            {"detail": "Only subleasers can upload media."},
             status=status.HTTP_403_FORBIDDEN,
         )
 
     listing = PropertyListing.objects.filter(id=listing_id, deleted_at__isnull=True).first()
     if not listing:
-        return Response({"detail": "Property listing not found."}, status=status.HTTP_404_NOT_FOUND)
-    if listing.owner != request.user:
+        return Response({"detail": "Listing not found."}, status=status.HTTP_404_NOT_FOUND)
+    if listing.owner_id != request.user.pk:
         return Response(
-            {"detail": "You do not have permission to update this listing."},
+            {"detail": "You can only upload media to your own listings."},
             status=status.HTTP_403_FORBIDDEN,
         )
 
-    serializer = ListingMediaUploadSerializer(data=request.data)
-    if not serializer.is_valid():
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    file = request.FILES.get("file")
+    display_order = int(request.data.get("display_order", 0))
+    is_primary = str(request.data.get("is_primary", "false")).lower() in ("true", "1")
 
-    file = serializer.validated_data["file"]
-    is_primary = serializer.validated_data.get("is_primary", False)
-    display_order = serializer.validated_data.get("display_order", 0)
+    if not file:
+        return Response(
+            {"detail": "file is required."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Validate file type and size
+    allowed_types = ["image/jpeg", "image/png", "image/webp", "image/gif"]
+    content_type = file.content_type or "application/octet-stream"
+    if content_type not in allowed_types:
+        return Response(
+            {"detail": f"Unsupported file type. Allowed: {', '.join(allowed_types)}"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    max_size = 10 * 1024 * 1024  # 10 MB
+    if file.size > max_size:
+        return Response(
+            {"detail": "File too large. Maximum size is 10 MB."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Build a unique storage key and upload to S3
+    ext = file.name.rsplit(".", 1)[-1] if "." in file.name else "bin"
+    storage_key = f"{listing.pk}/{uuid.uuid4().hex}.{ext}"
+
+    try:
+        storage = storages["listing_media_public"]
+    except KeyError:
+        return Response(
+            {"detail": "Storage backend not configured. Check AWS settings."},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+    saved_name = storage.save(storage_key, file)
+
+    base = getattr(settings, "LISTING_MEDIA_PUBLIC_BASE_URL", "")
+    if base:
+        file_url = f"{base}/{saved_name}"
+    else:
+        file_url = storage.url(saved_name)
 
     if is_primary:
         ListingMedia.objects.filter(listing=listing, is_primary=True).update(is_primary=False)
@@ -465,10 +508,17 @@ def upload_listing_media(request, listing_id):
     media = ListingMedia.objects.create(
         listing=listing,
         media_type=ListingMedia.MediaType.IMAGE,
-        file=file,
+        storage_key=saved_name,
+        is_private=False,
+        original_filename=file.name,
+        content_type=content_type,
+        file_size=file.size,
+        file_url=file_url,
+        upload_status=ListingMedia.UploadStatus.UPLOADED,
         display_order=display_order,
         is_primary=is_primary,
     )
+
     return Response(ListingMediaSerializer(media).data, status=status.HTTP_201_CREATED)
 
 
@@ -525,6 +575,94 @@ def listing_amenities(request):
     return Response(
         [{"id": amenity.id, "code": amenity.code, "label": amenity.label} for amenity in amenities]
     )
+
+
+
+@api_view(["DELETE"])
+@permission_classes([IsAuthenticated])
+def delete_listing_media(request, media_id):
+    """Delete a media record and its S3 object."""
+    from django.core.files.storage import storages
+
+    if request.user.user_type != User.UserType.SUBLEASER:
+        return Response(
+            {"detail": "Only subleasers can delete media."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    try:
+        media = ListingMedia.objects.select_related("listing").get(pk=media_id)
+    except ListingMedia.DoesNotExist:
+        return Response({"detail": "Media not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    if media.listing.owner_id != request.user.pk:
+        return Response(
+            {"detail": "You can only delete media from your own listings."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    # Delete from S3 if storage_key exists
+    if media.storage_key:
+        try:
+            bucket_key = "listing_media_private" if media.is_private else "listing_media_public"
+            storage = storages[bucket_key]
+            storage.delete(media.storage_key)
+        except Exception:
+            pass  # Best-effort S3 cleanup
+
+    media.delete()
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+@api_view(["PATCH"])
+@permission_classes([IsAuthenticated])
+def reorder_listing_media(request):
+    """Bulk-update display_order and is_primary for media items.
+
+    Expects JSON body: { "listing_id": <int>, "order": [ { "id": <media_id>, "display_order": <int>, "is_primary": <bool> }, ... ] }
+    """
+    if request.user.user_type != User.UserType.SUBLEASER:
+        return Response(
+            {"detail": "Only subleasers can reorder media."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    listing_id = request.data.get("listing_id")
+    order = request.data.get("order")
+
+    if not listing_id or not isinstance(order, list):
+        return Response(
+            {"detail": "listing_id and order[] are required."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        listing = PropertyListing.objects.get(pk=listing_id, deleted_at__isnull=True)
+    except PropertyListing.DoesNotExist:
+        return Response({"detail": "Listing not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    if listing.owner_id != request.user.pk:
+        return Response(
+            {"detail": "You can only reorder media on your own listings."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    media_ids = [item["id"] for item in order if "id" in item]
+    media_qs = ListingMedia.objects.filter(pk__in=media_ids, listing=listing)
+    media_map = {m.pk: m for m in media_qs}
+
+    for item in order:
+        media = media_map.get(item.get("id"))
+        if not media:
+            continue
+        media.display_order = int(item.get("display_order", media.display_order))
+        media.is_primary = bool(item.get("is_primary", media.is_primary))
+
+    ListingMedia.objects.bulk_update(media_map.values(), ["display_order", "is_primary"])
+
+    from .serializers import ListingMediaSerializer
+    updated = ListingMedia.objects.filter(listing=listing).order_by("display_order", "id")
+    return Response(ListingMediaSerializer(updated, many=True).data)
 
 
 # ----- Property Listing Browse (Public) -----
@@ -654,6 +792,44 @@ def browse_property_listings(request):
 
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
+def private_media_access(request, media_id):
+    """Return a short-lived signed URL for a private photo."""
+    try:
+        media = ListingMedia.objects.select_related("listing").get(pk=media_id)
+    except ListingMedia.DoesNotExist:
+        return Response({"detail": "Media not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    if not media.is_private:
+        return Response(
+            {"detail": "This media is public. Use the public URL."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    if media.upload_status != ListingMedia.UploadStatus.UPLOADED:
+        return Response({"detail": "Media not available."}, status=status.HTTP_404_NOT_FOUND)
+
+    # Only the listing owner can access private photos for now
+    if media.listing.owner_id != request.user.pk:
+        return Response(
+            {"detail": "You do not have permission to access this media."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    if not media.storage_key:
+        return Response({"detail": "No storage key for this media."}, status=status.HTTP_404_NOT_FOUND)
+
+    from django.core.files.storage import storages
+
+    try:
+        private_storage = storages["listing_media_private"]
+        signed_url = private_storage.url(media.storage_key)
+    except (KeyError, Exception):
+        return Response(
+            {"detail": "Private storage not configured."},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+    return Response({"access_url": signed_url, "expires_in": settings.AWS_S3_PRIVATE_URL_EXPIRE_SECONDS})
 def my_current_bookings(request):
     if not _is_sublessee(request):
         return Response(
@@ -825,6 +1001,106 @@ def my_payment_history(request):
     transactions = TransactionRecord.objects.filter(user=request.user).order_by("-created_at")
     serializer = TransactionRecordSerializer(transactions, many=True)
     return Response(serializer.data)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def create_deposit_checkout_session(request):
+    """Create a Stripe Checkout Session for a security deposit (placeholder amount until booking-linked)."""
+    if not _is_sublessee(request):
+        return Response(
+            {"detail": "Only sublessees can start deposit payments."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    if not request.user.email_verified:
+        return Response(
+            {"detail": "Please verify your email before making a payment."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if not settings.STRIPE_SECRET_KEY:
+        return Response(
+            {"detail": "Stripe is not configured on the server."},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+    stripe.api_key = settings.STRIPE_SECRET_KEY
+
+    # TODO: set from booking / listing security_deposit when bookings integrate with checkout.
+    amount_cents = 5000
+    txn = TransactionRecord.objects.create(
+        user=request.user,
+        amount=amount_cents / 100,
+        currency="usd",
+        booking_reference="",
+        status=TransactionRecord.Status.PENDING,
+    )
+
+    session = stripe.checkout.Session.create(
+        mode="payment",
+        customer_email=request.user.email,
+        line_items=[
+            {
+                "price_data": {
+                    "currency": "usd",
+                    "unit_amount": amount_cents,
+                    "product_data": {"name": "Security deposit"},
+                },
+                "quantity": 1,
+            }
+        ],
+        metadata={
+            "transaction_id": str(txn.id),
+            "user_id": str(request.user.id),
+        },
+        success_url=f"{settings.FRONTEND_URL}/dashboard",
+        cancel_url=f"{settings.FRONTEND_URL}/dashboard",
+    )
+    txn.stripe_checkout_session_id = session.id
+    txn.save(update_fields=["stripe_checkout_session_id"])
+    return Response({"checkout_url": session.url}, status=status.HTTP_201_CREATED)
+
+
+@csrf_exempt
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def stripe_webhook(request):
+    payload = request.body
+    sig_header = request.META.get("HTTP_STRIPE_SIGNATURE")
+    webhook_secret = settings.STRIPE_WEBHOOK_SECRET
+
+    if not webhook_secret:
+        return Response({"detail": "Webhook secret not configured."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    try:
+        event = stripe.Webhook.construct_event(payload, sig_header, webhook_secret)
+    except Exception:
+        return Response({"detail": "Invalid webhook payload/signature."}, status=status.HTTP_400_BAD_REQUEST)
+
+    event_type = event.get("type")
+    obj = event.get("data", {}).get("object", {})
+
+    if event_type == "checkout.session.completed":
+        session_id = obj.get("id")
+        payment_intent_id = obj.get("payment_intent") or ""
+        amount_total = obj.get("amount_total")
+
+        txn = TransactionRecord.objects.filter(stripe_checkout_session_id=session_id).first()
+        if txn:
+            if isinstance(amount_total, int):
+                txn.amount = amount_total / 100
+            txn.status = TransactionRecord.Status.SUCCEEDED
+            txn.paid_at = timezone.now()
+            txn.stripe_payment_intent_id = payment_intent_id
+            txn.save(update_fields=["amount", "status", "paid_at", "stripe_payment_intent_id"])
+
+    elif event_type == "checkout.session.expired":
+        session_id = obj.get("id")
+        txn = TransactionRecord.objects.filter(stripe_checkout_session_id=session_id).first()
+        if txn and txn.status == TransactionRecord.Status.PENDING:
+            txn.status = TransactionRecord.Status.CANCELED
+            txn.save(update_fields=["status"])
+
+    return Response({"received": True}, status=status.HTTP_200_OK)
 
 
 @api_view(["GET", "PATCH", "DELETE"])
