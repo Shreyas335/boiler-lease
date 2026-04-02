@@ -1,6 +1,7 @@
 from django.contrib.auth.password_validation import validate_password
 from django.conf import settings
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db.models import Avg
 from rest_framework import serializers
 
 from .models import (
@@ -17,6 +18,8 @@ from .models import (
     PropertyListing,
     TransactionRecord,
     User,
+    UserBlock,
+    UserRating,
 )
 
 
@@ -38,6 +41,9 @@ class UserSerializer(serializers.ModelSerializer):
             "identity_verification_status",
             "company_name",
             "company_status",
+            "bio",
+            "profile_picture_url",
+            "contact_phone",
         )
         read_only_fields = (
             "id",
@@ -51,6 +57,9 @@ class UserSerializer(serializers.ModelSerializer):
             "identity_verification_status",
             "company_name",
             "company_status",
+            "bio",
+            "profile_picture_url",
+            "contact_phone",
         )
 
     def get_company_name(self, obj):
@@ -347,6 +356,11 @@ class PropertyListingSerializer(serializers.ModelSerializer):
     amenities = serializers.SerializerMethodField()
     media = serializers.SerializerMethodField()
     approved_by_company_name = serializers.SerializerMethodField()
+    approved_by_company_user_id = serializers.SerializerMethodField()
+    owner_id = serializers.IntegerField(source="owner.id", read_only=True)
+    owner_username = serializers.CharField(source="owner.username", read_only=True)
+    owner_first_name = serializers.CharField(source="owner.first_name", read_only=True)
+    owner_last_name = serializers.CharField(source="owner.last_name", read_only=True)
 
     class Meta:
         model = PropertyListing
@@ -387,6 +401,11 @@ class PropertyListingSerializer(serializers.ModelSerializer):
             "status",
             "approval_status",
             "approved_by_company_name",
+            "approved_by_company_user_id",
+            "owner_id",
+            "owner_username",
+            "owner_first_name",
+            "owner_last_name",
             "published_at",
             "created_at",
             "updated_at",
@@ -405,6 +424,11 @@ class PropertyListingSerializer(serializers.ModelSerializer):
     def get_approved_by_company_name(self, obj):
         if obj.approved_by_company_id:
             return obj.approved_by_company.company_name
+        return None
+
+    def get_approved_by_company_user_id(self, obj):
+        if obj.approved_by_company_id:
+            return obj.approved_by_company.user_id
         return None
 
 
@@ -813,6 +837,11 @@ class PropertyListingBrowseSerializer(serializers.ModelSerializer):
     amenities = serializers.SerializerMethodField()
     media = ListingMediaSerializer(many=True, read_only=True)
     approved_by_company_name = serializers.SerializerMethodField()
+    approved_by_company_user_id = serializers.SerializerMethodField()
+    owner_id = serializers.IntegerField(source="owner.id", read_only=True)
+    owner_username = serializers.CharField(source="owner.username", read_only=True)
+    owner_first_name = serializers.CharField(source="owner.first_name", read_only=True)
+    owner_last_name = serializers.CharField(source="owner.last_name", read_only=True)
 
     class Meta:
         model = PropertyListing
@@ -840,6 +869,11 @@ class PropertyListingBrowseSerializer(serializers.ModelSerializer):
             "lease_term_min_months",
             "lease_term_max_months",
             "approved_by_company_name",
+            "approved_by_company_user_id",
+            "owner_id",
+            "owner_username",
+            "owner_first_name",
+            "owner_last_name",
             "amenities",
             "media",
         )
@@ -852,6 +886,11 @@ class PropertyListingBrowseSerializer(serializers.ModelSerializer):
     def get_approved_by_company_name(self, obj):
         if obj.approved_by_company_id:
             return obj.approved_by_company.company_name
+        return None
+
+    def get_approved_by_company_user_id(self, obj):
+        if obj.approved_by_company_id:
+            return obj.approved_by_company.user_id
         return None
 
 
@@ -1085,3 +1124,89 @@ class ApprovalRequestDetailSerializer(serializers.ModelSerializer):
         if check_fn and obj.guideline:
             return check_fn(obj.listing, obj.guideline)
         return []
+
+
+class UserProfileSerializer(serializers.ModelSerializer):
+    average_rating = serializers.SerializerMethodField()
+    rating_count = serializers.SerializerMethodField()
+    my_rating = serializers.SerializerMethodField()
+    is_blocked = serializers.SerializerMethodField()
+
+    class Meta:
+        model = User
+        fields = (
+            "id",
+            "username",
+            "first_name",
+            "last_name",
+            "user_type",
+            "bio",
+            "profile_picture_url",
+            "contact_phone",
+            "average_rating",
+            "rating_count",
+            "my_rating",
+            "is_blocked",
+        )
+        read_only_fields = fields
+
+    def get_average_rating(self, obj):
+        result = obj.ratings_received.aggregate(avg=Avg("score"))["avg"]
+        return round(result, 2) if result is not None else None
+
+    def get_rating_count(self, obj):
+        return obj.ratings_received.count()
+
+    def get_my_rating(self, obj):
+        request = self.context.get("request")
+        if not request or not request.user.is_authenticated:
+            return None
+        rating = UserRating.objects.filter(rater=request.user, rated_user=obj).first()
+        return rating.score if rating else None
+
+    def get_is_blocked(self, obj):
+        request = self.context.get("request")
+        if not request or not request.user.is_authenticated:
+            return False
+        return UserBlock.objects.filter(blocker=request.user, blocked_user=obj).exists()
+
+
+class UserProfileUpdateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ("bio", "contact_phone", "first_name", "last_name")
+        extra_kwargs = {
+            "bio": {"required": False},
+            "contact_phone": {"required": False},
+            "first_name": {"required": False},
+            "last_name": {"required": False},
+        }
+
+    def validate_bio(self, value):
+        if len(value) > 500:
+            raise serializers.ValidationError("Bio must be 500 characters or fewer.")
+        return value
+
+
+class UserRatingSerializer(serializers.Serializer):
+    score = serializers.IntegerField(min_value=1, max_value=5)
+
+
+class BlockedUserSerializer(serializers.ModelSerializer):
+    blocked_user_id = serializers.IntegerField(source="blocked_user.id", read_only=True)
+    blocked_user_username = serializers.CharField(source="blocked_user.username", read_only=True)
+    blocked_user_first_name = serializers.CharField(source="blocked_user.first_name", read_only=True)
+    blocked_user_last_name = serializers.CharField(source="blocked_user.last_name", read_only=True)
+    blocked_user_profile_picture_url = serializers.CharField(source="blocked_user.profile_picture_url", read_only=True)
+
+    class Meta:
+        model = UserBlock
+        fields = (
+            "id",
+            "blocked_user_id",
+            "blocked_user_username",
+            "blocked_user_first_name",
+            "blocked_user_last_name",
+            "blocked_user_profile_picture_url",
+            "created_at",
+        )
