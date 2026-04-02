@@ -437,6 +437,13 @@ export default function DashboardPage() {
               >
                 My listings
               </Button>
+              <Button
+                component={RouterLink}
+                to="/booking-requests"
+                variant="outlined"
+              >
+                Booking requests
+              </Button>
             </>
           )}
           { user.user_type === "management" && user.company_status !== "approved" &&

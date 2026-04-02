@@ -84,6 +84,11 @@ export interface BookingRecord {
   is_cancelable: boolean;
 }
 
+export interface ManagedBookingRecord extends BookingRecord {
+  sublessee_name: string;
+  sublessee_email: string;
+}
+
 export interface CreateBookingPayload {
   listing: number;
   start_date: string;
@@ -331,6 +336,22 @@ export async function getCurrentBookings(sortBy: BookingSortBy, order: SortOrder
 
 export async function createBooking(payload: CreateBookingPayload): Promise<BookingRecord> {
   const { data } = await api.post<BookingRecord>("/bookings/", payload);
+  return data;
+}
+
+export async function getManageableBookings(): Promise<ManagedBookingRecord[]> {
+  const { data } = await api.get<ManagedBookingRecord[]>("/bookings/manage/");
+  return data;
+}
+
+export async function updateBookingStatus(
+  bookingId: number,
+  status: "confirmed" | "declined",
+): Promise<ManagedBookingRecord> {
+  const { data } = await api.patch<ManagedBookingRecord>(
+    `/bookings/${bookingId}/status/`,
+    { status },
+  );
   return data;
 }
 
