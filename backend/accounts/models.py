@@ -457,6 +457,20 @@ class PropertyBooking(models.Model):
         null=True,
         blank=True,
     )
+    platform_fee_percentage_snapshot = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text='Company fee percentage frozen at booking confirmation time'
+    )
+    platform_fee_flat_snapshot = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text='Company flat fee frozen at booking confirmation time'
+    )
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING, db_index=True)
     deposit_paid_at = models.DateTimeField(null=True, blank=True)
     booked_at = models.DateTimeField(auto_now_add=True, db_index=True)
