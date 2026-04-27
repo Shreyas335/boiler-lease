@@ -12,6 +12,7 @@ from .models import (
     BookingGroupMembership,
     BookingExtensionRequest,
     CompanyDocument,
+    CompanyFeeConfig,
     FavoriteListing,
     FeedbackSubmission,
     Guideline,
@@ -1311,6 +1312,13 @@ class ManagementCompanySerializer(serializers.ModelSerializer):
 
 class CompanyBookingFeeUpdateSerializer(serializers.Serializer):
     booking_fee_percent = serializers.DecimalField(max_digits=5, decimal_places=2, min_value=0, max_value=100)
+
+
+class CompanyFeeConfigSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CompanyFeeConfig
+        fields = ('platform_fee_percentage', 'platform_fee_flat', 'created_at', 'updated_at')
+        read_only_fields = ('created_at', 'updated_at')
 
 
 class PublicGuidelineSerializer(serializers.ModelSerializer):
