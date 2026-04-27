@@ -1,10 +1,26 @@
 import { useEffect, useState } from "react";
 import axios from "axios";
-import { Alert, Avatar, Box, Button, Card, CardContent, Chip, Container, Grid, Stack, TextField, Typography } from "@mui/material";
+import {
+  Alert,
+  Avatar,
+  Box,
+  Button,
+  Card,
+  CardContent,
+  Chip,
+  Container,
+  Grid,
+  Snackbar,
+  Stack,
+  TextField,
+  Typography,
+} from "@mui/material";
 import VerifiedIcon from "@mui/icons-material/Verified";
 import PersonIcon from "@mui/icons-material/Person";
 import FavoriteBorderRoundedIcon from "@mui/icons-material/FavoriteBorderRounded";
 import FavoriteRoundedIcon from "@mui/icons-material/FavoriteRounded";
+import MailOutlineIcon from "@mui/icons-material/MailOutline";
+import LinkIcon from "@mui/icons-material/Link";
 import { Link as RouterLink, useNavigate, useParams } from "react-router-dom";
 import { addFavorite, createBooking, getPropertyListingDetail, removeFavorite, type PropertyListing } from "../api/listings";
 import { useAuth } from "../contexts/AuthContext";
@@ -27,6 +43,31 @@ export default function PropertyDetailPage() {
   const [bookingBusy, setBookingBusy] = useState(false);
   const [bookingMessage, setBookingMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [bookingDates, setBookingDates] = useState({ start_date: "", end_date: "" });
+  const [copyLinkOpen, setCopyLinkOpen] = useState(false);
+
+  function shareListingUrl(): string {
+    if (!listing) return "";
+    return `${window.location.origin}/properties/${listing.id}`;
+  }
+
+  async function handleCopyShareLink() {
+    if (!listing) return;
+    const url = shareListingUrl();
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopyLinkOpen(true);
+    } catch {
+      setError("Unable to copy the link. You can copy it from the address bar instead.");
+    }
+  }
+
+  function handleShareByEmail() {
+    if (!listing) return;
+    const url = shareListingUrl();
+    const subject = encodeURIComponent(`Check out this listing: ${listing.title}`);
+    const body = encodeURIComponent(`I thought you might be interested in this sublease:\n\n${url}\n`);
+    window.location.href = `mailto:?subject=${subject}&body=${body}`;
+  }
 
   function validateBookingForm() {
     if (!listing) return "Property listing not found.";
@@ -177,8 +218,24 @@ export default function PropertyDetailPage() {
               </Stack>
             )}
           </Box>
-          <Stack direction="row" spacing={1}>
+          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ justifyContent: "flex-end" }}>
             <Chip label={`${formatMoney(listing.monthly_rent)}/mo`} size="small" />
+            <Button
+              variant="outlined"
+              size="small"
+              startIcon={<LinkIcon />}
+              onClick={() => void handleCopyShareLink()}
+            >
+              Copy link
+            </Button>
+            <Button
+              variant="outlined"
+              size="small"
+              startIcon={<MailOutlineIcon />}
+              onClick={handleShareByEmail}
+            >
+              Share by email
+            </Button>
             {user?.user_type === "sublessee" && (
               <Button
                 variant="outlined"
@@ -244,41 +301,68 @@ export default function PropertyDetailPage() {
             <Card sx={{ mb: 2 }}>
               <CardContent>
                 <Typography variant="h6" sx={{ mb: 1 }}>Posted by</Typography>
-                <Stack
-                  direction="row"
-                  spacing={1.5}
-                  alignItems="center"
-                  component={RouterLink}
-                  to={`/profile/${listing.owner_id}`}
-                  sx={{ textDecoration: "none", color: "inherit", "&:hover": { opacity: 0.8 } }}
-                >
-                  <Avatar sx={{ width: 36, height: 36, bgcolor: "primary.main" }}>
-                    <PersonIcon fontSize="small" />
-                  </Avatar>
-                  <Box>
-                    <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                      {listing.owner_first_name && listing.owner_last_name
-                        ? `${listing.owner_first_name} ${listing.owner_last_name}`
-                        : listing.owner_username}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      @{listing.owner_username}
-                    </Typography>
-                  </Box>
-                </Stack>
-                {listing.approved_by_company_name && listing.approved_by_company_user_id && (
+                {user ? (
                   <Stack
                     direction="row"
-                    spacing={0.5}
+                    spacing={1.5}
                     alignItems="center"
                     component={RouterLink}
-                    to={`/profile/${listing.approved_by_company_user_id}`}
-                    sx={{ mt: 1.5, textDecoration: "none", color: "success.main", "&:hover": { opacity: 0.8 } }}
+                    to={`/profile/${listing.owner_id}`}
+                    sx={{ textDecoration: "none", color: "inherit", "&:hover": { opacity: 0.8 } }}
                   >
-                    <VerifiedIcon fontSize="small" />
-                    <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                      {listing.approved_by_company_name}
-                    </Typography>
+                    <Avatar sx={{ width: 36, height: 36, bgcolor: "primary.main" }}>
+                      <PersonIcon fontSize="small" />
+                    </Avatar>
+                    <Box>
+                      <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                        {listing.owner_first_name && listing.owner_last_name
+                          ? `${listing.owner_first_name} ${listing.owner_last_name}`
+                          : listing.owner_username}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        @{listing.owner_username}
+                      </Typography>
+                    </Box>
+                  </Stack>
+                ) : (
+                  <Stack direction="row" spacing={1.5} alignItems="center">
+                    <Avatar sx={{ width: 36, height: 36, bgcolor: "primary.main" }}>
+                      <PersonIcon fontSize="small" />
+                    </Avatar>
+                    <Box>
+                      <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                        {listing.owner_first_name && listing.owner_last_name
+                          ? `${listing.owner_first_name} ${listing.owner_last_name}`
+                          : listing.owner_username}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        @{listing.owner_username}
+                      </Typography>
+                    </Box>
+                  </Stack>
+                )}
+                {listing.approved_by_company_name && listing.approved_by_company_user_id && (
+                  <Stack direction="row" spacing={0.5} alignItems="center" sx={{ mt: 1.5 }}>
+                    <VerifiedIcon fontSize="small" color="success" />
+                    {user ? (
+                      <Typography
+                        component={RouterLink}
+                        to={`/profile/${listing.approved_by_company_user_id}`}
+                        variant="body2"
+                        sx={{
+                          fontWeight: 600,
+                          color: "success.main",
+                          textDecoration: "none",
+                          "&:hover": { opacity: 0.8 },
+                        }}
+                      >
+                        {listing.approved_by_company_name}
+                      </Typography>
+                    ) : (
+                      <Typography variant="body2" sx={{ fontWeight: 600, color: "success.main" }}>
+                        {listing.approved_by_company_name}
+                      </Typography>
+                    )}
                   </Stack>
                 )}
               </CardContent>
@@ -371,6 +455,13 @@ export default function PropertyDetailPage() {
           </Grid>
         </Grid>
       </Container>
+      <Snackbar
+        open={copyLinkOpen}
+        autoHideDuration={4000}
+        onClose={() => setCopyLinkOpen(false)}
+        message="Link copied to clipboard"
+        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+      />
     </Box>
   );
 }
