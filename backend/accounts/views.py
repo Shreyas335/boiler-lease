@@ -1368,11 +1368,6 @@ def create_deposit_checkout_session(request):
             {"detail": "Only sublessees can start deposit payments."},
             status=status.HTTP_403_FORBIDDEN,
         )
-    if not request.user.email_verified:
-        return Response(
-            {"detail": "Please verify your email before making a payment."},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
     if _user_must_verify_identity(request.user):
         return _identity_verification_required_response()
     if not settings.STRIPE_SECRET_KEY:
@@ -1566,8 +1561,10 @@ def property_listing_detail(request, listing_id):
 
     # GET: Retrieve listing
     if request.method == "GET":
-        # Check if sublessee can access this listing
-        if _is_sublessee(request):
+        is_owner = (
+            request.user.is_authenticated and listing.owner_id == request.user.id
+        )
+        if not is_owner:
             if (
                 listing.status != PropertyListing.ListingStatus.PUBLISHED
                 or listing.approval_status != PropertyListing.ApprovalStatus.APPROVED
@@ -1577,9 +1574,12 @@ def property_listing_detail(request, listing_id):
                 )
 
         data = PropertyListingSerializer(listing).data
-        data["is_favorited"] = FavoriteListing.objects.filter(
-            user=request.user, listing=listing
-        ).exists()
+        if request.user.is_authenticated:
+            data["is_favorited"] = FavoriteListing.objects.filter(
+                user=request.user, listing=listing
+            ).exists()
+        else:
+            data["is_favorited"] = False
         return Response(data)
 
     # PATCH: Update listing (owner only)
