@@ -6,6 +6,7 @@ from rest_framework import serializers
 
 from .models import (
     ApprovalRequest,
+    BookingExtensionRequest,
     CompanyDocument,
     FavoriteListing,
     FeedbackSubmission,
@@ -482,6 +483,8 @@ class PropertyBookingSerializer(serializers.ModelSerializer):
     price = serializers.SerializerMethodField()
     status_label = serializers.SerializerMethodField()
     is_cancelable = serializers.SerializerMethodField()
+    can_request_extension = serializers.SerializerMethodField()
+    pending_extension_request = serializers.SerializerMethodField()
 
     class Meta:
         model = PropertyBooking
@@ -498,6 +501,8 @@ class PropertyBookingSerializer(serializers.ModelSerializer):
             "status_label",
             "price",
             "is_cancelable",
+            "can_request_extension",
+            "pending_extension_request",
         )
 
     def get_price(self, obj):
@@ -511,6 +516,76 @@ class PropertyBookingSerializer(serializers.ModelSerializer):
             PropertyBooking.Status.PENDING,
             PropertyBooking.Status.CONFIRMED,
         )
+
+    def _has_pending_extension(self, obj):
+        for er in obj.extension_requests.all():
+            if er.status == BookingExtensionRequest.Status.PENDING:
+                return er
+        return None
+
+    def get_can_request_extension(self, obj):
+        if obj.status != PropertyBooking.Status.CONFIRMED:
+            return False
+        if obj.listing.availability_end_date <= obj.end_date:
+            return False
+        return self._has_pending_extension(obj) is None
+
+    def get_pending_extension_request(self, obj):
+        er = self._has_pending_extension(obj)
+        if er is None:
+            return None
+        return {
+            "id": er.id,
+            "requested_end_date": er.requested_end_date.isoformat(),
+            "status": er.status,
+        }
+
+
+class BookingExtensionRequestSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = BookingExtensionRequest
+        fields = (
+            "id",
+            "booking",
+            "requested_end_date",
+            "sublessee_notes",
+            "status",
+            "reviewer_notes",
+            "decided_at",
+            "created_at",
+        )
+        read_only_fields = (
+            "id",
+            "booking",
+            "requested_end_date",
+            "sublessee_notes",
+            "status",
+            "reviewer_notes",
+            "decided_at",
+            "created_at",
+        )
+
+
+class BookingExtensionRequestCreateSerializer(serializers.Serializer):
+    requested_end_date = serializers.DateField()
+    sublessee_notes = serializers.CharField(required=False, allow_blank=True, max_length=2000)
+
+    def validate(self, attrs):
+        booking = self.context["booking"]
+        requested_end_date = attrs["requested_end_date"]
+        if requested_end_date <= booking.end_date:
+            raise serializers.ValidationError(
+                {"requested_end_date": "New end date must be after your current checkout."}
+            )
+        if requested_end_date > booking.listing.availability_end_date:
+            raise serializers.ValidationError(
+                {"requested_end_date": "Cannot extend beyond the listing's availability end date."}
+            )
+        if requested_end_date < booking.start_date:
+            raise serializers.ValidationError(
+                {"requested_end_date": "Invalid end date for this booking."}
+            )
+        return attrs
 
 
 class ManagedPropertyBookingSerializer(PropertyBookingSerializer):
