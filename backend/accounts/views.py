@@ -23,6 +23,7 @@ from .email_verification import send_2fa_code_email, send_password_reset_email, 
 
 from .models import (
     ApprovalRequest,
+    BookingExtensionRequest,
     CompanyDocument,
     FavoriteListing,
     Guideline,
@@ -57,6 +58,8 @@ from .serializers import (
     PasswordChangeSerializer,
     PasswordResetConfirmSerializer,
     PasswordResetRequestSerializer,
+    BookingExtensionRequestCreateSerializer,
+    BookingExtensionRequestSerializer,
     PropertyBookingCreateSerializer,
     PropertyBookingStatusUpdateSerializer,
     PropertyListingBrowseSerializer,
@@ -973,7 +976,7 @@ def my_current_bookings(request):
             listing__deleted_at__isnull=True,
         )
         .select_related("listing")
-        .prefetch_related("listing__media")
+        .prefetch_related("listing__media", "extension_requests")
     )
     sort_by = request.query_params.get("sort_by", "date_booked")
     order = request.query_params.get("order", "desc")
@@ -1005,7 +1008,7 @@ def my_booking_history(request):
             listing__deleted_at__isnull=True,
         )
         .select_related("listing")
-        .prefetch_related("listing__media")
+        .prefetch_related("listing__media", "extension_requests")
     )
     sort_by = request.query_params.get("sort_by", "date_booked")
     order = request.query_params.get("order", "desc")
@@ -1084,6 +1087,50 @@ def cancel_booking(request, booking_id):
     return Response({"detail": "Booking cancelled successfully."}, status=status.HTTP_200_OK)
 
 
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def create_booking_extension_request(request, booking_id):
+    if not _is_sublessee(request):
+        return Response(
+            {"detail": "Only sublessees can request booking extensions."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    booking = (
+        PropertyBooking.objects.select_related("listing")
+        .filter(pk=booking_id, sublessee=request.user, listing__deleted_at__isnull=True)
+        .first()
+    )
+    if not booking:
+        return Response({"detail": "Booking not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    if booking.status != PropertyBooking.Status.CONFIRMED:
+        return Response(
+            {"detail": "Extensions can only be requested for confirmed bookings."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if booking.listing.availability_end_date <= booking.end_date:
+        return Response(
+            {"detail": "This listing has no availability beyond your current checkout."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if booking.extension_requests.filter(status=BookingExtensionRequest.Status.PENDING).exists():
+        return Response(
+            {"detail": "You already have a pending extension request for this booking."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    serializer = BookingExtensionRequestCreateSerializer(data=request.data, context={"booking": booking})
+    serializer.is_valid(raise_exception=True)
+
+    ext = BookingExtensionRequest.objects.create(
+        booking=booking,
+        requested_end_date=serializer.validated_data["requested_end_date"],
+        sublessee_notes=serializer.validated_data.get("sublessee_notes") or "",
+    )
+    return Response(BookingExtensionRequestSerializer(ext).data, status=status.HTTP_201_CREATED)
+
+
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def manageable_bookings(request):
@@ -1101,7 +1148,7 @@ def manageable_bookings(request):
             listing__deleted_at__isnull=True,
         )
         .select_related("listing", "sublessee")
-        .prefetch_related("listing__media")
+        .prefetch_related("listing__media", "extension_requests")
         .order_by("status", "-booked_at")
     )
     serializer = ManagedPropertyBookingSerializer(bookings, many=True)
@@ -1124,7 +1171,7 @@ def company_manageable_bookings(request):
             listing__deleted_at__isnull=True,
         )
         .select_related("listing", "sublessee", "listing__owner")
-        .prefetch_related("listing__media")
+        .prefetch_related("listing__media", "extension_requests")
         .order_by("status", "-booked_at")
     )
     serializer = ManagedPropertyBookingSerializer(bookings, many=True)
@@ -1173,7 +1220,7 @@ def my_past_bookings(request):
             listing__deleted_at__isnull=True,
         )
         .select_related("listing")
-        .prefetch_related("listing__media")
+        .prefetch_related("listing__media", "extension_requests")
     )
     bookings = bookings.filter(
         Q(end_date__lt=today)
