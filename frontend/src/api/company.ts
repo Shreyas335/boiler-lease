@@ -161,6 +161,25 @@ export async function reviewApprovalRequest(
   return data;
 }
 
+export interface CompanyFeeConfig {
+  platform_fee_percentage: string | null;
+  platform_fee_flat: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function getFeeConfig(): Promise<CompanyFeeConfig> {
+  const { data } = await api.get<CompanyFeeConfig>('/company/fee-config/');
+  return data;
+}
+
+export async function updateFeeConfig(
+  config: { platform_fee_percentage?: string | null; platform_fee_flat?: string | null }
+): Promise<CompanyFeeConfig> {
+  const { data } = await api.put<CompanyFeeConfig>('/company/fee-config/', config);
+  return data;
+}
+
 function formToPayload(form: GuidelineFormData) {
   return {
     name: form.name,
