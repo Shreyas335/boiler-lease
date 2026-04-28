@@ -390,6 +390,8 @@ class PropertyListingSerializer(serializers.ModelSerializer):
     owner_username = serializers.CharField(source="owner.username", read_only=True)
     owner_first_name = serializers.CharField(source="owner.first_name", read_only=True)
     owner_last_name = serializers.CharField(source="owner.last_name", read_only=True)
+    platform_fee_percentage = serializers.SerializerMethodField()
+    platform_fee_flat = serializers.SerializerMethodField()
 
     class Meta:
         model = PropertyListing
@@ -443,6 +445,8 @@ class PropertyListingSerializer(serializers.ModelSerializer):
             "management_fee_percent",
             "amenities",
             "media",
+            "platform_fee_percentage",
+            "platform_fee_flat",
         )
 
     def get_platform_fee_flat(self, obj):
@@ -467,6 +471,24 @@ class PropertyListingSerializer(serializers.ModelSerializer):
     def get_approved_by_company_user_id(self, obj):
         if obj.approved_by_company_id:
             return obj.approved_by_company.user_id
+        return None
+
+    def get_platform_fee_percentage(self, obj):
+        if obj.approved_by_company_id:
+            try:
+                cfg = obj.approved_by_company.fee_config
+                return str(cfg.platform_fee_percentage) if cfg.platform_fee_percentage is not None else None
+            except Exception:
+                pass
+        return None
+
+    def get_platform_fee_flat(self, obj):
+        if obj.approved_by_company_id:
+            try:
+                cfg = obj.approved_by_company.fee_config
+                return str(cfg.platform_fee_flat) if cfg.platform_fee_flat is not None else None
+            except Exception:
+                pass
         return None
 
 
