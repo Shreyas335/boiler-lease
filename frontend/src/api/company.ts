@@ -180,6 +180,27 @@ export async function updateFeeConfig(
   return data;
 }
 
+export interface RecentTransaction {
+  id: number;
+  amount: string;
+  currency: string;
+  status: string;
+  paid_at: string | null;
+  booking_reference: string;
+}
+
+export interface CompanyDashboardStats {
+  total_listings: number;
+  pending_approvals: number;
+  active_bookings: number;
+  recent_transactions: RecentTransaction[];
+}
+
+export async function getCompanyDashboardStats(): Promise<CompanyDashboardStats> {
+  const { data } = await api.get<CompanyDashboardStats>('/company/dashboard/');
+  return data;
+}
+
 function formToPayload(form: GuidelineFormData) {
   return {
     name: form.name,
