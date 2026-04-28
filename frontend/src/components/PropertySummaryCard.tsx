@@ -30,6 +30,12 @@ interface PropertySummaryCardProps {
     disabled?: boolean;
     color?: "primary" | "error";
   };
+  extensionButton?: {
+    label: string;
+    onClick: () => Promise<void> | void;
+    disabled?: boolean;
+    color?: "primary" | "error";
+  };
 }
 
 export default function PropertySummaryCard({
@@ -41,6 +47,7 @@ export default function PropertySummaryCard({
   statusColor = "default",
   actionButton,
   secondaryActionButton,
+  extensionButton,
 }: PropertySummaryCardProps) {
   return (
     <Card>
@@ -134,6 +141,17 @@ export default function PropertySummaryCard({
                   {secondaryActionButton.label}
                 </Button>
               )}
+              {extensionButton && (
+                <Button
+                  variant="outlined"
+                  size="small"
+                  color={extensionButton.color || "primary"}
+                  onClick={extensionButton.onClick}
+                  disabled={extensionButton.disabled}
+                >
+                  {extensionButton.label}
+                </Button>
+              )}
               <Button component={RouterLink} to={`/properties/${listing.id}`} variant="text" size="small">
                 View details
               </Button>
@@ -150,7 +168,7 @@ export default function PropertySummaryCard({
           )}
 
           {footerText && (
-            <Typography variant="body2" color="text.secondary">
+            <Typography variant="body2" color="text.secondary" sx={{ whiteSpace: "pre-line" }}>
               {footerText}
             </Typography>
           )}
