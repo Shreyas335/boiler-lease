@@ -42,6 +42,7 @@ import { getListingAmenities } from "../api/listings";
 import type { ListingAmenity } from "../api/listings";
 import type { GuidelineRecord, GuidelineFormData } from "../types/guidelines";
 import { emptyForm, recordToForm } from "../types/guidelines";
+import FeeConfigSection from '../components/FeeConfigSection';
 
 // ─── Guideline form dialog ────────────────────────────────────────────────────
 
@@ -380,6 +381,8 @@ export default function GuidelineSettingsPage() {
 
   return (
     <Container maxWidth="md" sx={{ py: 4 }}>
+      <FeeConfigSection />
+
       <Typography variant="h4" fontWeight={700} mb={1}>
         Guideline Settings
       </Typography>
