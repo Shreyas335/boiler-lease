@@ -29,6 +29,7 @@ from .models import (
     BookingGroupMembership,
     BookingExtensionRequest,
     CompanyDocument,
+    CompanyFeeConfig,
     FavoriteListing,
     Guideline,
     ListingAmenity,
@@ -49,6 +50,7 @@ from .pagination import PropertyListingPagination
 from .serializers import (
     AccountUpdateSerializer,
     ApprovalRequestCreateSerializer,
+    CompanyFeeConfigSerializer,
     ApprovalRequestDetailSerializer,
     ApprovalRequestSummarySerializer,
     BookingGroupCreateSerializer,
@@ -2572,4 +2574,22 @@ def block_user_toggle(request, user_id):
 def blocked_users_list(request):
     blocks = UserBlock.objects.filter(blocker=request.user).select_related("blocked_user")
     serializer = BlockedUserSerializer(blocks, many=True)
+    return Response(serializer.data)
+
+
+@api_view(['GET', 'PUT'])
+@permission_classes([IsAuthenticated])
+def company_fee_config(request):
+    if not _is_approved_management(request):
+        return Response(
+            {'detail': 'Approved management company required.'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+    company = request.user.management_company
+    fee_config, _ = CompanyFeeConfig.objects.get_or_create(company=company)
+    if request.method == 'GET':
+        return Response(CompanyFeeConfigSerializer(fee_config).data)
+    serializer = CompanyFeeConfigSerializer(fee_config, data=request.data, partial=True)
+    serializer.is_valid(raise_exception=True)
+    serializer.save()
     return Response(serializer.data)
