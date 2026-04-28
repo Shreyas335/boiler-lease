@@ -201,6 +201,25 @@ export async function getCompanyDashboardStats(): Promise<CompanyDashboardStats>
   return data;
 }
 
+export interface CompanyListing {
+  id: number;
+  title: string;
+  monthly_rent: string;
+  status: string;
+  approval_status: string;
+  city: string;
+  state: string;
+  street_line_1: string;
+  created_at: string;
+}
+
+export async function getCompanyListings(
+  params?: { status?: string; search?: string }
+): Promise<CompanyListing[]> {
+  const { data } = await api.get<CompanyListing[]>('/company/listings/', { params });
+  return data;
+}
+
 function formToPayload(form: GuidelineFormData) {
   return {
     name: form.name,
