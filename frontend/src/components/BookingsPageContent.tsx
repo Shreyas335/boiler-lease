@@ -5,11 +5,16 @@ import {
   Box,
   Button,
   Container,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   FormControl,
   InputLabel,
   MenuItem,
   Select,
   Stack,
+  TextField,
   Typography,
   type ChipProps,
 } from "@mui/material";
@@ -17,6 +22,7 @@ import { Link as RouterLink, useNavigate } from "react-router-dom";
 import {
   addFavorite,
   cancelBooking,
+  createBookingExtensionRequest,
   removeFavorite,
   type BookingRecord,
   type BookingSortBy,
@@ -26,6 +32,13 @@ import {
 import { createDepositCheckoutSession } from "../api/payments";
 import PropertySummaryCard from "./PropertySummaryCard";
 import { useAuth } from "../contexts/AuthContext";
+
+/** Next calendar day as `YYYY-MM-DD` (avoids DST edge cases around noon UTC). */
+function datePlusOneDay(isoDate: string): string {
+  const d = new Date(`${isoDate}T12:00:00`);
+  d.setDate(d.getDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
 
 interface BookingsPageContentProps {
   title: string;
@@ -56,6 +69,10 @@ export default function BookingsPageContent({
   const [cancelBusyId, setCancelBusyId] = useState<number | null>(null);
   const [payBusyId, setPayBusyId] = useState<number | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [extensionDialogBooking, setExtensionDialogBooking] = useState<BookingRecord | null>(null);
+  const [extensionEndDate, setExtensionEndDate] = useState("");
+  const [extensionNotes, setExtensionNotes] = useState("");
+  const [extensionSubmitBusy, setExtensionSubmitBusy] = useState(false);
 
   useEffect(() => {
     async function loadBookings() {
@@ -100,6 +117,13 @@ export default function BookingsPageContent({
 
   function buildFooterText(booking: BookingRecord) {
     return `Booked on ${new Date(booking.booked_at).toLocaleDateString()} | Stay ${booking.start_date} to ${booking.end_date} | Status ${booking.status_label}`;
+  }
+
+  function bookingFooterText(booking: BookingRecord): string {
+    const base = buildFooterText(booking);
+    const pe = booking.pending_extension_request;
+    if (!pe) return base;
+    return `${base}\nExtension request pending (requested checkout through ${pe.requested_end_date}).`;
   }
 
   function effectiveDepositAmount(booking: BookingRecord): number | null {
@@ -179,6 +203,47 @@ export default function BookingsPageContent({
       setError("Unable to cancel booking. Please try again.");
     } finally {
       setCancelBusyId(null);
+    }
+  }
+
+  function openExtensionDialog(booking: BookingRecord) {
+    setExtensionDialogBooking(booking);
+    setExtensionEndDate(booking.listing.availability_end_date);
+    setExtensionNotes("");
+  }
+
+  async function handleSubmitExtensionRequest() {
+    if (!extensionDialogBooking) return;
+    const booking = extensionDialogBooking;
+    const minEnd = datePlusOneDay(booking.end_date);
+    const maxEnd = booking.listing.availability_end_date;
+    if (extensionEndDate < minEnd || extensionEndDate > maxEnd) {
+      setError(`Checkout date must be between ${minEnd} and ${maxEnd}.`);
+      return;
+    }
+    try {
+      setExtensionSubmitBusy(true);
+      setError(null);
+      await createBookingExtensionRequest(booking.id, {
+        requested_end_date: extensionEndDate,
+        sublessee_notes: extensionNotes.trim() || undefined,
+      });
+      setExtensionDialogBooking(null);
+      setSuccessMessage("Extension request submitted.");
+      const data = await fetchBookings(sortBy, order);
+      setBookings(data);
+    } catch (e) {
+      const ax = e as AxiosError<{ detail?: string | string[] }>;
+      const d = ax.response?.data?.detail;
+      const msg =
+        typeof d === "string"
+          ? d
+          : Array.isArray(d) && typeof d[0] === "string"
+            ? d[0]
+            : "Unable to submit extension request.";
+      setError(msg);
+    } finally {
+      setExtensionSubmitBusy(false);
     }
   }
 
@@ -264,6 +329,7 @@ export default function BookingsPageContent({
                 depositEligible && booking.status === "confirmed" && !identityVerified;
               const showAwaitingApproval = depositEligible && booking.status === "pending";
               const showCancel = allowCancelBookings && booking.is_cancelable;
+              const showRequestExtension = Boolean(booking.can_request_extension);
 
               return (
                 <PropertySummaryCard
@@ -313,12 +379,72 @@ export default function BookingsPageContent({
                         }
                       : undefined
                   }
-                  footerText={buildFooterText(booking)}
+                  extensionButton={
+                    showRequestExtension
+                      ? {
+                          label: "Request extension",
+                          onClick: () => openExtensionDialog(booking),
+                          disabled: extensionSubmitBusy && extensionDialogBooking?.id === booking.id,
+                          color: "primary",
+                        }
+                      : undefined
+                  }
+                  footerText={bookingFooterText(booking)}
                 />
               );
             })}
           </Stack>
         )}
+        <Dialog
+          open={extensionDialogBooking !== null}
+          onClose={() => !extensionSubmitBusy && setExtensionDialogBooking(null)}
+          maxWidth="xs"
+          fullWidth
+        >
+          <DialogTitle>Request lease extension</DialogTitle>
+          <DialogContent>
+            {extensionDialogBooking && (
+              <Stack spacing={2} sx={{ mt: 1 }}>
+                <Typography variant="body2" color="text.secondary">
+                  Current checkout is {extensionDialogBooking.end_date}. The listing is available through{" "}
+                  {extensionDialogBooking.listing.availability_end_date}.
+                </Typography>
+                <TextField
+                  label="Requested new checkout date"
+                  type="date"
+                  value={extensionEndDate}
+                  onChange={(e) => setExtensionEndDate(e.target.value)}
+                  InputLabelProps={{ shrink: true }}
+                  inputProps={{
+                    min: datePlusOneDay(extensionDialogBooking.end_date),
+                    max: extensionDialogBooking.listing.availability_end_date,
+                  }}
+                  fullWidth
+                />
+                <TextField
+                  label="Note (optional)"
+                  multiline
+                  minRows={2}
+                  value={extensionNotes}
+                  onChange={(e) => setExtensionNotes(e.target.value)}
+                  fullWidth
+                />
+              </Stack>
+            )}
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setExtensionDialogBooking(null)} disabled={extensionSubmitBusy}>
+              Cancel
+            </Button>
+            <Button
+              variant="contained"
+              onClick={() => void handleSubmitExtensionRequest()}
+              disabled={extensionSubmitBusy}
+            >
+              {extensionSubmitBusy ? "Submitting…" : "Submit request"}
+            </Button>
+          </DialogActions>
+        </Dialog>
       </Container>
     </Box>
   );
