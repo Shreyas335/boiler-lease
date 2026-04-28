@@ -2657,3 +2657,56 @@ def company_dashboard_stats(request):
         'active_bookings': active_bookings,
         'recent_transactions': txn_data,
     })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def company_listings(request):
+    if not _is_approved_management(request):
+        return Response(
+            {'detail': 'Approved management company required.'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+    company = request.user.management_company
+
+    qs = PropertyListing.objects.filter(
+        Q(approved_by_company=company) | Q(approval_requests__management_company=company),
+        deleted_at__isnull=True
+    ).distinct()
+
+    status_filter = request.query_params.get('status')
+    if status_filter == 'active':
+        qs = qs.filter(
+            approval_status=PropertyListing.ApprovalStatus.APPROVED,
+            status=PropertyListing.ListingStatus.PUBLISHED
+        )
+    elif status_filter == 'pending':
+        qs = qs.filter(approval_status=PropertyListing.ApprovalStatus.PENDING)
+    elif status_filter == 'archived':
+        qs = qs.filter(status=PropertyListing.ListingStatus.ARCHIVED)
+
+    search = request.query_params.get('search', '').strip()
+    if search:
+        qs = qs.filter(
+            Q(title__icontains=search) |
+            Q(street_line_1__icontains=search) |
+            Q(city__icontains=search)
+        )
+
+    qs = qs.order_by('-created_at')
+
+    data = [
+        {
+            'id': listing.id,
+            'title': listing.title,
+            'monthly_rent': str(listing.monthly_rent),
+            'status': listing.status,
+            'approval_status': listing.approval_status,
+            'city': listing.city,
+            'state': listing.state,
+            'street_line_1': listing.street_line_1,
+            'created_at': listing.created_at,
+        }
+        for listing in qs
+    ]
+    return Response(data)
