@@ -1510,6 +1510,7 @@ class UserProfileUpdateSerializer(serializers.ModelSerializer):
 
 class UserRatingSerializer(serializers.Serializer):
     score = serializers.IntegerField(min_value=1, max_value=5)
+    review = serializers.CharField(required=False, allow_blank=True, default='')
 
 
 class BlockedUserSerializer(serializers.ModelSerializer):
