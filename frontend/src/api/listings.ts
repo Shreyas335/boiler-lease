@@ -74,6 +74,12 @@ export interface PropertyListingSummary {
   is_favorited: boolean;
 }
 
+export interface BookingExtensionPendingSummary {
+  id: number;
+  requested_end_date: string;
+  status: string;
+}
+
 export interface BookingRecord {
   id: number;
   listing: PropertyListingSummary;
@@ -87,6 +93,9 @@ export interface BookingRecord {
   status_label: string;
   price: string;
   is_cancelable: boolean;
+  /** True when booking is confirmed and the listing has availability after checkout with no pending extension. */
+  can_request_extension?: boolean;
+  pending_extension_request?: BookingExtensionPendingSummary | null;
 }
 
 export interface ManagedBookingRecord extends BookingRecord {
@@ -367,6 +376,14 @@ export async function updateBookingStatus(
 
 export async function cancelBooking(bookingId: number): Promise<{ detail: string }> {
   const { data } = await api.delete<{ detail: string }>(`/bookings/${bookingId}/`);
+  return data;
+}
+
+export async function createBookingExtensionRequest(
+  bookingId: number,
+  payload: { requested_end_date: string; sublessee_notes?: string },
+): Promise<{ id: number }> {
+  const { data } = await api.post<{ id: number }>(`/bookings/${bookingId}/extension-requests/`, payload);
   return data;
 }
 
