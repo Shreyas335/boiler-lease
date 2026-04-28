@@ -21,7 +21,10 @@ import BusinessRoundedIcon from "@mui/icons-material/BusinessRounded";
 import WarningAmberRoundedIcon from "@mui/icons-material/WarningAmberRounded";
 import PropertySummaryCard from "../components/PropertySummaryCard";
 import { getBookingHistory, type BookingRecord } from "../api/listings";
+import { getCompanyDashboardStats, type CompanyDashboardStats } from '../api/company';
 import { useAuth } from "../contexts/AuthContext";
+import CircularProgress from '@mui/material/CircularProgress';
+import Grid from '@mui/material/Grid';
 
 const USER_TYPE_CONFIG: Record<
   string,
@@ -56,6 +59,9 @@ export default function DashboardPage() {
   const [bookingsLoading, setBookingsLoading] = useState(false);
   const [bookingsError, setBookingsError] = useState<string | null>(null);
   const [depositNotice, setDepositNotice] = useState<"success" | "canceled" | null>(null);
+  const [dashStats, setDashStats] = useState<CompanyDashboardStats | null>(null);
+  const [statsLoading, setStatsLoading] = useState(false);
+  const [statsError, setStatsError] = useState<string | null>(null);
   const userType = user?.user_type;
 
   useEffect(() => {
@@ -152,6 +158,26 @@ export default function DashboardPage() {
       isMounted = false;
       window.clearInterval(intervalId);
     };
+  }, [userType]);
+
+  useEffect(() => {
+    if (userType !== 'management') return undefined;
+    let isMounted = true;
+    async function loadStats(showSpinner: boolean) {
+      try {
+        if (showSpinner && isMounted) setStatsLoading(true);
+        if (isMounted) setStatsError(null);
+        const data = await getCompanyDashboardStats();
+        if (isMounted) setDashStats(data);
+      } catch {
+        if (isMounted) setStatsError('Unable to load dashboard stats.');
+      } finally {
+        if (showSpinner && isMounted) setStatsLoading(false);
+      }
+    }
+    void loadStats(true);
+    const intervalId = window.setInterval(() => void loadStats(false), 30000);
+    return () => { isMounted = false; window.clearInterval(intervalId); };
   }, [userType]);
 
   useEffect(() => {
@@ -355,9 +381,55 @@ export default function DashboardPage() {
                 </Typography>
               </Box>
             </Box>
-            <Typography variant="body2" color="text.secondary">
-              More features are coming soon. You're all set up and ready to go.
-            </Typography>
+            {user.user_type === 'management' && (
+              <>
+                {statsLoading && <CircularProgress size={24} sx={{ mt: 1 }} />}
+                {statsError && <Alert severity='error' sx={{ mt: 1 }}>{statsError}</Alert>}
+                {dashStats && (
+                  <Grid container spacing={2} sx={{ mt: 1 }}>
+                    <Grid item xs={12} sm={6} md={3}>
+                      <Card variant='outlined'>
+                        <CardContent sx={{ textAlign: 'center' }}>
+                          <Typography variant='h3' color='primary'>{dashStats.total_listings}</Typography>
+                          <Typography variant='body2' color='text.secondary'>Total Listings</Typography>
+                        </CardContent>
+                      </Card>
+                    </Grid>
+                    <Grid item xs={12} sm={6} md={3}>
+                      <Card variant='outlined'>
+                        <CardContent sx={{ textAlign: 'center' }}>
+                          <Typography variant='h3' color='warning.main'>{dashStats.pending_approvals}</Typography>
+                          <Typography variant='body2' color='text.secondary'>Pending Approvals</Typography>
+                        </CardContent>
+                      </Card>
+                    </Grid>
+                    <Grid item xs={12} sm={6} md={3}>
+                      <Card variant='outlined'>
+                        <CardContent sx={{ textAlign: 'center' }}>
+                          <Typography variant='h3' color='success.main'>{dashStats.active_bookings}</Typography>
+                          <Typography variant='body2' color='text.secondary'>Active Bookings</Typography>
+                        </CardContent>
+                      </Card>
+                    </Grid>
+                    <Grid item xs={12}>
+                      <Typography variant='subtitle2' sx={{ mt: 1, mb: 1 }}>Recent Transactions</Typography>
+                      {dashStats.recent_transactions.length === 0 ? (
+                        <Alert severity='info'>No recent transactions.</Alert>
+                      ) : (
+                        <Stack spacing={1}>
+                          {dashStats.recent_transactions.map(txn => (
+                            <Box key={txn.id} sx={{ display: 'flex', justifyContent: 'space-between', p: 1, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+                              <Typography variant='body2'>${txn.amount} {txn.currency.toUpperCase()}</Typography>
+                              <Chip label={txn.status} size='small' color={txn.status === 'succeeded' ? 'success' : 'default'} />
+                            </Box>
+                          ))}
+                        </Stack>
+                      )}
+                    </Grid>
+                  </Grid>
+                )}
+              </>
+            )}
           </CardContent>
         </Card>
 
