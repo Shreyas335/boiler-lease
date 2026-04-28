@@ -2551,13 +2551,15 @@ def rate_user(request, user_id):
         rated_user = User.objects.get(pk=user_id)
     except User.DoesNotExist:
         return Response({"detail": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+    score = request.data.get("score")
+    review = request.data.get("review", "")
     serializer = UserRatingSerializer(data=request.data)
     if not serializer.is_valid():
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-    UserRating.objects.update_or_create(
+    rating, created = UserRating.objects.update_or_create(
         rater=request.user,
         rated_user=rated_user,
-        defaults={"score": serializer.validated_data["score"]},
+        defaults={"score": score, "review": review},
     )
     return Response(UserProfileSerializer(rated_user, context={"request": request}).data)
 
