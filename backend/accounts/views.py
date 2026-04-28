@@ -2602,3 +2602,58 @@ def company_fee_config(request):
     serializer.is_valid(raise_exception=True)
     serializer.save()
     return Response(serializer.data)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def company_dashboard_stats(request):
+    if not _is_approved_management(request):
+        return Response(
+            {'detail': 'Approved management company required.'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+    company = request.user.management_company
+
+    total_listings = PropertyListing.objects.filter(
+        approved_by_company=company,
+        deleted_at__isnull=True
+    ).count()
+
+    pending_approvals = ApprovalRequest.objects.filter(
+        management_company=company,
+        status=ApprovalRequest.Status.PENDING
+    ).count()
+
+    active_bookings = PropertyBooking.objects.filter(
+        listing__approved_by_company=company,
+        status=PropertyBooking.Status.CONFIRMED
+    ).count()
+
+    booking_ids = list(
+        PropertyBooking.objects.filter(
+            listing__approved_by_company=company
+        ).values_list('id', flat=True)
+    )
+    booking_refs = [str(bid) for bid in booking_ids]
+    recent_txns = TransactionRecord.objects.filter(
+        booking_reference__in=booking_refs
+    ).order_by('-created_at')[:5]
+
+    txn_data = [
+        {
+            'id': t.id,
+            'amount': str(t.amount),
+            'currency': t.currency,
+            'status': t.status,
+            'paid_at': t.paid_at,
+            'booking_reference': t.booking_reference,
+        }
+        for t in recent_txns
+    ]
+
+    return Response({
+        'total_listings': total_listings,
+        'pending_approvals': pending_approvals,
+        'active_bookings': active_bookings,
+        'recent_transactions': txn_data,
+    })
