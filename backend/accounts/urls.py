@@ -59,6 +59,7 @@ urlpatterns = [
     path("company/documents/<int:pk>/", views.company_document_delete),
     path("company/guidelines/", views.company_guidelines),
     path("company/guidelines/<int:pk>/", views.company_guideline_detail),
+    path('company/fee-config/', views.company_fee_config),
     path("companies/", views.browse_management_companies),
     path("companies/<int:pk>/", views.management_company_detail),
     path("listings/<int:listing_id>/request-approval/", views.submit_approval_request),
