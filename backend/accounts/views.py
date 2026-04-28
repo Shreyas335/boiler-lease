@@ -1489,6 +1489,15 @@ def update_booking_status(request, booking_id):
     if not serializer.is_valid():
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+    if serializer.validated_data.get("status") == PropertyBooking.Status.CONFIRMED:
+        if booking.listing.approved_by_company_id:
+            try:
+                fee_cfg = booking.listing.approved_by_company.fee_config
+                booking.platform_fee_percentage_snapshot = fee_cfg.platform_fee_percentage
+                booking.platform_fee_flat_snapshot = fee_cfg.platform_fee_flat
+            except CompanyFeeConfig.DoesNotExist:
+                pass
+
     serializer.save()
     response_serializer = ManagedPropertyBookingSerializer(booking)
     return Response(response_serializer.data, status=status.HTTP_200_OK)
