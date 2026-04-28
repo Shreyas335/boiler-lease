@@ -116,8 +116,6 @@ npm run dev
 
 ## sidecommands
 
-## sidecommands
-
 '
 docker compose up --build\
 docker compose exec backend python manage.py migrate
