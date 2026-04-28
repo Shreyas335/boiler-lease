@@ -435,6 +435,38 @@ class PropertyBooking(models.Model):
         ]
 
 
+class BookingExtensionRequest(models.Model):
+    """Sublessee asks to extend checkout; subleaser or management approves/declines (see views)."""
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        APPROVED = "approved", "Approved"
+        DECLINED = "declined", "Declined"
+
+    booking = models.ForeignKey(
+        PropertyBooking,
+        on_delete=models.CASCADE,
+        related_name="extension_requests",
+    )
+    requested_end_date = models.DateField()
+    sublessee_notes = models.TextField(blank=True, default="")
+    status = models.CharField(
+        max_length=16,
+        choices=Status.choices,
+        default=Status.PENDING,
+        db_index=True,
+    )
+    reviewer_notes = models.TextField(blank=True, default="")
+    decided_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        indexes = [
+            models.Index(fields=["booking", "status"], name="extreq_booking_status_idx"),
+        ]
+
+
 class TransactionRecord(models.Model):
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
