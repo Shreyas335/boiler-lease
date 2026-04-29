@@ -126,6 +126,7 @@ export interface BookingRecord {
 export interface ManagedBookingRecord extends BookingRecord {
   sublessee_name: string;
   sublessee_email: string;
+  sublessee_id: number;
 }
 
 export interface BookingExtensionRequestRecord {
