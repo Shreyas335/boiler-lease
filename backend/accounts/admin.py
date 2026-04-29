@@ -5,6 +5,9 @@ from django.utils import timezone
 
 from .models import (
     ApprovalRequest,
+    BookingGroup,
+    BookingGroupConfirmation,
+    BookingGroupMembership,
     CompanyDocument,
     FavoriteListing,
     FeedbackSubmission,
@@ -121,9 +124,27 @@ class ListingMediaAdmin(admin.ModelAdmin):
 
 @admin.register(PropertyBooking)
 class PropertyBookingAdmin(admin.ModelAdmin):
-    list_display = ("sublessee", "listing", "status", "start_date", "end_date", "monthly_rent_snapshot", "booked_at")
-    list_filter = ("status", "start_date", "end_date", "booked_at")
-    search_fields = ("sublessee__email", "sublessee__username", "listing__title")
+    list_display = ("sublessee", "listing", "group", "status", "start_date", "end_date", "monthly_rent_snapshot", "booked_at")
+    list_filter = ("status", "group", "start_date", "end_date", "booked_at")
+    search_fields = ("sublessee__email", "sublessee__username", "listing__title", "group__name")
+
+
+class BookingGroupMembershipInline(admin.TabularInline):
+    model = BookingGroupMembership
+    extra = 0
+
+
+@admin.register(BookingGroup)
+class BookingGroupAdmin(admin.ModelAdmin):
+    list_display = ("name", "created_by", "created_at")
+    search_fields = ("name", "created_by__email", "created_by__username")
+    inlines = [BookingGroupMembershipInline]
+
+
+@admin.register(BookingGroupConfirmation)
+class BookingGroupConfirmationAdmin(admin.ModelAdmin):
+    list_display = ("booking", "user", "confirmed_at")
+    search_fields = ("booking__listing__title", "user__email", "user__username")
 
 
 @admin.register(FavoriteListing)

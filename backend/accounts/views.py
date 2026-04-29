@@ -2,6 +2,7 @@ import random
 import secrets
 import hashlib
 import uuid
+from decimal import Decimal, ROUND_HALF_UP
 from datetime import timedelta
 import stripe
 from django.contrib.auth import login, logout
@@ -13,7 +14,7 @@ from django.http import HttpResponseRedirect
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt, ensure_csrf_cookie
-from django.db.models import Q, Prefetch
+from django.db.models import Q, Prefetch, Count
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -23,6 +24,9 @@ from .email_verification import send_2fa_code_email, send_password_reset_email, 
 
 from .models import (
     ApprovalRequest,
+    BookingGroup,
+    BookingGroupConfirmation,
+    BookingGroupMembership,
     CompanyDocument,
     FavoriteListing,
     Guideline,
@@ -46,6 +50,9 @@ from .serializers import (
     ApprovalRequestCreateSerializer,
     ApprovalRequestDetailSerializer,
     ApprovalRequestSummarySerializer,
+    BookingGroupCreateSerializer,
+    BookingGroupInviteSerializer,
+    BookingGroupSerializer,
     CompanyDocumentSerializer,
     CompanyDocumentUploadSerializer,
     FavoriteListingSerializer,
@@ -180,6 +187,124 @@ def _can_user_update_booking_status(request, booking):
         except ManagementCompany.DoesNotExist:
             return False
     return request.user.user_type == User.UserType.SUBLEASER and listing.owner_id == request.user.pk
+
+
+def _is_confirmed_group_member(user, group_id):
+    return BookingGroupMembership.objects.filter(
+        group_id=group_id,
+        user=user,
+        status=BookingGroupMembership.Status.CONFIRMED,
+    ).exists()
+
+
+def _group_member_count(group_id):
+    return BookingGroupMembership.objects.filter(
+        group_id=group_id,
+        status=BookingGroupMembership.Status.CONFIRMED,
+    ).count()
+
+
+def _group_share_amount(booking):
+    dep = booking.security_deposit_snapshot or booking.listing.security_deposit
+    if dep is None or dep <= 0:
+        return None
+    member_count = _group_member_count(booking.group_id) if booking.group_id else 1
+    member_count = max(member_count, 1)
+    return (Decimal(dep) / Decimal(member_count)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def _send_group_invitation_email(group, invitee, inviter):
+    try:
+        send_mail(
+            subject=f"You were invited to join {group.name}",
+            message=(
+                f"Hi {invitee.first_name or invitee.username},\n\n"
+                f"{inviter.get_full_name().strip() or inviter.username} invited you to join "
+                f"the Boiler Lease group '{group.name}'.\n\n"
+                f"Open your groups page to accept the invitation:\n"
+                f"{settings.FRONTEND_URL}/groups\n\n"
+                f"The Boiler Lease Team"
+            ),
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[invitee.email],
+            fail_silently=True,
+        )
+    except Exception:
+        pass
+
+
+def _send_group_payment_reminders(booking):
+    if not booking.group_id:
+        return 0
+    paid_user_ids = set(
+        TransactionRecord.objects.filter(
+            booking_reference=str(booking.id),
+            status=TransactionRecord.Status.SUCCEEDED,
+        ).values_list("user_id", flat=True)
+    )
+    outstanding = BookingGroupMembership.objects.filter(
+        group=booking.group,
+        status=BookingGroupMembership.Status.CONFIRMED,
+    ).exclude(user_id__in=paid_user_ids).select_related("user")
+    sent = 0
+    for membership in outstanding:
+        try:
+            send_mail(
+                subject=f"Payment reminder for {booking.listing.title}",
+                message=(
+                    f"Hi {membership.user.first_name or membership.user.username},\n\n"
+                    f"Your group booking for '{booking.listing.title}' is waiting on your share of "
+                    f"the security deposit.\n\n"
+                    f"Open your groups page to pay:\n{settings.FRONTEND_URL}/groups\n\n"
+                    f"The Boiler Lease Team"
+                ),
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[membership.user.email],
+                fail_silently=True,
+            )
+            sent += 1
+        except Exception:
+            pass
+    return sent
+
+
+def _update_group_booking_payment_status(booking):
+    if not booking.group_id:
+        return
+    member_ids = set(
+        BookingGroupMembership.objects.filter(
+            group=booking.group,
+            status=BookingGroupMembership.Status.CONFIRMED,
+        ).values_list("user_id", flat=True)
+    )
+    paid_user_ids = set(
+        TransactionRecord.objects.filter(
+            booking_reference=str(booking.id),
+            status=TransactionRecord.Status.SUCCEEDED,
+            user_id__in=member_ids,
+        ).values_list("user_id", flat=True)
+    )
+    if member_ids and member_ids.issubset(paid_user_ids):
+        booking.status = PropertyBooking.Status.FULLY_PAID
+        booking.deposit_paid_at = booking.deposit_paid_at or timezone.now()
+        booking.save(update_fields=["status", "deposit_paid_at"])
+        try:
+            send_mail(
+                subject=f"Group booking fully paid: {booking.listing.title}",
+                message=(
+                    f"The group booking for '{booking.listing.title}' is now fully paid.\n\n"
+                    f"Booking dates: {booking.start_date} to {booking.end_date}"
+                ),
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[booking.listing.owner.email],
+                fail_silently=True,
+            )
+        except Exception:
+            pass
+    elif paid_user_ids and booking.status == PropertyBooking.Status.CONFIRMED:
+        booking.status = PropertyBooking.Status.PARTIALLY_PAID
+        booking.save(update_fields=["status"])
+        _send_group_payment_reminders(booking)
 
 
 def _get_blocked_user_ids(user):
@@ -964,16 +1089,23 @@ def my_current_bookings(request):
     today = timezone.localdate()
     bookings = (
         PropertyBooking.objects.filter(
-            sublessee=request.user,
+            Q(sublessee=request.user)
+            | Q(
+                group__memberships__user=request.user,
+                group__memberships__status=BookingGroupMembership.Status.CONFIRMED,
+            ),
             end_date__gte=today,
             status__in=[
                 PropertyBooking.Status.PENDING,
                 PropertyBooking.Status.CONFIRMED,
+                PropertyBooking.Status.PARTIALLY_PAID,
+                PropertyBooking.Status.FULLY_PAID,
             ],
             listing__deleted_at__isnull=True,
         )
         .select_related("listing")
         .prefetch_related("listing__media")
+        .distinct()
     )
     sort_by = request.query_params.get("sort_by", "date_booked")
     order = request.query_params.get("order", "desc")
@@ -1001,11 +1133,16 @@ def my_booking_history(request):
 
     bookings = (
         PropertyBooking.objects.filter(
-            sublessee=request.user,
+            Q(sublessee=request.user)
+            | Q(
+                group__memberships__user=request.user,
+                group__memberships__status=BookingGroupMembership.Status.CONFIRMED,
+            ),
             listing__deleted_at__isnull=True,
         )
         .select_related("listing")
         .prefetch_related("listing__media")
+        .distinct()
     )
     sort_by = request.query_params.get("sort_by", "date_booked")
     order = request.query_params.get("order", "desc")
@@ -1051,6 +1188,143 @@ def create_booking(request):
         context={"user": request.user},
     )
     return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+
+
+@api_view(["GET", "POST"])
+@permission_classes([IsAuthenticated])
+def booking_groups(request):
+    if not _is_sublessee(request):
+        return Response({"detail": "Only sublessees can use booking groups."}, status=status.HTTP_403_FORBIDDEN)
+
+    if request.method == "GET":
+        groups = (
+            BookingGroup.objects.filter(memberships__user=request.user)
+            .prefetch_related("memberships__user")
+            .annotate(booking_count=Count("bookings", distinct=True))
+            .order_by("-created_at")
+            .distinct()
+        )
+        return Response(BookingGroupSerializer(groups, many=True).data)
+
+    serializer = BookingGroupCreateSerializer(data=request.data, context={"request": request})
+    serializer.is_valid(raise_exception=True)
+    group = BookingGroup.objects.create(name=serializer.validated_data["name"], created_by=request.user)
+    BookingGroupMembership.objects.create(
+        group=group,
+        user=request.user,
+        invited_by=request.user,
+        status=BookingGroupMembership.Status.CONFIRMED,
+        confirmed_at=timezone.now(),
+    )
+    for invitee in serializer.context.get("invitee_users", []):
+        if invitee.id == request.user.id:
+            continue
+        membership, created = BookingGroupMembership.objects.get_or_create(
+            group=group,
+            user=invitee,
+            defaults={"invited_by": request.user, "status": BookingGroupMembership.Status.INVITED},
+        )
+        if created:
+            _send_group_invitation_email(group, invitee, request.user)
+    group = BookingGroup.objects.prefetch_related("memberships__user").get(pk=group.pk)
+    return Response(BookingGroupSerializer(group).data, status=status.HTTP_201_CREATED)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def booking_group_detail(request, group_id):
+    group = (
+        BookingGroup.objects.filter(pk=group_id, memberships__user=request.user)
+        .prefetch_related("memberships__user", "bookings__listing")
+        .first()
+    )
+    if not group:
+        return Response({"detail": "Group not found."}, status=status.HTTP_404_NOT_FOUND)
+    data = BookingGroupSerializer(group).data
+    data["bookings"] = PropertyBookingSerializer(
+        group.bookings.all().order_by("-booked_at"),
+        many=True,
+        context={"user": request.user},
+    ).data
+    return Response(data)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def invite_booking_group_members(request, group_id):
+    group = BookingGroup.objects.filter(pk=group_id, memberships__user=request.user).first()
+    if not group or not _is_confirmed_group_member(request.user, group_id):
+        return Response({"detail": "Group not found."}, status=status.HTTP_404_NOT_FOUND)
+    serializer = BookingGroupInviteSerializer(data=request.data, context={"request": request})
+    serializer.is_valid(raise_exception=True)
+    for invitee in serializer.context.get("invitee_users", []):
+        if invitee.id == request.user.id:
+            continue
+        membership, created = BookingGroupMembership.objects.get_or_create(
+            group=group,
+            user=invitee,
+            defaults={"invited_by": request.user, "status": BookingGroupMembership.Status.INVITED},
+        )
+        if created:
+            _send_group_invitation_email(group, invitee, request.user)
+    group = BookingGroup.objects.prefetch_related("memberships__user").get(pk=group.pk)
+    return Response(BookingGroupSerializer(group).data)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def accept_booking_group_invitation(request, membership_id):
+    membership = BookingGroupMembership.objects.filter(pk=membership_id, user=request.user).select_related("group").first()
+    if not membership:
+        return Response({"detail": "Invitation not found."}, status=status.HTTP_404_NOT_FOUND)
+    if membership.status != BookingGroupMembership.Status.CONFIRMED:
+        membership.status = BookingGroupMembership.Status.CONFIRMED
+        membership.confirmed_at = timezone.now()
+        membership.save(update_fields=["status", "confirmed_at"])
+    group = BookingGroup.objects.prefetch_related("memberships__user").get(pk=membership.group_id)
+    return Response(BookingGroupSerializer(group).data)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def create_group_booking(request, group_id):
+    if not _is_sublessee(request):
+        return Response({"detail": "Only sublessees can create group bookings."}, status=status.HTTP_403_FORBIDDEN)
+    if _user_must_verify_identity(request.user):
+        return _identity_verification_required_response()
+    if not _is_confirmed_group_member(request.user, group_id):
+        return Response({"detail": "Group not found."}, status=status.HTTP_404_NOT_FOUND)
+    serializer = PropertyBookingCreateSerializer(data=request.data, context={"request": request})
+    serializer.is_valid(raise_exception=True)
+    listing = serializer.validated_data["listing"]
+    if listing.owner_id in _get_blocked_user_ids(request.user):
+        return Response({"detail": "Cannot book this listing."}, status=status.HTTP_403_FORBIDDEN)
+    booking = serializer.save()
+    booking.group_id = group_id
+    booking.save(update_fields=["group"])
+    BookingGroupConfirmation.objects.get_or_create(booking=booking, user=request.user)
+    response_serializer = PropertyBookingSerializer(booking, context={"user": request.user})
+    return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def confirm_group_booking(request, booking_id):
+    booking = PropertyBooking.objects.filter(pk=booking_id, group__isnull=False).select_related("group").first()
+    if not booking or not _is_confirmed_group_member(request.user, booking.group_id):
+        return Response({"detail": "Booking not found."}, status=status.HTTP_404_NOT_FOUND)
+    BookingGroupConfirmation.objects.get_or_create(booking=booking, user=request.user)
+    return Response(PropertyBookingSerializer(booking, context={"user": request.user}).data)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def send_group_booking_reminders(request, booking_id):
+    booking = PropertyBooking.objects.filter(pk=booking_id, group__isnull=False).select_related("group", "listing").first()
+    if not booking or not _is_confirmed_group_member(request.user, booking.group_id):
+        return Response({"detail": "Booking not found."}, status=status.HTTP_404_NOT_FOUND)
+    sent = _send_group_payment_reminders(booking)
+    return Response({"detail": f"Reminder sent to {sent} outstanding member(s)."})
 
 
 @api_view(["DELETE"])
@@ -1169,11 +1443,16 @@ def my_past_bookings(request):
     today = timezone.localdate()
     bookings = (
         PropertyBooking.objects.filter(
-            sublessee=request.user,
+            Q(sublessee=request.user)
+            | Q(
+                group__memberships__user=request.user,
+                group__memberships__status=BookingGroupMembership.Status.CONFIRMED,
+            ),
             listing__deleted_at__isnull=True,
         )
         .select_related("listing")
         .prefetch_related("listing__media")
+        .distinct()
     )
     bookings = bookings.filter(
         Q(end_date__lt=today)
@@ -1383,6 +1662,7 @@ def create_deposit_checkout_session(request):
 
     stripe.api_key = settings.STRIPE_SECRET_KEY
 
+    booking = None
     booking_ref = ""
     amount_cents = 5000
     raw_bid = request.data.get("booking_id")
@@ -1392,8 +1672,15 @@ def create_deposit_checkout_session(request):
         except (TypeError, ValueError):
             return Response({"detail": "Invalid booking_id."}, status=status.HTTP_400_BAD_REQUEST)
         booking = (
-            PropertyBooking.objects.filter(pk=bid, sublessee=request.user)
-            .select_related("listing")
+            PropertyBooking.objects.filter(pk=bid)
+            .filter(
+                Q(sublessee=request.user)
+                | Q(
+                    group__memberships__user=request.user,
+                    group__memberships__status=BookingGroupMembership.Status.CONFIRMED,
+                )
+            )
+            .select_related("listing", "group")
             .first()
         )
         if not booking:
@@ -1406,12 +1693,24 @@ def create_deposit_checkout_session(request):
                 {"detail": "Cannot pay a deposit for this booking."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        if booking.deposit_paid_at is not None:
+        if not booking.group_id and booking.deposit_paid_at is not None:
             return Response(
                 {"detail": "Security deposit for this booking has already been paid."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        if booking.status != PropertyBooking.Status.CONFIRMED:
+        if booking.group_id and TransactionRecord.objects.filter(
+            booking_reference=str(booking.id),
+            user=request.user,
+            status=TransactionRecord.Status.SUCCEEDED,
+        ).exists():
+            return Response(
+                {"detail": "Your share for this booking has already been paid."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if booking.status not in (
+            PropertyBooking.Status.CONFIRMED,
+            PropertyBooking.Status.PARTIALLY_PAID,
+        ):
             return Response(
                 {
                     "detail": "You can pay the security deposit only after your booking has been approved.",
@@ -1419,7 +1718,7 @@ def create_deposit_checkout_session(request):
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        dep = booking.security_deposit_snapshot or booking.listing.security_deposit
+        dep = _group_share_amount(booking) if booking.group_id else (booking.security_deposit_snapshot or booking.listing.security_deposit)
         if dep is None or dep <= 0:
             return Response(
                 {"detail": "No security deposit amount for this booking."},
@@ -1442,6 +1741,8 @@ def create_deposit_checkout_session(request):
     }
     if booking_ref:
         session_metadata["booking_id"] = booking_ref
+        if booking and booking.group_id:
+            session_metadata["group_id"] = str(booking.group_id)
 
     session = stripe.checkout.Session.create(
         mode="payment",
@@ -1504,12 +1805,16 @@ def stripe_webhook(request):
                 except ValueError:
                     bid = None
                 if bid is not None:
-                    PropertyBooking.objects.filter(
-                        pk=bid,
-                        sublessee_id=txn.user_id,
-                        deposit_paid_at__isnull=True,
-                        status=PropertyBooking.Status.CONFIRMED,
-                    ).update(deposit_paid_at=timezone.now())
+                    booking = PropertyBooking.objects.filter(pk=bid).select_related("group", "listing").first()
+                    if booking and booking.group_id:
+                        _update_group_booking_payment_status(booking)
+                    else:
+                        PropertyBooking.objects.filter(
+                            pk=bid,
+                            sublessee_id=txn.user_id,
+                            deposit_paid_at__isnull=True,
+                            status=PropertyBooking.Status.CONFIRMED,
+                        ).update(deposit_paid_at=timezone.now())
 
     elif event_type == "checkout.session.expired":
         session_id = obj.id
