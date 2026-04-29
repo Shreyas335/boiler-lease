@@ -86,6 +86,12 @@ export default function BookingsPageContent({
     if (status === "confirmed") {
       return { label: "Confirmed", color: "success" };
     }
+    if (status === "partially_paid") {
+      return { label: "Partially Paid", color: "warning" };
+    }
+    if (status === "fully_paid") {
+      return { label: "Fully Paid", color: "success" };
+    }
     if (status === "declined") {
       return { label: "Declined", color: "warning" };
     }
@@ -99,7 +105,8 @@ export default function BookingsPageContent({
   }
 
   function buildFooterText(booking: BookingRecord) {
-    return `Booked on ${new Date(booking.booked_at).toLocaleDateString()} | Stay ${booking.start_date} to ${booking.end_date} | Status ${booking.status_label}`;
+    const groupText = booking.group_name ? ` | Group ${booking.group_name}` : "";
+    return `Booked on ${new Date(booking.booked_at).toLocaleDateString()} | Stay ${booking.start_date} to ${booking.end_date} | Status ${booking.status_label}${groupText}`;
   }
 
   function effectiveDepositAmount(booking: BookingRecord): number | null {
@@ -113,6 +120,7 @@ export default function BookingsPageContent({
   /** Listing has a deposit and booking isn’t closed — deposit may still require approval. */
   function depositActionEligible(booking: BookingRecord): boolean {
     if (booking.deposit_paid_at) return false;
+    if (booking.group_id && booking.group_paid_user_ids.includes(user?.id ?? -1)) return false;
     if (booking.status === "declined" || booking.status === "cancelled") return false;
     return effectiveDepositAmount(booking) != null;
   }
@@ -120,7 +128,7 @@ export default function BookingsPageContent({
   function canPaySecurityDeposit(booking: BookingRecord): boolean {
     return (
       depositActionEligible(booking) &&
-      booking.status === "confirmed" &&
+      (booking.status === "confirmed" || booking.status === "partially_paid") &&
       identityVerified
     );
   }
@@ -261,7 +269,7 @@ export default function BookingsPageContent({
               const depositEligible = depositActionEligible(booking);
               const showPayDeposit = canPaySecurityDeposit(booking);
               const showPayBlockedIdentity =
-                depositEligible && booking.status === "confirmed" && !identityVerified;
+                depositEligible && (booking.status === "confirmed" || booking.status === "partially_paid") && !identityVerified;
               const showAwaitingApproval = depositEligible && booking.status === "pending";
               const showCancel = allowCancelBookings && booking.is_cancelable;
 
