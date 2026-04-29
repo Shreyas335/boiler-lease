@@ -40,6 +40,12 @@ function datePlusOneDay(isoDate: string): string {
   return d.toISOString().slice(0, 10);
 }
 
+function formatMoney(value: string): string {
+  const amount = Number(value);
+  if (Number.isNaN(amount)) return value;
+  return `$${amount.toFixed(2)}`;
+}
+
 interface BookingsPageContentProps {
   title: string;
   subtitle: string;
@@ -128,7 +134,7 @@ export default function BookingsPageContent({
     const latest = booking.latest_extension_request;
     if (!latest) return base;
     if (latest.status === "approved") {
-      return `${base}\nExtension approved through ${latest.requested_end_date}.`;
+      return `${base}\nExtension approved through ${latest.requested_end_date}. Additional amount due: ${formatMoney(latest.additional_amount_due)}.`;
     }
     if (latest.status === "declined") {
       const reason = latest.reviewer_notes?.trim();
