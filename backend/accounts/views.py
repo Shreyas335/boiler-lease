@@ -3,7 +3,6 @@ import secrets
 import hashlib
 import uuid
 from decimal import Decimal, ROUND_HALF_UP
-from decimal import Decimal, ROUND_HALF_UP
 from datetime import timedelta
 import stripe
 from django.contrib.auth import login, logout
