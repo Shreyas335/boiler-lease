@@ -36,6 +36,7 @@ import CompanyBookingRequestsPage from "./pages/CompanyBookingRequestsPage";
 import ProfilePage from "./pages/ProfilePage";
 import EditProfilePage from "./pages/EditProfilePage";
 import PrivacySettingsPage from "./pages/PrivacySettingsPage";
+import CompanyListingsPage from './pages/CompanyListingsPage';
 
 function App() {
   return (
@@ -222,6 +223,7 @@ function App() {
                   </ProtectedRoute>
                 }
               />
+              <Route path="/company/listings" element={<ProtectedRoute><CompanyListingsPage /></ProtectedRoute>} />
               <Route
                 path="/profile/edit"
                 element={
