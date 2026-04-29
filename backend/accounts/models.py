@@ -64,46 +64,6 @@ class ManagementCompany(models.Model):
 
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="management_company")
     company_name = models.CharField(max_length=200)
-    guidelines = models.JSONField(default=list, blank=True)
-    status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
-    rejection_reason = models.TextField(blank=True)
-    reviewed_at = models.DateTimeField(null=True, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        verbose_name_plural = "Management companies"
-
-    def __str__(self):
-        return f"{self.company_name} ({self.get_status_display()})"
-
-
-class CompanyDocument(models.Model):
-
-    class DocumentType(models.TextChoices):
-        BUSINESS_LICENSE = "business_license", "Business License"
-        PROOF_OF_OWNERSHIP = "proof_of_ownership", "Proof of Ownership"
-        OTHER = "other", "Other"
-
-    company = models.ForeignKey(ManagementCompany, on_delete=models.CASCADE, related_name="documents")
-    file = models.FileField(upload_to="company_docs/")
-    document_type = models.CharField(max_length=24, choices=DocumentType.choices, default=DocumentType.OTHER)
-    original_filename = models.CharField(max_length=255, blank=True)
-    uploaded_at = models.DateTimeField(auto_now_add=True)
-
-    def __str__(self):
-        return f"{self.original_filename} ({self.get_document_type_display()})"
-
-
-class ManagementCompany(models.Model):
-
-    class Status(models.TextChoices):
-        PENDING = "pending", "Pending Review"
-        APPROVED = "approved", "Approved"
-        REJECTED = "rejected", "Rejected"
-
-    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="management_company")
-    company_name = models.CharField(max_length=200)
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
     rejection_reason = models.TextField(blank=True)
     reviewed_at = models.DateTimeField(null=True, blank=True)
@@ -695,6 +655,35 @@ class ConversationDeletion(models.Model):
         ]
 
 
+class PriceOffer(models.Model):
+    class Status(models.TextChoices):
+        PENDING  = "pending",  "Pending"
+        ACCEPTED = "accepted", "Accepted"
+        DECLINED = "declined", "Declined"
+
+    conversation  = models.ForeignKey(
+        "Conversation", on_delete=models.CASCADE, related_name="offers"
+    )
+    listing       = models.ForeignKey(
+        PropertyListing, on_delete=models.CASCADE, related_name="offers"
+    )
+    sublessee     = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="sent_offers"
+    )
+    offered_price = models.DecimalField(max_digits=10, decimal_places=2)
+    note          = models.TextField(blank=True)
+    status        = models.CharField(
+        max_length=16, choices=Status.choices, default=Status.PENDING, db_index=True
+    )
+    created_at    = models.DateTimeField(auto_now_add=True)
+    responded_at  = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["listing", "sublessee", "status"], name="offer_listing_sublessee_idx"),
+        ]
+
+
 class Message(models.Model):
     """A single message within a conversation."""
 
@@ -705,6 +694,13 @@ class Message(models.Model):
         User, on_delete=models.CASCADE, related_name="sent_messages"
     )
     content = models.TextField()
+    offer = models.OneToOneField(
+        PriceOffer,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="message",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     is_read = models.BooleanField(default=False)
 
@@ -717,25 +713,3 @@ class Message(models.Model):
         ]
 
 
-class UserBlock(models.Model):
-    """Records that blocker has blocked blocked_user, preventing messaging between them."""
-
-    blocker = models.ForeignKey(
-        User, on_delete=models.CASCADE, related_name="blocks_initiated"
-    )
-    blocked = models.ForeignKey(
-        User, on_delete=models.CASCADE, related_name="blocks_received"
-    )
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        db_table = "messaging_user_block"
-        constraints = [
-            models.UniqueConstraint(
-                fields=["blocker", "blocked"],
-                name="userblock_unique",
-            )
-        ]
-        indexes = [
-            models.Index(fields=["blocker", "blocked"], name="block_lookup_idx"),
-        ]
