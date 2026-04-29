@@ -5,7 +5,7 @@ import VerifiedIcon from "@mui/icons-material/Verified";
 import PersonIcon from "@mui/icons-material/Person";
 import FavoriteBorderRoundedIcon from "@mui/icons-material/FavoriteBorderRounded";
 import FavoriteRoundedIcon from "@mui/icons-material/FavoriteRounded";
-import { Link as RouterLink, useNavigate, useParams } from "react-router-dom";
+import { Link as RouterLink, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { addFavorite, createBooking, getPropertyListingDetail, removeFavorite, type PropertyListing } from "../api/listings";
 import { createGroupBooking, getBookingGroups, type BookingGroup } from "../api/groups";
 import { useAuth } from "../contexts/AuthContext";
@@ -24,6 +24,8 @@ export default function PropertyDetailPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
+  const [searchParams] = useSearchParams();
+  const offerId = searchParams.get("offer_id") ? Number(searchParams.get("offer_id")) : undefined;
   const [listing, setListing] = useState<PropertyListing | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -125,6 +127,7 @@ export default function PropertyDetailPage() {
         listing: listing.id,
         start_date: bookingDates.start_date,
         end_date: bookingDates.end_date,
+        ...(offerId ? { offer_id: offerId } : {}),
       };
       const booking = selectedGroupId !== SOLO_BOOKING_VALUE
         ? await createGroupBooking(Number(selectedGroupId), payload)
@@ -322,6 +325,11 @@ export default function PropertyDetailPage() {
                       </Typography>
                     </Box>
 
+                    {offerId && (
+                      <Alert severity="success" icon={false}>
+                        Your offer was accepted — booking will use your negotiated price.
+                      </Alert>
+                    )}
                     {bookingMessage && <Alert severity={bookingMessage.type}>{bookingMessage.text}</Alert>}
 
                     {bookingIdentityBlocked && (
