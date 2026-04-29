@@ -38,6 +38,7 @@ export interface Message {
   sender_id: number;
   sender_username: string;
   content: string;
+  offer: import("./offers").PriceOffer | null;
   created_at: string;
   is_read: boolean;
 }
