@@ -20,13 +20,13 @@ from .models import (
     ListingMedia,
     Message,
     ManagementCompany,
+    PriceOffer,
     PropertyBooking,
     PropertyListing,
     TransactionRecord,
     User,
     UserBlock,
     UserRating,
-    UserBlock,
 )
 
 
@@ -685,9 +685,11 @@ class PropertyBookingStatusUpdateSerializer(serializers.ModelSerializer):
 
 
 class PropertyBookingCreateSerializer(serializers.ModelSerializer):
+    offer_id = serializers.IntegerField(required=False, allow_null=True, write_only=True)
+
     class Meta:
         model = PropertyBooking
-        fields = ("id", "listing", "start_date", "end_date")
+        fields = ("id", "listing", "start_date", "end_date", "offer_id")
         read_only_fields = ("id",)
 
     def validate(self, attrs):
@@ -741,12 +743,23 @@ class PropertyBookingCreateSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         listing = validated_data["listing"]
+        offer_id = validated_data.pop("offer_id", None)
+        monthly_rent = listing.monthly_rent
+        if offer_id:
+            offer = PriceOffer.objects.filter(
+                pk=offer_id,
+                listing=listing,
+                sublessee=self.context["request"].user,
+                status=PriceOffer.Status.ACCEPTED,
+            ).first()
+            if offer:
+                monthly_rent = offer.offered_price
         return PropertyBooking.objects.create(
             sublessee=self.context["request"].user,
             listing=listing,
             start_date=validated_data["start_date"],
             end_date=validated_data["end_date"],
-            monthly_rent_snapshot=listing.monthly_rent,
+            monthly_rent_snapshot=monthly_rent,
             security_deposit_snapshot=listing.security_deposit,
             status=PropertyBooking.Status.PENDING,
         )
@@ -1356,14 +1369,40 @@ class ConversationParticipantSerializer(serializers.ModelSerializer):
         return obj.get_full_name() or obj.username
 
 
+class PriceOfferSerializer(serializers.ModelSerializer):
+    listing_id = serializers.IntegerField(source="listing.id", read_only=True)
+    listing_title = serializers.CharField(source="listing.title", read_only=True)
+    sublessee_id = serializers.IntegerField(source="sublessee.id", read_only=True)
+    sublessee_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = PriceOffer
+        fields = (
+            "id",
+            "listing_id",
+            "listing_title",
+            "sublessee_id",
+            "sublessee_name",
+            "offered_price",
+            "note",
+            "status",
+            "created_at",
+            "responded_at",
+        )
+
+    def get_sublessee_name(self, obj):
+        return obj.sublessee.get_full_name() or obj.sublessee.username
+
+
 class MessageSerializer(serializers.ModelSerializer):
     sender_id = serializers.IntegerField(source="sender.id", read_only=True)
     sender_username = serializers.CharField(source="sender.username", read_only=True)
+    offer = PriceOfferSerializer(read_only=True)
 
     class Meta:
         model = Message
-        fields = ("id", "conversation", "sender_id", "sender_username", "content", "created_at", "is_read")
-        read_only_fields = ("id", "conversation", "sender_id", "sender_username", "created_at", "is_read")
+        fields = ("id", "conversation", "sender_id", "sender_username", "content", "offer", "created_at", "is_read")
+        read_only_fields = ("id", "conversation", "sender_id", "sender_username", "offer", "created_at", "is_read")
 
 
 class ConversationSerializer(serializers.ModelSerializer):
@@ -1443,7 +1482,7 @@ class SendMessageSerializer(serializers.Serializer):
 
 
 class UserBlockSerializer(serializers.ModelSerializer):
-    blocked_user = ConversationParticipantSerializer(source="blocked", read_only=True)
+    blocked_user = ConversationParticipantSerializer(source="blocked_user", read_only=True)
 
     class Meta:
         model = UserBlock

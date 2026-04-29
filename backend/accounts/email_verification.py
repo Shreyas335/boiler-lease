@@ -74,6 +74,66 @@ def send_password_reset_email(user, raw_token):
     )
 
 
+def send_offer_received_email(subleaser, offer):
+    """Notify subleaser they received a new price offer."""
+    offers_url = f"{settings.FRONTEND_URL}/offers"
+    sublessee_display = offer.sublessee.get_full_name() or offer.sublessee.username
+    subject = f"New price offer on {offer.listing.title} — Boiler Lease"
+    message = (
+        f"Hi {subleaser.get_full_name() or subleaser.username},\n\n"
+        f"{sublessee_display} has offered ${offer.offered_price}/mo for your listing "
+        f"\"{offer.listing.title}\".\n\n"
+        + (f"Their note: \"{offer.note}\"\n\n" if offer.note else "")
+        + f"Review the offer here: {offers_url}\n\n"
+        "— Boiler Lease"
+    )
+    send_mail(
+        subject=subject,
+        message=message,
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        recipient_list=[subleaser.email],
+        fail_silently=True,
+    )
+
+
+def send_offer_accepted_email(sublessee, offer):
+    """Notify sublessee their offer was accepted."""
+    listing_url = f"{settings.FRONTEND_URL}/properties/{offer.listing_id}?offer_id={offer.id}"
+    subject = f"Your offer was accepted — Boiler Lease"
+    message = (
+        f"Hi {sublessee.get_full_name() or sublessee.username},\n\n"
+        f"Your offer of ${offer.offered_price}/mo for \"{offer.listing.title}\" was accepted!\n\n"
+        f"Book now at the negotiated price: {listing_url}\n\n"
+        "— Boiler Lease"
+    )
+    send_mail(
+        subject=subject,
+        message=message,
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        recipient_list=[sublessee.email],
+        fail_silently=True,
+    )
+
+
+def send_offer_declined_email(sublessee, offer):
+    """Notify sublessee their offer was declined."""
+    listing_url = f"{settings.FRONTEND_URL}/properties/{offer.listing_id}"
+    subject = f"Your offer was declined — Boiler Lease"
+    message = (
+        f"Hi {sublessee.get_full_name() or sublessee.username},\n\n"
+        f"Your offer of ${offer.offered_price}/mo for \"{offer.listing.title}\" was declined.\n\n"
+        f"You may submit a revised offer here: {listing_url}\n\n"
+        "— Boiler Lease"
+    )
+    send_mail(
+        subject=subject,
+        message=message,
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        recipient_list=[sublessee.email],
+        fail_silently=True,
+    )
+
+
 def send_new_message_notification(recipient, sender, conversation, message_content_preview):
     """Send email notification to recipient when they receive a new message."""
     inbox_url = f"{settings.FRONTEND_URL}/messages/{conversation.pk}"
