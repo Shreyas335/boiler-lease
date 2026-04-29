@@ -556,6 +556,44 @@ class PropertyBookingSerializer(serializers.ModelSerializer):
             .distinct()
         )
 
+    def _has_pending_extension(self, obj):
+        for er in obj.extension_requests.all():
+            if er.status == BookingExtensionRequest.Status.PENDING:
+                return er
+        return None
+
+    def get_can_request_extension(self, obj):
+        if obj.status != PropertyBooking.Status.CONFIRMED:
+            return False
+        if obj.listing.availability_end_date <= obj.end_date:
+            return False
+        return self._has_pending_extension(obj) is None
+
+    def get_pending_extension_request(self, obj):
+        er = self._has_pending_extension(obj)
+        if er is None:
+            return None
+        return {
+            "id": er.id,
+            "requested_end_date": er.requested_end_date.isoformat(),
+            "status": er.status,
+            "additional_amount_due": str(er.additional_amount_due or "0.00"),
+        }
+
+    def get_latest_extension_request(self, obj):
+        ers = obj.extension_requests.all()
+        er = ers[0] if ers else None
+        if er is None:
+            return None
+        return {
+            "id": er.id,
+            "requested_end_date": er.requested_end_date.isoformat(),
+            "status": er.status,
+            "additional_amount_due": str(er.additional_amount_due or "0.00"),
+            "reviewer_notes": er.reviewer_notes,
+            "decided_at": er.decided_at.isoformat() if er.decided_at else None,
+        }
+
 
 class BookingGroupMembershipSerializer(serializers.ModelSerializer):
     user_id = serializers.IntegerField(source="user.id", read_only=True)
@@ -641,44 +679,6 @@ class BookingGroupInviteSerializer(serializers.Serializer):
             raise serializers.ValidationError(f"Could not find sublessee(s): {', '.join(missing)}")
         self.context["invitee_users"] = users
         return value
-
-    def _has_pending_extension(self, obj):
-        for er in obj.extension_requests.all():
-            if er.status == BookingExtensionRequest.Status.PENDING:
-                return er
-        return None
-
-    def get_can_request_extension(self, obj):
-        if obj.status != PropertyBooking.Status.CONFIRMED:
-            return False
-        if obj.listing.availability_end_date <= obj.end_date:
-            return False
-        return self._has_pending_extension(obj) is None
-
-    def get_pending_extension_request(self, obj):
-        er = self._has_pending_extension(obj)
-        if er is None:
-            return None
-        return {
-            "id": er.id,
-            "requested_end_date": er.requested_end_date.isoformat(),
-            "status": er.status,
-            "additional_amount_due": str(er.additional_amount_due or "0.00"),
-        }
-
-    def get_latest_extension_request(self, obj):
-        ers = obj.extension_requests.all()
-        er = ers[0] if ers else None
-        if er is None:
-            return None
-        return {
-            "id": er.id,
-            "requested_end_date": er.requested_end_date.isoformat(),
-            "status": er.status,
-            "additional_amount_due": str(er.additional_amount_due or "0.00"),
-            "reviewer_notes": er.reviewer_notes,
-            "decided_at": er.decided_at.isoformat() if er.decided_at else None,
-        }
 
 
 class BookingExtensionRequestSerializer(serializers.ModelSerializer):
