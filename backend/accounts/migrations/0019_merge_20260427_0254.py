@@ -6,6 +6,7 @@ from django.db import migrations
 class Migration(migrations.Migration):
 
     dependencies = [
+        ('accounts', '0014_user_message_notifications_enabled_conversation_and_more'),
         ('accounts', '0018_merge_20260329_booking_deposit_and_approval'),
         ('accounts', '0018_user_bio_user_contact_phone_user_profile_picture_url_and_more'),
     ]
