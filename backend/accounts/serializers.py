@@ -1,11 +1,14 @@
 from django.contrib.auth.password_validation import validate_password
 from django.conf import settings
 from django.core.exceptions import ValidationError as DjangoValidationError
-from django.db.models import Avg
+from django.db.models import Avg, Q
 from rest_framework import serializers
 
 from .models import (
     ApprovalRequest,
+    BookingGroup,
+    BookingGroupConfirmation,
+    BookingGroupMembership,
     CompanyDocument,
     FavoriteListing,
     FeedbackSubmission,
@@ -482,6 +485,10 @@ class PropertyBookingSerializer(serializers.ModelSerializer):
     price = serializers.SerializerMethodField()
     status_label = serializers.SerializerMethodField()
     is_cancelable = serializers.SerializerMethodField()
+    group_id = serializers.SerializerMethodField()
+    group_name = serializers.SerializerMethodField()
+    group_confirmed_user_ids = serializers.SerializerMethodField()
+    group_paid_user_ids = serializers.SerializerMethodField()
 
     class Meta:
         model = PropertyBooking
@@ -498,6 +505,10 @@ class PropertyBookingSerializer(serializers.ModelSerializer):
             "status_label",
             "price",
             "is_cancelable",
+            "group_id",
+            "group_name",
+            "group_confirmed_user_ids",
+            "group_paid_user_ids",
         )
 
     def get_price(self, obj):
@@ -511,6 +522,118 @@ class PropertyBookingSerializer(serializers.ModelSerializer):
             PropertyBooking.Status.PENDING,
             PropertyBooking.Status.CONFIRMED,
         )
+
+    def get_group_id(self, obj):
+        return obj.group_id
+
+    def get_group_name(self, obj):
+        return obj.group.name if obj.group_id and obj.group else None
+
+    def get_group_confirmed_user_ids(self, obj):
+        if not obj.group_id:
+            return []
+        return list(obj.group_confirmations.values_list("user_id", flat=True))
+
+    def get_group_paid_user_ids(self, obj):
+        paid_user_ids_by_booking_id = self.context.get("paid_user_ids_by_booking_id")
+        if paid_user_ids_by_booking_id is not None:
+            return paid_user_ids_by_booking_id.get(obj.id, [])
+        if not obj.group_id:
+            return []
+        return list(
+            TransactionRecord.objects.filter(
+                booking_reference=str(obj.id),
+                status=TransactionRecord.Status.SUCCEEDED,
+            )
+            .values_list("user_id", flat=True)
+            .distinct()
+        )
+
+
+class BookingGroupMembershipSerializer(serializers.ModelSerializer):
+    user_id = serializers.IntegerField(source="user.id", read_only=True)
+    username = serializers.CharField(source="user.username", read_only=True)
+    email = serializers.EmailField(source="user.email", read_only=True)
+    display_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = BookingGroupMembership
+        fields = ("id", "user_id", "username", "email", "display_name", "status", "invited_at", "confirmed_at")
+
+    def get_display_name(self, obj):
+        return obj.user.get_full_name().strip() or obj.user.username
+
+
+class BookingGroupSerializer(serializers.ModelSerializer):
+    memberships = BookingGroupMembershipSerializer(many=True, read_only=True)
+    booking_count = serializers.IntegerField(read_only=True, default=0)
+
+    class Meta:
+        model = BookingGroup
+        fields = ("id", "name", "created_by", "created_at", "memberships", "booking_count")
+        read_only_fields = ("id", "created_by", "created_at", "memberships", "booking_count")
+
+
+class BookingGroupCreateSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=120)
+    invitees = serializers.ListField(
+        child=serializers.CharField(max_length=254),
+        required=False,
+        allow_empty=True,
+    )
+
+    def _resolve_invitee(self, identifier):
+        identifier = identifier.strip()
+        if not identifier:
+            return None
+        return User.objects.filter(
+            Q(email__iexact=identifier) | Q(username__iexact=identifier),
+            user_type=User.UserType.SUBLESSEE,
+        ).first()
+
+    def validate_invitees(self, value):
+        users = []
+        missing = []
+        seen = set()
+        for identifier in value:
+            user = self._resolve_invitee(identifier)
+            if not user:
+                missing.append(identifier)
+                continue
+            if user.id in seen:
+                continue
+            seen.add(user.id)
+            users.append(user)
+        if missing:
+            raise serializers.ValidationError(f"Could not find sublessee(s): {', '.join(missing)}")
+        self.context["invitee_users"] = users
+        return value
+
+
+class BookingGroupInviteSerializer(serializers.Serializer):
+    invitees = serializers.ListField(child=serializers.CharField(max_length=254), allow_empty=False)
+
+    def validate_invitees(self, value):
+        users = []
+        missing = []
+        seen = set()
+        for identifier in value:
+            identifier = identifier.strip()
+            user = User.objects.filter(
+                Q(email__iexact=identifier) | Q(username__iexact=identifier),
+                user_type=User.UserType.SUBLESSEE,
+            ).first()
+            if not user:
+                missing.append(identifier)
+                continue
+            if user.id in seen:
+                continue
+            seen.add(user.id)
+            users.append(user)
+        if missing:
+            raise serializers.ValidationError(f"Could not find sublessee(s): {', '.join(missing)}")
+        self.context["invitee_users"] = users
+        return value
 
 
 class ManagedPropertyBookingSerializer(PropertyBookingSerializer):
