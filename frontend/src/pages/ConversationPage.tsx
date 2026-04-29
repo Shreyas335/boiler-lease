@@ -2,17 +2,24 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, Link as RouterLink } from "react-router-dom";
 import {
   Box,
-  Container,
-  Typography,
-  TextField,
   Button,
-  Alert,
-  Stack,
-  Paper,
+  CircularProgress,
+  Container,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   Divider,
+  InputAdornment,
+  Paper,
+  Stack,
+  TextField,
+  Typography,
+  Alert,
 } from "@mui/material";
 import SendRoundedIcon from "@mui/icons-material/SendRounded";
 import ArrowBackRoundedIcon from "@mui/icons-material/ArrowBackRounded";
+import LocalOfferRoundedIcon from "@mui/icons-material/LocalOfferRounded";
 import {
   getConversation,
   listMessages,
@@ -20,8 +27,11 @@ import {
   markMessagesRead,
 } from "../api/messaging";
 import type { Conversation, Message } from "../api/messaging";
+import type { PriceOffer } from "../api/offers";
+import { submitOffer } from "../api/offers";
 import { useAuth } from "../contexts/AuthContext";
 import { useConversationSocket } from "../hooks/useConversationSocket";
+import OfferCard from "../components/OfferCard";
 
 function formatTime(dateStr: string): string {
   const date = new Date(dateStr);
@@ -52,7 +62,15 @@ export default function ConversationPage() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const messageIdsRef = useRef<Set<number>>(new Set());
 
+  // Offer modal state
+  const [offerModalOpen, setOfferModalOpen] = useState(false);
+  const [offerPrice, setOfferPrice] = useState("");
+  const [offerNote, setOfferNote] = useState("");
+  const [offerSubmitting, setOfferSubmitting] = useState(false);
+  const [offerError, setOfferError] = useState<string | null>(null);
+
   const convId = Number(id);
+  const isSublessee = user?.user_type === "sublessee";
 
   // Initial load
   useEffect(() => {
@@ -79,10 +97,9 @@ export default function ConversationPage() {
   // WebSocket handler — called when the server pushes a new message
   const handleSocketMessage = useCallback(
     (msg: Message) => {
-      if (messageIdsRef.current.has(msg.id)) return; // already in state
+      if (messageIdsRef.current.has(msg.id)) return;
       messageIdsRef.current.add(msg.id);
       setMessages((prev) => [...prev, msg]);
-      // If recipient opened the conversation, mark the new message as read
       if (msg.sender_id !== user?.id) {
         markMessagesRead(convId).catch(() => {});
       }
@@ -97,12 +114,20 @@ export default function ConversationPage() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // Update an offer in-place when subleaser accepts/declines from within the chat
+  function handleOfferUpdated(updated: PriceOffer) {
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.offer?.id === updated.id ? { ...m, offer: updated } : m
+      )
+    );
+  }
+
   async function handleSend() {
     if (!content.trim() || !convId) return;
     setSending(true);
     try {
       const msg = await sendMessage(convId, content.trim());
-      // Optimistically add our own message (the WS echo will be deduped)
       if (!messageIdsRef.current.has(msg.id)) {
         messageIdsRef.current.add(msg.id);
         setMessages((prev) => [...prev, msg]);
@@ -124,6 +149,44 @@ export default function ConversationPage() {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
+    }
+  }
+
+  async function handleSubmitOffer() {
+    const price = Number(offerPrice);
+    if (!price || price <= 0) {
+      setOfferError("Please enter a valid price greater than 0.");
+      return;
+    }
+    setOfferSubmitting(true);
+    setOfferError(null);
+    try {
+      const offer = await submitOffer(convId, price, offerNote.trim());
+      // The backend also creates a message; it arrives via WebSocket, but optimistically add it
+      const optimisticMsg: Message = {
+        id: Date.now(), // temporary id; WS echo deduplication keeps the real one
+        conversation: convId,
+        sender_id: user!.id,
+        sender_username: user!.username,
+        content: `Sent a price offer: $${price.toLocaleString()}/mo`,
+        offer,
+        created_at: new Date().toISOString(),
+        is_read: true,
+      };
+      messageIdsRef.current.add(optimisticMsg.id);
+      setMessages((prev) => [...prev, optimisticMsg]);
+      setOfferModalOpen(false);
+      setOfferPrice("");
+      setOfferNote("");
+    } catch (err: unknown) {
+      const detail =
+        err && typeof err === "object" && "response" in err
+          ? (err as { response?: { data?: { detail?: string } } }).response?.data
+              ?.detail
+          : null;
+      setOfferError(detail || "Failed to submit offer.");
+    } finally {
+      setOfferSubmitting(false);
     }
   }
 
@@ -211,6 +274,22 @@ export default function ConversationPage() {
           )}
           {messages.map((msg) => {
             const isMe = msg.sender_id === user?.id;
+
+            if (msg.offer) {
+              return (
+                <Box
+                  key={msg.id}
+                  sx={{ display: "flex", justifyContent: isMe ? "flex-end" : "flex-start" }}
+                >
+                  <OfferCard
+                    offer={msg.offer}
+                    viewerIsSublessee={isSublessee}
+                    onOfferUpdated={handleOfferUpdated}
+                  />
+                </Box>
+              );
+            }
+
             return (
               <Box
                 key={msg.id}
@@ -264,6 +343,16 @@ export default function ConversationPage() {
             inputProps={{ maxLength: 4000 }}
             size="small"
           />
+          {isSublessee && conversation?.listing_summary && (
+            <Button
+              variant="outlined"
+              onClick={() => setOfferModalOpen(true)}
+              startIcon={<LocalOfferRoundedIcon />}
+              sx={{ whiteSpace: "nowrap" }}
+            >
+              Make Offer
+            </Button>
+          )}
           <Button
             variant="contained"
             onClick={handleSend}
@@ -274,6 +363,56 @@ export default function ConversationPage() {
           </Button>
         </Stack>
       </Container>
+
+      {/* Make Offer Modal */}
+      <Dialog
+        open={offerModalOpen}
+        onClose={() => !offerSubmitting && setOfferModalOpen(false)}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>Make a Price Offer</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ pt: 1 }}>
+            {offerError && <Alert severity="error">{offerError}</Alert>}
+            <TextField
+              label="Your offered price (monthly)"
+              type="number"
+              value={offerPrice}
+              onChange={(e) => setOfferPrice(e.target.value)}
+              InputProps={{
+                startAdornment: <InputAdornment position="start">$</InputAdornment>,
+              }}
+              inputProps={{ min: 1, step: "0.01" }}
+              fullWidth
+              autoFocus
+            />
+            <TextField
+              label="Note (optional)"
+              multiline
+              rows={3}
+              value={offerNote}
+              onChange={(e) => setOfferNote(e.target.value)}
+              inputProps={{ maxLength: 500 }}
+              fullWidth
+              placeholder="E.g. I'm a quiet grad student, flexible on move-in date."
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setOfferModalOpen(false)} disabled={offerSubmitting}>
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            onClick={handleSubmitOffer}
+            disabled={offerSubmitting || !offerPrice}
+            startIcon={offerSubmitting ? <CircularProgress size={16} color="inherit" /> : undefined}
+          >
+            Send Offer
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }
