@@ -29,6 +29,7 @@ import SubmitApprovalPage from "./pages/SubmitApprovalPage";
 import ManagementApprovalQueuePage from "./pages/ManagementApprovalQueuePage";
 import ApprovalRequestDetailPage from "./pages/ApprovalRequestDetailPage";
 import PaymentHistoryPage from "./pages/PaymentHistoryPage";
+import GroupsPage from "./pages/GroupsPage";
 import ListingDepositHistoryPage from "./pages/ListingDepositHistoryPage";
 import BookingRequestsPage from "./pages/BookingRequestsPage";
 import CompanyBookingRequestsPage from "./pages/CompanyBookingRequestsPage";
@@ -146,6 +147,14 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <PaymentHistoryPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/groups"
+                element={
+                  <ProtectedRoute>
+                    <GroupsPage />
                   </ProtectedRoute>
                 }
               />

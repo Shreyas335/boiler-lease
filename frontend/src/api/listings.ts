@@ -99,10 +99,14 @@ export interface BookingRecord {
   monthly_rent_snapshot: string | null;
   security_deposit_snapshot: string | null;
   deposit_paid_at: string | null;
-  status: "pending" | "confirmed" | "declined" | "cancelled";
+  status: "pending" | "confirmed" | "partially_paid" | "fully_paid" | "declined" | "cancelled";
   status_label: string;
   price: string;
   is_cancelable: boolean;
+  group_id: number | null;
+  group_name: string | null;
+  group_confirmed_user_ids: number[];
+  group_paid_user_ids: number[];
   /** True when booking is confirmed and the listing has availability after checkout with no pending extension. */
   can_request_extension?: boolean;
   pending_extension_request?: BookingExtensionPendingSummary | null;

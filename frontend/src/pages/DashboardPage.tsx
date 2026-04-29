@@ -100,6 +100,12 @@ export default function DashboardPage() {
     if (status === "confirmed") {
       return { label: "Confirmed", color: "success" };
     }
+    if (status === "partially_paid") {
+      return { label: "Partially Paid", color: "warning" };
+    }
+    if (status === "fully_paid") {
+      return { label: "Fully Paid", color: "success" };
+    }
     if (status === "declined") {
       return { label: "Declined", color: "warning" };
     }
