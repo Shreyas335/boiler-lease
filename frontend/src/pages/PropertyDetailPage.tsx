@@ -11,7 +11,7 @@ import {
   Container,
   Grid,
   Snackbar,
-  Stack,
+  MenuItem, Stack,
   TextField,
   Typography,
 } from "@mui/material";
@@ -23,7 +23,10 @@ import MailOutlineIcon from "@mui/icons-material/MailOutline";
 import LinkIcon from "@mui/icons-material/Link";
 import { Link as RouterLink, useNavigate, useParams } from "react-router-dom";
 import { addFavorite, createBooking, getPropertyListingDetail, removeFavorite, type PropertyListing } from "../api/listings";
+import { createGroupBooking, getBookingGroups, type BookingGroup } from "../api/groups";
 import { useAuth } from "../contexts/AuthContext";
+
+const SOLO_BOOKING_VALUE = "solo";
 
 function formatMoney(value: string | null) {
   if (!value) return "-";
@@ -43,6 +46,8 @@ export default function PropertyDetailPage() {
   const [bookingBusy, setBookingBusy] = useState(false);
   const [bookingMessage, setBookingMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [bookingDates, setBookingDates] = useState({ start_date: "", end_date: "" });
+  const [groups, setGroups] = useState<BookingGroup[]>([]);
+  const [selectedGroupId, setSelectedGroupId] = useState(SOLO_BOOKING_VALUE);
   const [copyLinkOpen, setCopyLinkOpen] = useState(false);
 
   function shareListingUrl(): string {
@@ -113,6 +118,13 @@ export default function PropertyDetailPage() {
     loadListing();
   }, [id]);
 
+  useEffect(() => {
+    if (user?.user_type !== "sublessee") return;
+    getBookingGroups()
+      .then((data) => setGroups(data.filter((group) => group.memberships.some((member) => member.user_id === user.id && member.status === "confirmed"))))
+      .catch(() => setGroups([]));
+  }, [user]);
+
   async function handleToggleFavorite() {
     if (!listing) return;
     try {
@@ -149,22 +161,26 @@ export default function PropertyDetailPage() {
     try {
       setBookingBusy(true);
       setBookingMessage(null);
-      const booking = await createBooking({
+      const payload = {
         listing: listing.id,
         start_date: bookingDates.start_date,
         end_date: bookingDates.end_date,
-      });
+      };
+      const booking = selectedGroupId !== SOLO_BOOKING_VALUE
+        ? await createGroupBooking(Number(selectedGroupId), payload)
+        : await createBooking(payload);
       setBookingMessage({
         type: "success",
-        text: `Booking submitted successfully. Current status: ${booking.status_label}.`,
+        text: `${selectedGroupId !== SOLO_BOOKING_VALUE ? "Group booking" : "Booking"} submitted successfully. Current status: ${booking.status_label}.`,
       });
     } catch (err) {
       const fallback = "Unable to complete booking. Please review your dates and try again.";
       if (axios.isAxiosError(err)) {
-        const data = err.response?.data as Record<string, string[] | string> | undefined;
-        const firstMessage = data
-          ? Object.values(data).flatMap((value) => (Array.isArray(value) ? value : [value]))[0]
-          : null;
+        const data = err.response?.data;
+        const firstMessage =
+          data && typeof data === "object"
+            ? Object.values(data as Record<string, string[] | string>).flatMap((value) => (Array.isArray(value) ? value : [value]))[0]
+            : null;
         setBookingMessage({ type: "error", text: typeof firstMessage === "string" ? firstMessage : fallback });
       } else {
         setBookingMessage({ type: "error", text: fallback });
@@ -423,6 +439,22 @@ export default function PropertyDetailPage() {
                     <Typography variant="body2" color="text.secondary">
                       Available window: {listing.availability_start_date} to {listing.availability_end_date}
                     </Typography>
+
+                    <TextField
+                      label="Booking group"
+                      select
+                      value={selectedGroupId}
+                      onChange={(e) => setSelectedGroupId(e.target.value)}
+                      fullWidth
+                      disabled={bookingIdentityBlocked}
+                    >
+                      <MenuItem value={SOLO_BOOKING_VALUE}>Just me</MenuItem>
+                      {groups.map((group) => (
+                        <MenuItem key={group.id} value={String(group.id)}>
+                          {group.name}
+                        </MenuItem>
+                      ))}
+                    </TextField>
 
                     <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
                       <Button

@@ -241,23 +241,23 @@ class PropertyListing(models.Model):
     class Meta:
         constraints = [
             models.CheckConstraint(
-                check=models.Q(availability_start_date__lte=models.F("availability_end_date")),
+                condition=models.Q(availability_start_date__lte=models.F("availability_end_date")),
                 name="listing_dates_valid",
             ),
             models.CheckConstraint(
-                check=models.Q(monthly_rent__gte=0),
+                condition=models.Q(monthly_rent__gte=0),
                 name="listing_monthly_rent_non_negative",
             ),
             models.CheckConstraint(
-                check=models.Q(security_deposit__gte=0) | models.Q(security_deposit__isnull=True),
+                condition=models.Q(security_deposit__gte=0) | models.Q(security_deposit__isnull=True),
                 name="listing_security_deposit_non_negative",
             ),
             models.CheckConstraint(
-                check=models.Q(bedrooms__gte=0),
+                condition=models.Q(bedrooms__gte=0),
                 name="listing_bedrooms_non_negative",
             ),
             models.CheckConstraint(
-                check=models.Q(bathrooms__gte=0),
+                condition=models.Q(bathrooms__gte=0),
                 name="listing_bathrooms_non_negative",
             ),
         ]
@@ -400,11 +400,20 @@ class PropertyBooking(models.Model):
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
         CONFIRMED = "confirmed", "Confirmed"
+        PARTIALLY_PAID = "partially_paid", "Partially Paid"
+        FULLY_PAID = "fully_paid", "Fully Paid"
         DECLINED = "declined", "Declined"
         CANCELLED = "cancelled", "Cancelled"
 
     sublessee = models.ForeignKey(User, on_delete=models.CASCADE, related_name="property_bookings")
     listing = models.ForeignKey(PropertyListing, on_delete=models.CASCADE, related_name="bookings")
+    group = models.ForeignKey(
+        "BookingGroup",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="bookings",
+    )
     start_date = models.DateField()
     end_date = models.DateField()
     monthly_rent_snapshot = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
@@ -421,7 +430,7 @@ class PropertyBooking(models.Model):
     class Meta:
         constraints = [
             models.CheckConstraint(
-                check=models.Q(start_date__lte=models.F("end_date")),
+                condition=models.Q(start_date__lte=models.F("end_date")),
                 name="booking_dates_valid",
             ),
             models.UniqueConstraint(
@@ -432,6 +441,58 @@ class PropertyBooking(models.Model):
         indexes = [
             models.Index(fields=["sublessee", "end_date"], name="booking_user_end_date_idx"),
             models.Index(fields=["sublessee", "-booked_at"], name="booking_user_booked_at_idx"),
+        ]
+
+
+class BookingGroup(models.Model):
+    name = models.CharField(max_length=120)
+    created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name="created_booking_groups")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["created_by", "-created_at"], name="grp_creator_created_idx"),
+        ]
+
+    def __str__(self):
+        return self.name
+
+
+class BookingGroupMembership(models.Model):
+    class Status(models.TextChoices):
+        INVITED = "invited", "Invited"
+        CONFIRMED = "confirmed", "Confirmed"
+
+    group = models.ForeignKey(BookingGroup, on_delete=models.CASCADE, related_name="memberships")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="booking_group_memberships")
+    invited_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="sent_booking_group_invitations",
+    )
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.INVITED, db_index=True)
+    invited_at = models.DateTimeField(auto_now_add=True)
+    confirmed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["group", "user"], name="group_unique_member"),
+        ]
+        indexes = [
+            models.Index(fields=["user", "status"], name="grp_member_user_status_idx"),
+        ]
+
+
+class BookingGroupConfirmation(models.Model):
+    booking = models.ForeignKey(PropertyBooking, on_delete=models.CASCADE, related_name="group_confirmations")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="booking_group_confirmations")
+    confirmed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["booking", "user"], name="booking_unique_group_confirmation"),
         ]
 
 
@@ -540,7 +601,7 @@ class UserRating(models.Model):
     class Meta:
         constraints = [
             models.UniqueConstraint(fields=['rater', 'rated_user'], name='one_rating_per_user_pair'),
-            models.CheckConstraint(check=~models.Q(rater=models.F('rated_user')), name='cannot_rate_self'),
+            models.CheckConstraint(condition=~models.Q(rater=models.F('rated_user')), name='cannot_rate_self'),
         ]
 
     def __str__(self):
@@ -555,7 +616,7 @@ class UserBlock(models.Model):
     class Meta:
         constraints = [
             models.UniqueConstraint(fields=['blocker', 'blocked_user'], name='one_block_per_user_pair'),
-            models.CheckConstraint(check=~models.Q(blocker=models.F('blocked_user')), name='cannot_block_self'),
+            models.CheckConstraint(condition=~models.Q(blocker=models.F('blocked_user')), name='cannot_block_self'),
         ]
 
     def __str__(self):

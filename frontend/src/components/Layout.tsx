@@ -31,6 +31,7 @@ import EventAvailableRoundedIcon from "@mui/icons-material/EventAvailableRounded
 import HistoryRoundedIcon from "@mui/icons-material/HistoryRounded";
 import FavoriteRoundedIcon from "@mui/icons-material/FavoriteRounded";
 import PaymentsRoundedIcon from "@mui/icons-material/PaymentsRounded";
+import GroupsRoundedIcon from "@mui/icons-material/GroupsRounded";
 import BusinessRoundedIcon from "@mui/icons-material/BusinessRounded";
 import FactCheckRoundedIcon from "@mui/icons-material/FactCheckRounded";
 import { useAuth } from "../contexts/AuthContext";
@@ -179,6 +180,15 @@ export default function Layout({ children }: LayoutProps) {
                         sx={{ color: "text.secondary" }}
                       >
                         Payments
+                      </Button>
+                      <Button
+                        component={RouterLink}
+                        to="/groups"
+                        color="inherit"
+                        startIcon={<GroupsRoundedIcon />}
+                        sx={{ color: "text.secondary" }}
+                      >
+                        Groups
                       </Button>
                     </>
                   )}
