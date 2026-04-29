@@ -26,10 +26,11 @@ import {
   EditOutlined,
   KingBedOutlined,
   LocationOnOutlined,
+  PaymentsOutlined,
   ShowerOutlined,
   SquareFootOutlined,
 } from "@mui/icons-material";
-import { Link as RouterLink, useNavigate } from "react-router-dom";
+import { Link as RouterLink, useNavigate, useLocation } from "react-router-dom";
 import {
   getMyListings,
   deleteListing,
@@ -64,12 +65,23 @@ function resolveStatusColor(value: string): ChipProps["color"] {
   if (normalized === "approved") return "success";
   if (normalized === "pending") return "warning";
   if (normalized === "rejected") return "error";
+  if (normalized === "not_submitted") return "default";
   return "default";
+}
+
+function approvalStatusLabel(value: string): string {
+  if (value === "not_submitted") return "Not Submitted";
+  if (value === "pending") return "Pending Approval";
+  if (value === "approved") return "Approved";
+  if (value === "rejected") return "Rejected";
+  return value;
 }
 
 export default function MyListingsPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  const successMessage = (location.state as { successMessage?: string } | null)?.successMessage;
   const [listings, setListings] = useState<PropertyListing[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -175,6 +187,11 @@ export default function MyListingsPage() {
           </Button>
         </Stack>
 
+        {successMessage && (
+          <Alert severity="success" sx={{ mb: 2 }}>
+            {successMessage}
+          </Alert>
+        )}
         {error && (
           <Alert severity="error" sx={{ mb: 2 }}>
             {error}
@@ -300,7 +317,7 @@ export default function MyListingsPage() {
                         </Typography>
                       </Box>
                       <Stack direction="row" spacing={1} alignItems="center">
-                        <Stack direction="row" spacing={1}>
+                        <Stack direction="row" spacing={1} alignItems="center">
                           <Chip
                             size="small"
                             label={listing.status}
@@ -309,12 +326,31 @@ export default function MyListingsPage() {
                           />
                           <Chip
                             size="small"
-                            label={listing.approval_status}
+                            label={approvalStatusLabel(listing.approval_status)}
                             color={resolveStatusColor(listing.approval_status)}
                             variant="outlined"
                           />
+                          {(listing.approval_status === "not_submitted" || listing.approval_status === "rejected") && (
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              color={listing.approval_status === "rejected" ? "error" : "primary"}
+                              onClick={() => navigate(`/listings/${listing.id}/request-approval`)}
+                            >
+                              {listing.approval_status === "rejected" ? "Resubmit" : "Submit for Approval"}
+                            </Button>
+                          )}
                         </Stack>
                         <Stack direction="row" spacing={0}>
+                          <IconButton
+                            size="small"
+                            color="primary"
+                            component={RouterLink}
+                            to={`/listings/${listing.id}/deposits`}
+                            title="Deposit payments"
+                          >
+                            <PaymentsOutlined fontSize="small" />
+                          </IconButton>
                           <IconButton
                             size="small"
                             color="primary"

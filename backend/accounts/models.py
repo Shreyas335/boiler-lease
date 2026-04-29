@@ -12,6 +12,12 @@ class User(AbstractUser):
         SUBLEASER = "subleaser", "Subleaser"
         MANAGEMENT = "management", "Management Company"
 
+    class IdentityVerificationStatus(models.TextChoices):
+        UNVERIFIED = "unverified", "Unverified"
+        PENDING = "pending", "Pending"
+        VERIFIED = "verified", "Verified"
+        FAILED = "failed", "Failed"
+
     email = models.EmailField(unique=True)
 
     user_type = models.CharField(
@@ -31,6 +37,19 @@ class User(AbstractUser):
 
     # Messaging notifications
     message_notifications_enabled = models.BooleanField(default=True)
+
+    # Stripe Identity
+    identity_verification_status = models.CharField(
+        max_length=20,
+        choices=IdentityVerificationStatus.choices,
+        default=IdentityVerificationStatus.UNVERIFIED,
+    )
+    stripe_identity_session_id = models.CharField(max_length=255, blank=True)
+
+    # Profile fields
+    bio = models.TextField(blank=True, default="")
+    profile_picture_url = models.URLField(blank=True, default="")
+    contact_phone = models.CharField(max_length=30, blank=True, default="")
 
     class Meta:
         db_table = "accounts_user"
@@ -74,6 +93,84 @@ class CompanyDocument(models.Model):
 
     def __str__(self):
         return f"{self.original_filename} ({self.get_document_type_display()})"
+
+
+class ManagementCompany(models.Model):
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending Review"
+        APPROVED = "approved", "Approved"
+        REJECTED = "rejected", "Rejected"
+
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="management_company")
+    company_name = models.CharField(max_length=200)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
+    rejection_reason = models.TextField(blank=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name_plural = "Management companies"
+
+    def __str__(self):
+        return f"{self.company_name} ({self.get_status_display()})"
+
+
+class CompanyDocument(models.Model):
+
+    class DocumentType(models.TextChoices):
+        BUSINESS_LICENSE = "business_license", "Business License"
+        PROOF_OF_OWNERSHIP = "proof_of_ownership", "Proof of Ownership"
+        OTHER = "other", "Other"
+
+    company = models.ForeignKey(ManagementCompany, on_delete=models.CASCADE, related_name="documents")
+    file = models.FileField(upload_to="company_docs/")
+    document_type = models.CharField(max_length=24, choices=DocumentType.choices, default=DocumentType.OTHER)
+    original_filename = models.CharField(max_length=255, blank=True)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.original_filename} ({self.get_document_type_display()})"
+
+
+class Guideline(models.Model):
+    """A named set of listing requirements for a building managed by a ManagementCompany."""
+
+    class FurnishedStatus(models.TextChoices):
+        FURNISHED = "furnished", "Furnished"
+        UNFURNISHED = "unfurnished", "Unfurnished"
+        PARTIALLY_FURNISHED = "partially_furnished", "Partially Furnished"
+
+    company = models.ForeignKey(ManagementCompany, on_delete=models.CASCADE, related_name="guidelines")
+    name = models.CharField(max_length=200, help_text="e.g. Verve Apartments, The Hub")
+
+    # Rent requirements
+    min_rent = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    max_rent = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+
+    # Deposit requirements
+    min_deposit = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    max_deposit = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+
+    # Availability
+    min_availability_days = models.PositiveIntegerField(null=True, blank=True)
+
+    # Property requirements — null means no requirement
+    utilities_included = models.BooleanField(null=True, blank=True)
+    pets_allowed = models.BooleanField(null=True, blank=True)
+    furnished_status = models.CharField(
+        max_length=24, choices=FurnishedStatus.choices, null=True, blank=True
+    )
+
+    # Required amenities (list of amenity codes)
+    required_amenities = models.JSONField(default=list, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.name} — {self.company.company_name}"
 
 
 class FeedbackSubmission(models.Model):
@@ -121,7 +218,8 @@ class PropertyListing(models.Model):
         ARCHIVED = "archived", "Archived"
 
     class ApprovalStatus(models.TextChoices):
-        PENDING = "pending", "Pending"
+        NOT_SUBMITTED = "not_submitted", "Not Submitted"
+        PENDING = "pending", "Pending Approval"
         APPROVED = "approved", "Approved"
         REJECTED = "rejected", "Rejected"
 
@@ -169,7 +267,7 @@ class PropertyListing(models.Model):
     approval_status = models.CharField(
         max_length=16,
         choices=ApprovalStatus.choices,
-        default=ApprovalStatus.PENDING,
+        default=ApprovalStatus.NOT_SUBMITTED,
     )
     approved_by_company = models.ForeignKey(
         "ManagementCompany",
@@ -345,15 +443,31 @@ class PropertyBooking(models.Model):
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
         CONFIRMED = "confirmed", "Confirmed"
+        PARTIALLY_PAID = "partially_paid", "Partially Paid"
+        FULLY_PAID = "fully_paid", "Fully Paid"
         DECLINED = "declined", "Declined"
         CANCELLED = "cancelled", "Cancelled"
 
     sublessee = models.ForeignKey(User, on_delete=models.CASCADE, related_name="property_bookings")
     listing = models.ForeignKey(PropertyListing, on_delete=models.CASCADE, related_name="bookings")
+    group = models.ForeignKey(
+        "BookingGroup",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="bookings",
+    )
     start_date = models.DateField()
     end_date = models.DateField()
     monthly_rent_snapshot = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    security_deposit_snapshot = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING, db_index=True)
+    deposit_paid_at = models.DateTimeField(null=True, blank=True)
     booked_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
     class Meta:
@@ -370,6 +484,58 @@ class PropertyBooking(models.Model):
         indexes = [
             models.Index(fields=["sublessee", "end_date"], name="booking_user_end_date_idx"),
             models.Index(fields=["sublessee", "-booked_at"], name="booking_user_booked_at_idx"),
+        ]
+
+
+class BookingGroup(models.Model):
+    name = models.CharField(max_length=120)
+    created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name="created_booking_groups")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["created_by", "-created_at"], name="grp_creator_created_idx"),
+        ]
+
+    def __str__(self):
+        return self.name
+
+
+class BookingGroupMembership(models.Model):
+    class Status(models.TextChoices):
+        INVITED = "invited", "Invited"
+        CONFIRMED = "confirmed", "Confirmed"
+
+    group = models.ForeignKey(BookingGroup, on_delete=models.CASCADE, related_name="memberships")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="booking_group_memberships")
+    invited_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="sent_booking_group_invitations",
+    )
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.INVITED, db_index=True)
+    invited_at = models.DateTimeField(auto_now_add=True)
+    confirmed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["group", "user"], name="group_unique_member"),
+        ]
+        indexes = [
+            models.Index(fields=["user", "status"], name="grp_member_user_status_idx"),
+        ]
+
+
+class BookingGroupConfirmation(models.Model):
+    booking = models.ForeignKey(PropertyBooking, on_delete=models.CASCADE, related_name="group_confirmations")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="booking_group_confirmations")
+    confirmed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["booking", "user"], name="booking_unique_group_confirmation"),
         ]
 
 
@@ -433,6 +599,38 @@ class PasswordResetToken(models.Model):
     @property
     def is_usable(self):
         return self.used_at is None and not self.is_expired
+
+
+class UserRating(models.Model):
+    rater = models.ForeignKey(User, on_delete=models.CASCADE, related_name='ratings_given')
+    rated_user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='ratings_received')
+    score = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(5)])
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['rater', 'rated_user'], name='one_rating_per_user_pair'),
+            models.CheckConstraint(condition=~models.Q(rater=models.F('rated_user')), name='cannot_rate_self'),
+        ]
+
+    def __str__(self):
+        return f'{self.rater} rated {self.rated_user}: {self.score}'
+
+
+class UserBlock(models.Model):
+    blocker = models.ForeignKey(User, on_delete=models.CASCADE, related_name='blocks_given')
+    blocked_user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='blocks_received')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['blocker', 'blocked_user'], name='one_block_per_user_pair'),
+            models.CheckConstraint(condition=~models.Q(blocker=models.F('blocked_user')), name='cannot_block_self'),
+        ]
+
+    def __str__(self):
+        return f'{self.blocker} blocked {self.blocked_user}'
 
 
 class Conversation(models.Model):

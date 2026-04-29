@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams, Link as RouterLink } from "react-router-dom";
 import {
+  Avatar,
   Box,
   Container,
   Grid,
@@ -27,7 +28,7 @@ import {
   useTheme,
   Pagination,
 } from "@mui/material";
-import { Menu as MenuIcon, Close as CloseIcon, ImageNotSupported } from "@mui/icons-material";
+import { Menu as MenuIcon, Close as CloseIcon, ImageNotSupported, Person as PersonIcon } from "@mui/icons-material";
 import {
   browseListings,
   type PropertyListing,
@@ -277,6 +278,25 @@ function PropertyCard({
               variant="outlined"
             />
           )}
+
+          <Stack
+            direction="row"
+            spacing={1}
+            alignItems="center"
+            component={RouterLink}
+            to={`/profile/${listing.owner_id}`}
+            onClick={(e: React.MouseEvent) => e.stopPropagation()}
+            sx={{ textDecoration: "none", color: "text.secondary", mt: 0.5, "&:hover": { color: "primary.main" } }}
+          >
+            <Avatar sx={{ width: 20, height: 20, bgcolor: "grey.400" }}>
+              <PersonIcon sx={{ fontSize: 14 }} />
+            </Avatar>
+            <Typography variant="caption">
+              {listing.owner_first_name && listing.owner_last_name
+                ? `${listing.owner_first_name} ${listing.owner_last_name}`
+                : listing.owner_username}
+            </Typography>
+          </Stack>
         </Stack>
       </CardContent>
     </Card>
