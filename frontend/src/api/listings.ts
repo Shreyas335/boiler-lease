@@ -103,6 +103,17 @@ export interface ManagedBookingRecord extends BookingRecord {
   sublessee_email: string;
 }
 
+export interface BookingExtensionRequestRecord {
+  id: number;
+  booking: number;
+  requested_end_date: string;
+  sublessee_notes: string;
+  status: "pending" | "approved" | "declined";
+  reviewer_notes: string;
+  decided_at: string | null;
+  created_at: string;
+}
+
 export interface CreateBookingPayload {
   listing: number;
   start_date: string;
@@ -452,6 +463,17 @@ export async function submitApprovalRequest(
 ): Promise<ApprovalRequestSummary> {
   const { data } = await api.post<ApprovalRequestSummary>(
     `/listings/${listingId}/request-approval/`,
+    payload,
+  );
+  return data;
+}
+
+export async function reviewBookingExtensionRequest(
+  extensionRequestId: number,
+  payload: { status: "approved" | "declined"; reviewer_notes?: string },
+): Promise<BookingExtensionRequestRecord> {
+  const { data } = await api.patch<BookingExtensionRequestRecord>(
+    `/bookings/extension-requests/${extensionRequestId}/`,
     payload,
   );
   return data;
