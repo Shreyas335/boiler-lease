@@ -34,6 +34,7 @@ urlpatterns = [
     path("bookings/manage/", views.manageable_bookings),
     path("bookings/<int:booking_id>/", views.cancel_booking),
     path("bookings/<int:booking_id>/extension-requests/", views.create_booking_extension_request),
+    path("bookings/extension-requests/<int:extension_request_id>/", views.review_booking_extension_request),
     path("bookings/<int:booking_id>/status/", views.update_booking_status),
     path("bookings/history/", views.my_booking_history),
     path("bookings/current/", views.my_current_bookings),

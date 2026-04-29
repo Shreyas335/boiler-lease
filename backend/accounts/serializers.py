@@ -588,6 +588,16 @@ class BookingExtensionRequestCreateSerializer(serializers.Serializer):
         return attrs
 
 
+class BookingExtensionRequestDecisionSerializer(serializers.Serializer):
+    status = serializers.ChoiceField(
+        choices=[
+            BookingExtensionRequest.Status.APPROVED,
+            BookingExtensionRequest.Status.DECLINED,
+        ]
+    )
+    reviewer_notes = serializers.CharField(required=False, allow_blank=True, max_length=2000)
+
+
 class ManagedPropertyBookingSerializer(PropertyBookingSerializer):
     sublessee_name = serializers.SerializerMethodField()
     sublessee_email = serializers.EmailField(source="sublessee.email", read_only=True)
