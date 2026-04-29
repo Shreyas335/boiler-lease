@@ -2,6 +2,7 @@ import random
 import secrets
 import hashlib
 import uuid
+from decimal import Decimal, ROUND_HALF_UP
 from datetime import timedelta
 import stripe
 from django.contrib.auth import login, logout
@@ -10,9 +11,10 @@ from django.core.cache import cache
 from django.conf import settings
 from django.db.models.functions import Coalesce
 from django.http import HttpResponseRedirect
+from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt, ensure_csrf_cookie
-from django.db.models import Q, Prefetch
+from django.db.models import Q, Prefetch, Count
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -28,8 +30,13 @@ from .email_verification import (
 from .models import (
     Conversation,
     ConversationDeletion,
+    ApprovalRequest,
+    BookingGroup,
+    BookingGroupConfirmation,
+    BookingGroupMembership,
     CompanyDocument,
     FavoriteListing,
+    Guideline,
     ListingAmenity,
     ListingAmenityMap,
     ListingMedia,
@@ -44,32 +51,50 @@ from .models import (
 )
 from .pagination import MessagePagination, PropertyListingPagination
 
+from .guidelines import validate_guideline_data
+
 from .serializers import (
     AccountUpdateSerializer,
-    ConversationSerializer,
-    CreateConversationSerializer,
+    ApprovalRequestCreateSerializer,
+    ApprovalRequestDetailSerializer,
+    ApprovalRequestSummarySerializer,
+    BookingGroupCreateSerializer,
+    BookingGroupInviteSerializer,
+    BookingGroupSerializer,
+    CompanyDocumentSerializer,
+    CompanyDocumentUploadSerializer,
     FavoriteListingSerializer,
     FeedbackSubmissionSerializer,
+    GuidelineSerializer,
     LoginSerializer,
     MessageSerializer,
+    ManagementCompanySerializer,
+    ManagedPropertyBookingSerializer,
     PasswordChangeSerializer,
     PasswordResetConfirmSerializer,
     PasswordResetRequestSerializer,
     PropertyBookingCreateSerializer,
+    PropertyBookingStatusUpdateSerializer,
     PropertyListingBrowseSerializer,
     PropertyListingUpdateSerializer,
     PropertyBookingSerializer,
     PropertyListingCreateSerializer,
     PropertyListingSerializer,
     PropertyListingSummarySerializer,
+    PublicManagementCompanySerializer,
     RegisterSerializer,
     ListingMediaSerializer,
     ListingMediaUploadSerializer,
     SendMessageSerializer,
+    OwnerListingTransactionSerializer,
     TransactionRecordSerializer,
     UserBlockSerializer,
     UserSerializer,
     TwoFactorVerifyLoginSerializer,
+    BlockedUserSerializer,
+    UserProfileSerializer,
+    UserProfileUpdateSerializer,
+    UserRatingSerializer,
 )
 
 
@@ -85,6 +110,57 @@ def _make_2fa_temp_token(user):
         raise
     return token
 
+def _user_for_identity_verification_session(obj):
+    """Resolve User from Stripe VerificationSession (webhook payload or API object)."""
+    if not obj:
+        return None
+    meta = getattr(obj, "metadata", None)
+    if meta is None and isinstance(obj, dict):
+        meta = obj.get("metadata")
+    meta = meta or {}
+    uid = None
+    if isinstance(meta, dict):
+        uid = meta.get("user_id")
+    elif hasattr(meta, "get"):
+        uid = meta.get("user_id")
+    if uid is not None:
+        try:
+            return User.objects.filter(pk=int(uid)).first()
+        except (ValueError, TypeError):
+            return None
+    session_id = getattr(obj, "id", None)
+    if session_id is None and isinstance(obj, dict):
+        session_id = obj.get("id")
+    if session_id:
+        return User.objects.filter(stripe_identity_session_id=session_id).first()
+    return None
+
+
+def _identity_verification_last_error_present(obj):
+    err = getattr(obj, "last_error", None)
+    if err is None and isinstance(obj, dict):
+        err = obj.get("last_error")
+    if not err:
+        return False
+    if isinstance(err, dict):
+        return bool(err)
+    return True
+
+
+def _user_must_verify_identity(user):
+    if user.user_type not in (User.UserType.SUBLESSEE, User.UserType.SUBLEASER):
+        return False
+    return user.identity_verification_status != User.IdentityVerificationStatus.VERIFIED
+
+
+def _identity_verification_required_response():
+    return Response(
+        {
+            "detail": "Identity verification is required before this action.",
+            "code": "identity_verification_required",
+        },
+        status=status.HTTP_403_FORBIDDEN,
+    )
 
 def _hash_token(token):
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
@@ -94,6 +170,10 @@ def _is_sublessee(request):
     return request.user.user_type == User.UserType.SUBLESSEE
 
 
+def _email_verified(request):
+    return request.user.email_verified
+
+
 def _is_approved_management(request):
     if request.user.user_type != User.UserType.MANAGEMENT:
         return False
@@ -101,6 +181,141 @@ def _is_approved_management(request):
         return request.user.management_company.status == ManagementCompany.Status.APPROVED
     except ManagementCompany.DoesNotExist:
         return False
+
+
+def _can_manage_booking_requests(request):
+    return request.user.user_type == User.UserType.SUBLEASER
+
+
+def _can_user_update_booking_status(request, booking):
+    """Subleaser approves bookings on their own listings without a company; management approves for company-approved listings."""
+    listing = booking.listing
+    if listing.approved_by_company_id:
+        if request.user.user_type != User.UserType.MANAGEMENT or not _is_approved_management(request):
+            return False
+        try:
+            return listing.approved_by_company_id == request.user.management_company.pk
+        except ManagementCompany.DoesNotExist:
+            return False
+    return request.user.user_type == User.UserType.SUBLEASER and listing.owner_id == request.user.pk
+
+
+def _is_confirmed_group_member(user, group_id):
+    return BookingGroupMembership.objects.filter(
+        group_id=group_id,
+        user=user,
+        status=BookingGroupMembership.Status.CONFIRMED,
+    ).exists()
+
+
+def _group_member_count(group_id):
+    return BookingGroupMembership.objects.filter(
+        group_id=group_id,
+        status=BookingGroupMembership.Status.CONFIRMED,
+    ).count()
+
+
+def _group_share_amount(booking):
+    dep = booking.security_deposit_snapshot or booking.listing.security_deposit
+    if dep is None or dep <= 0:
+        return None
+    member_count = _group_member_count(booking.group_id) if booking.group_id else 1
+    member_count = max(member_count, 1)
+    return (Decimal(dep) / Decimal(member_count)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def _send_group_invitation_email(group, invitee, inviter):
+    try:
+        send_mail(
+            subject=f"You were invited to join {group.name}",
+            message=(
+                f"Hi {invitee.first_name or invitee.username},\n\n"
+                f"{inviter.get_full_name().strip() or inviter.username} invited you to join "
+                f"the Boiler Lease group '{group.name}'.\n\n"
+                f"Open your groups page to accept the invitation:\n"
+                f"{settings.FRONTEND_URL}/groups\n\n"
+                f"The Boiler Lease Team"
+            ),
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[invitee.email],
+            fail_silently=True,
+        )
+    except Exception:
+        pass
+
+
+def _send_group_payment_reminders(booking):
+    if not booking.group_id:
+        return 0
+    paid_user_ids = set(
+        TransactionRecord.objects.filter(
+            booking_reference=str(booking.id),
+            status=TransactionRecord.Status.SUCCEEDED,
+        ).values_list("user_id", flat=True)
+    )
+    outstanding = BookingGroupMembership.objects.filter(
+        group=booking.group,
+        status=BookingGroupMembership.Status.CONFIRMED,
+    ).exclude(user_id__in=paid_user_ids).select_related("user")
+    sent = 0
+    for membership in outstanding:
+        try:
+            send_mail(
+                subject=f"Payment reminder for {booking.listing.title}",
+                message=(
+                    f"Hi {membership.user.first_name or membership.user.username},\n\n"
+                    f"Your group booking for '{booking.listing.title}' is waiting on your share of "
+                    f"the security deposit.\n\n"
+                    f"Open your groups page to pay:\n{settings.FRONTEND_URL}/groups\n\n"
+                    f"The Boiler Lease Team"
+                ),
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[membership.user.email],
+                fail_silently=True,
+            )
+            sent += 1
+        except Exception:
+            pass
+    return sent
+
+
+def _update_group_booking_payment_status(booking):
+    if not booking.group_id:
+        return
+    member_ids = set(
+        BookingGroupMembership.objects.filter(
+            group=booking.group,
+            status=BookingGroupMembership.Status.CONFIRMED,
+        ).values_list("user_id", flat=True)
+    )
+    paid_user_ids = set(
+        TransactionRecord.objects.filter(
+            booking_reference=str(booking.id),
+            status=TransactionRecord.Status.SUCCEEDED,
+            user_id__in=member_ids,
+        ).values_list("user_id", flat=True)
+    )
+    if member_ids and member_ids.issubset(paid_user_ids):
+        booking.status = PropertyBooking.Status.FULLY_PAID
+        booking.deposit_paid_at = booking.deposit_paid_at or timezone.now()
+        booking.save(update_fields=["status", "deposit_paid_at"])
+        try:
+            send_mail(
+                subject=f"Group booking fully paid: {booking.listing.title}",
+                message=(
+                    f"The group booking for '{booking.listing.title}' is now fully paid.\n\n"
+                    f"Booking dates: {booking.start_date} to {booking.end_date}"
+                ),
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[booking.listing.owner.email],
+                fail_silently=True,
+            )
+        except Exception:
+            pass
+    elif paid_user_ids and booking.status == PropertyBooking.Status.CONFIRMED:
+        booking.status = PropertyBooking.Status.PARTIALLY_PAID
+        booking.save(update_fields=["status"])
+        _send_group_payment_reminders(booking)
 
 
 def _get_blocked_user_ids(user):
@@ -460,6 +675,8 @@ def create_property_listing(request):
             {"detail": "Only subleasers can create property listings."},
             status=status.HTTP_403_FORBIDDEN,
         )
+    if _user_must_verify_identity(request.user):
+        return _identity_verification_required_response()
 
     serializer = PropertyListingCreateSerializer(data=request.data, context={"request": request})
     if not serializer.is_valid():
@@ -600,9 +817,9 @@ def my_property_listings(request):
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def listing_amenities(request):
-    if request.user.user_type != User.UserType.SUBLEASER:
+    if request.user.user_type not in (User.UserType.SUBLEASER, User.UserType.MANAGEMENT):
         return Response(
-            {"detail": "Only subleasers can access listing amenities."},
+            {"detail": "Only subleasers and management companies can access listing amenities."},
             status=status.HTTP_403_FORBIDDEN,
         )
     amenities = ListingAmenity.objects.filter(is_active=True).order_by("label")
@@ -883,16 +1100,23 @@ def my_current_bookings(request):
     today = timezone.localdate()
     bookings = (
         PropertyBooking.objects.filter(
-            sublessee=request.user,
+            Q(sublessee=request.user)
+            | Q(
+                group__memberships__user=request.user,
+                group__memberships__status=BookingGroupMembership.Status.CONFIRMED,
+            ),
             end_date__gte=today,
             status__in=[
                 PropertyBooking.Status.PENDING,
                 PropertyBooking.Status.CONFIRMED,
+                PropertyBooking.Status.PARTIALLY_PAID,
+                PropertyBooking.Status.FULLY_PAID,
             ],
             listing__deleted_at__isnull=True,
         )
         .select_related("listing")
         .prefetch_related("listing__media")
+        .distinct()
     )
     sort_by = request.query_params.get("sort_by", "date_booked")
     order = request.query_params.get("order", "desc")
@@ -920,11 +1144,16 @@ def my_booking_history(request):
 
     bookings = (
         PropertyBooking.objects.filter(
-            sublessee=request.user,
+            Q(sublessee=request.user)
+            | Q(
+                group__memberships__user=request.user,
+                group__memberships__status=BookingGroupMembership.Status.CONFIRMED,
+            ),
             listing__deleted_at__isnull=True,
         )
         .select_related("listing")
         .prefetch_related("listing__media")
+        .distinct()
     )
     sort_by = request.query_params.get("sort_by", "date_booked")
     order = request.query_params.get("order", "desc")
@@ -949,6 +1178,8 @@ def create_booking(request):
             {"detail": "Only sublessees can book properties."},
             status=status.HTTP_403_FORBIDDEN,
         )
+    if _user_must_verify_identity(request.user):
+        return _identity_verification_required_response()
 
     serializer = PropertyBookingCreateSerializer(
         data=request.data,
@@ -968,6 +1199,143 @@ def create_booking(request):
         context={"user": request.user},
     )
     return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+
+
+@api_view(["GET", "POST"])
+@permission_classes([IsAuthenticated])
+def booking_groups(request):
+    if not _is_sublessee(request):
+        return Response({"detail": "Only sublessees can use booking groups."}, status=status.HTTP_403_FORBIDDEN)
+
+    if request.method == "GET":
+        groups = (
+            BookingGroup.objects.filter(memberships__user=request.user)
+            .prefetch_related("memberships__user")
+            .annotate(booking_count=Count("bookings", distinct=True))
+            .order_by("-created_at")
+            .distinct()
+        )
+        return Response(BookingGroupSerializer(groups, many=True).data)
+
+    serializer = BookingGroupCreateSerializer(data=request.data, context={"request": request})
+    serializer.is_valid(raise_exception=True)
+    group = BookingGroup.objects.create(name=serializer.validated_data["name"], created_by=request.user)
+    BookingGroupMembership.objects.create(
+        group=group,
+        user=request.user,
+        invited_by=request.user,
+        status=BookingGroupMembership.Status.CONFIRMED,
+        confirmed_at=timezone.now(),
+    )
+    for invitee in serializer.context.get("invitee_users", []):
+        if invitee.id == request.user.id:
+            continue
+        membership, created = BookingGroupMembership.objects.get_or_create(
+            group=group,
+            user=invitee,
+            defaults={"invited_by": request.user, "status": BookingGroupMembership.Status.INVITED},
+        )
+        if created:
+            _send_group_invitation_email(group, invitee, request.user)
+    group = BookingGroup.objects.prefetch_related("memberships__user").get(pk=group.pk)
+    return Response(BookingGroupSerializer(group).data, status=status.HTTP_201_CREATED)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def booking_group_detail(request, group_id):
+    group = (
+        BookingGroup.objects.filter(pk=group_id, memberships__user=request.user)
+        .prefetch_related("memberships__user", "bookings__listing")
+        .first()
+    )
+    if not group:
+        return Response({"detail": "Group not found."}, status=status.HTTP_404_NOT_FOUND)
+    data = BookingGroupSerializer(group).data
+    data["bookings"] = PropertyBookingSerializer(
+        group.bookings.all().order_by("-booked_at"),
+        many=True,
+        context={"user": request.user},
+    ).data
+    return Response(data)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def invite_booking_group_members(request, group_id):
+    group = BookingGroup.objects.filter(pk=group_id, memberships__user=request.user).first()
+    if not group or not _is_confirmed_group_member(request.user, group_id):
+        return Response({"detail": "Group not found."}, status=status.HTTP_404_NOT_FOUND)
+    serializer = BookingGroupInviteSerializer(data=request.data, context={"request": request})
+    serializer.is_valid(raise_exception=True)
+    for invitee in serializer.context.get("invitee_users", []):
+        if invitee.id == request.user.id:
+            continue
+        membership, created = BookingGroupMembership.objects.get_or_create(
+            group=group,
+            user=invitee,
+            defaults={"invited_by": request.user, "status": BookingGroupMembership.Status.INVITED},
+        )
+        if created:
+            _send_group_invitation_email(group, invitee, request.user)
+    group = BookingGroup.objects.prefetch_related("memberships__user").get(pk=group.pk)
+    return Response(BookingGroupSerializer(group).data)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def accept_booking_group_invitation(request, membership_id):
+    membership = BookingGroupMembership.objects.filter(pk=membership_id, user=request.user).select_related("group").first()
+    if not membership:
+        return Response({"detail": "Invitation not found."}, status=status.HTTP_404_NOT_FOUND)
+    if membership.status != BookingGroupMembership.Status.CONFIRMED:
+        membership.status = BookingGroupMembership.Status.CONFIRMED
+        membership.confirmed_at = timezone.now()
+        membership.save(update_fields=["status", "confirmed_at"])
+    group = BookingGroup.objects.prefetch_related("memberships__user").get(pk=membership.group_id)
+    return Response(BookingGroupSerializer(group).data)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def create_group_booking(request, group_id):
+    if not _is_sublessee(request):
+        return Response({"detail": "Only sublessees can create group bookings."}, status=status.HTTP_403_FORBIDDEN)
+    if _user_must_verify_identity(request.user):
+        return _identity_verification_required_response()
+    if not _is_confirmed_group_member(request.user, group_id):
+        return Response({"detail": "Group not found."}, status=status.HTTP_404_NOT_FOUND)
+    serializer = PropertyBookingCreateSerializer(data=request.data, context={"request": request})
+    serializer.is_valid(raise_exception=True)
+    listing = serializer.validated_data["listing"]
+    if listing.owner_id in _get_blocked_user_ids(request.user):
+        return Response({"detail": "Cannot book this listing."}, status=status.HTTP_403_FORBIDDEN)
+    booking = serializer.save()
+    booking.group_id = group_id
+    booking.save(update_fields=["group"])
+    BookingGroupConfirmation.objects.get_or_create(booking=booking, user=request.user)
+    response_serializer = PropertyBookingSerializer(booking, context={"user": request.user})
+    return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def confirm_group_booking(request, booking_id):
+    booking = PropertyBooking.objects.filter(pk=booking_id, group__isnull=False).select_related("group").first()
+    if not booking or not _is_confirmed_group_member(request.user, booking.group_id):
+        return Response({"detail": "Booking not found."}, status=status.HTTP_404_NOT_FOUND)
+    BookingGroupConfirmation.objects.get_or_create(booking=booking, user=request.user)
+    return Response(PropertyBookingSerializer(booking, context={"user": request.user}).data)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def send_group_booking_reminders(request, booking_id):
+    booking = PropertyBooking.objects.filter(pk=booking_id, group__isnull=False).select_related("group", "listing").first()
+    if not booking or not _is_confirmed_group_member(request.user, booking.group_id):
+        return Response({"detail": "Booking not found."}, status=status.HTTP_404_NOT_FOUND)
+    sent = _send_group_payment_reminders(booking)
+    return Response({"detail": f"Reminder sent to {sent} outstanding member(s)."})
 
 
 @api_view(["DELETE"])
@@ -1003,6 +1371,79 @@ def cancel_booking(request, booking_id):
 
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
+def manageable_bookings(request):
+    """Subleaser: bookings on their listings that are not tied to a management company booking-approval flow."""
+    if not _can_manage_booking_requests(request):
+        return Response(
+            {"detail": "Only subleasers can manage booking requests."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    bookings = (
+        PropertyBooking.objects.filter(
+            listing__owner=request.user,
+            listing__approved_by_company__isnull=True,
+            listing__deleted_at__isnull=True,
+        )
+        .select_related("listing", "sublessee")
+        .prefetch_related("listing__media")
+        .order_by("status", "-booked_at")
+    )
+    serializer = ManagedPropertyBookingSerializer(bookings, many=True)
+    return Response(serializer.data)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def company_manageable_bookings(request):
+    """Management company: bookings on listings this company approved (approve before sublessee can pay deposit)."""
+    if not _is_approved_management(request):
+        return Response(
+            {"detail": "Only approved management companies can view these booking requests."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    company = request.user.management_company
+    bookings = (
+        PropertyBooking.objects.filter(
+            listing__approved_by_company=company,
+            listing__deleted_at__isnull=True,
+        )
+        .select_related("listing", "sublessee", "listing__owner")
+        .prefetch_related("listing__media")
+        .order_by("status", "-booked_at")
+    )
+    serializer = ManagedPropertyBookingSerializer(bookings, many=True)
+    return Response(serializer.data)
+
+
+@api_view(["PATCH"])
+@permission_classes([IsAuthenticated])
+def update_booking_status(request, booking_id):
+    booking = (
+        PropertyBooking.objects.filter(pk=booking_id, listing__deleted_at__isnull=True)
+        .select_related("listing", "sublessee")
+        .first()
+    )
+    if not booking:
+        return Response({"detail": "Booking not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    if not _can_user_update_booking_status(request, booking):
+        return Response(
+            {"detail": "You do not have permission to update this booking."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    serializer = PropertyBookingStatusUpdateSerializer(instance=booking, data=request.data, partial=True)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    serializer.save()
+    response_serializer = ManagedPropertyBookingSerializer(booking)
+    return Response(response_serializer.data, status=status.HTTP_200_OK)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
 def my_past_bookings(request):
     if not _is_sublessee(request):
         return Response(
@@ -1013,11 +1454,16 @@ def my_past_bookings(request):
     today = timezone.localdate()
     bookings = (
         PropertyBooking.objects.filter(
-            sublessee=request.user,
+            Q(sublessee=request.user)
+            | Q(
+                group__memberships__user=request.user,
+                group__memberships__status=BookingGroupMembership.Status.CONFIRMED,
+            ),
             listing__deleted_at__isnull=True,
         )
         .select_related("listing")
         .prefetch_related("listing__media")
+        .distinct()
     )
     bookings = bookings.filter(
         Q(end_date__lt=today)
@@ -1041,20 +1487,172 @@ def my_past_bookings(request):
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def my_payment_history(request):
+    """List completed (succeeded) payment transactions for the sublessee."""
     if not _is_sublessee(request):
         return Response(
             {"detail": "Only sublessees can view payment history."},
             status=status.HTTP_403_FORBIDDEN,
         )
-    transactions = TransactionRecord.objects.filter(user=request.user).order_by("-created_at")
-    serializer = TransactionRecordSerializer(transactions, many=True)
+    transactions = list(
+        TransactionRecord.objects.filter(
+            user=request.user,
+            status=TransactionRecord.Status.SUCCEEDED,
+        ).order_by("-paid_at", "-created_at")
+    )
+    booking_ids = []
+    for txn in transactions:
+        ref = (txn.booking_reference or "").strip()
+        if not ref:
+            continue
+        try:
+            booking_ids.append(int(ref))
+        except ValueError:
+            pass
+    titles_by_booking_id = {}
+    if booking_ids:
+        for b in PropertyBooking.objects.filter(
+            pk__in=booking_ids,
+            sublessee=request.user,
+        ).select_related("listing"):
+            titles_by_booking_id[b.pk] = b.listing.title
+    serializer = TransactionRecordSerializer(
+        transactions,
+        many=True,
+        context={
+            "request": request,
+            "listing_titles_by_booking_id": titles_by_booking_id,
+        },
+    )
+    return Response(serializer.data)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def listing_owner_transactions(request, listing_id):
+    """Succeeded transactions linked to bookings on this listing (owner / subleaser only)."""
+    if request.user.user_type != User.UserType.SUBLEASER:
+        return Response(
+            {"detail": "Only subleasers can view listing transaction records."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    listing = get_object_or_404(
+        PropertyListing,
+        pk=listing_id,
+        owner=request.user,
+        deleted_at__isnull=True,
+    )
+    booking_ids = PropertyBooking.objects.filter(listing=listing).values_list("id", flat=True)
+    ref_strings = {str(bid) for bid in booking_ids}
+    if not ref_strings:
+        return Response([])
+    transactions = (
+        TransactionRecord.objects.filter(
+            status=TransactionRecord.Status.SUCCEEDED,
+            booking_reference__in=ref_strings,
+        )
+        .select_related("user")
+        .order_by("-paid_at", "-created_at")
+    )
+    serializer = OwnerListingTransactionSerializer(transactions, many=True)
     return Response(serializer.data)
 
 
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
+def start_identity_verification_session(request):
+    """Stripe Identity"""
+    user = request.user
+    if user.user_type not in (User.UserType.SUBLESSEE, User.UserType.SUBLEASER):
+        return Response(
+            {"detail": "Identity verification is not required for this account type."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    if user.identity_verification_status == User.IdentityVerificationStatus.VERIFIED:
+        return Response(
+            {"detail": "Your identity is already verified."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if not settings.STRIPE_SECRET_KEY:
+        return Response(
+            {"detail": "Stripe is not configured on the server."},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+    stripe.api_key = settings.STRIPE_SECRET_KEY
+    base = settings.FRONTEND_URL.rstrip("/")
+    return_url = f"{base}/dashboard?identity_return=1"
+    session = stripe.identity.VerificationSession.create(
+        type="document",
+        metadata={"user_id": str(user.id)},
+        return_url=return_url,
+    )
+    user.stripe_identity_session_id = session.id
+    user.identity_verification_status = User.IdentityVerificationStatus.PENDING
+    user.save(update_fields=["stripe_identity_session_id", "identity_verification_status"])
+    return Response({"url": session.url}, status=status.HTTP_201_CREATED)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def sync_identity_verification_status(request):
+    """Pull latest VerificationSession status from Stripe (e.g. after user returns from hosted flow)."""
+    user = request.user
+    if user.user_type not in (User.UserType.SUBLESSEE, User.UserType.SUBLEASER):
+        return Response(
+            {"detail": "Identity verification is not used for this account type."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    if user.identity_verification_status == User.IdentityVerificationStatus.VERIFIED:
+        return Response(
+            {
+                "identity_verification_status": user.identity_verification_status,
+                "synced": False,
+            }
+        )
+    sid = (user.stripe_identity_session_id or "").strip()
+    if not sid or not settings.STRIPE_SECRET_KEY:
+        return Response(
+            {
+                "identity_verification_status": user.identity_verification_status,
+                "synced": False,
+            }
+        )
+    stripe.api_key = settings.STRIPE_SECRET_KEY
+    try:
+        session = stripe.identity.VerificationSession.retrieve(sid)
+    except stripe.error.StripeError:
+        return Response(
+            {"detail": "Could not load verification status from Stripe."},
+            status=status.HTTP_502_BAD_GATEWAY,
+        )
+    vs_status = getattr(session, "status", None) or ""
+    last_error = getattr(session, "last_error", None)
+    if vs_status == "verified":
+        new_status = User.IdentityVerificationStatus.VERIFIED
+    elif vs_status == "canceled":
+        new_status = User.IdentityVerificationStatus.FAILED
+    elif vs_status == "requires_input":
+        new_status = (
+            User.IdentityVerificationStatus.FAILED
+            if last_error
+            else User.IdentityVerificationStatus.PENDING
+        )
+    else:
+        new_status = User.IdentityVerificationStatus.PENDING
+    if new_status != user.identity_verification_status:
+        user.identity_verification_status = new_status
+        user.save(update_fields=["identity_verification_status"])
+    return Response(
+        {
+            "identity_verification_status": user.identity_verification_status,
+            "synced": True,
+        }
+    )
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
 def create_deposit_checkout_session(request):
-    """Create a Stripe Checkout Session for a security deposit (placeholder amount until booking-linked)."""
+    """Stripe Checkout for security deposit; optional booking_id uses snapshotted listing deposit."""
     if not _is_sublessee(request):
         return Response(
             {"detail": "Only sublessees can start deposit payments."},
@@ -1065,6 +1663,8 @@ def create_deposit_checkout_session(request):
             {"detail": "Please verify your email before making a payment."},
             status=status.HTTP_400_BAD_REQUEST,
         )
+    if _user_must_verify_identity(request.user):
+        return _identity_verification_required_response()
     if not settings.STRIPE_SECRET_KEY:
         return Response(
             {"detail": "Stripe is not configured on the server."},
@@ -1073,15 +1673,87 @@ def create_deposit_checkout_session(request):
 
     stripe.api_key = settings.STRIPE_SECRET_KEY
 
-    # TODO: set from booking / listing security_deposit when bookings integrate with checkout.
+    booking = None
+    booking_ref = ""
     amount_cents = 5000
+    raw_bid = request.data.get("booking_id")
+    if raw_bid is not None:
+        try:
+            bid = int(raw_bid)
+        except (TypeError, ValueError):
+            return Response({"detail": "Invalid booking_id."}, status=status.HTTP_400_BAD_REQUEST)
+        booking = (
+            PropertyBooking.objects.filter(pk=bid)
+            .filter(
+                Q(sublessee=request.user)
+                | Q(
+                    group__memberships__user=request.user,
+                    group__memberships__status=BookingGroupMembership.Status.CONFIRMED,
+                )
+            )
+            .select_related("listing", "group")
+            .first()
+        )
+        if not booking:
+            return Response({"detail": "Booking not found."}, status=status.HTTP_404_NOT_FOUND)
+        if booking.status in (
+            PropertyBooking.Status.DECLINED,
+            PropertyBooking.Status.CANCELLED,
+        ):
+            return Response(
+                {"detail": "Cannot pay a deposit for this booking."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not booking.group_id and booking.deposit_paid_at is not None:
+            return Response(
+                {"detail": "Security deposit for this booking has already been paid."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if booking.group_id and TransactionRecord.objects.filter(
+            booking_reference=str(booking.id),
+            user=request.user,
+            status=TransactionRecord.Status.SUCCEEDED,
+        ).exists():
+            return Response(
+                {"detail": "Your share for this booking has already been paid."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if booking.status not in (
+            PropertyBooking.Status.CONFIRMED,
+            PropertyBooking.Status.PARTIALLY_PAID,
+        ):
+            return Response(
+                {
+                    "detail": "You can pay the security deposit only after your booking has been approved.",
+                    "code": "booking_not_approved_for_deposit",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        dep = _group_share_amount(booking) if booking.group_id else (booking.security_deposit_snapshot or booking.listing.security_deposit)
+        if dep is None or dep <= 0:
+            return Response(
+                {"detail": "No security deposit amount for this booking."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        amount_cents = int(dep * 100)
+        booking_ref = str(bid)
+
     txn = TransactionRecord.objects.create(
         user=request.user,
         amount=amount_cents / 100,
         currency="usd",
-        booking_reference="",
+        booking_reference=booking_ref,
         status=TransactionRecord.Status.PENDING,
     )
+
+    session_metadata = {
+        "transaction_id": str(txn.id),
+        "user_id": str(request.user.id),
+    }
+    if booking_ref:
+        session_metadata["booking_id"] = booking_ref
+        if booking and booking.group_id:
+            session_metadata["group_id"] = str(booking.group_id)
 
     session = stripe.checkout.Session.create(
         mode="payment",
@@ -1096,12 +1768,9 @@ def create_deposit_checkout_session(request):
                 "quantity": 1,
             }
         ],
-        metadata={
-            "transaction_id": str(txn.id),
-            "user_id": str(request.user.id),
-        },
-        success_url=f"{settings.FRONTEND_URL}/dashboard",
-        cancel_url=f"{settings.FRONTEND_URL}/dashboard",
+        metadata=session_metadata,
+        success_url=f"{settings.FRONTEND_URL}/dashboard?deposit=success",
+        cancel_url=f"{settings.FRONTEND_URL}/dashboard?deposit=canceled",
     )
     txn.stripe_checkout_session_id = session.id
     txn.save(update_fields=["stripe_checkout_session_id"])
@@ -1124,13 +1793,13 @@ def stripe_webhook(request):
     except Exception:
         return Response({"detail": "Invalid webhook payload/signature."}, status=status.HTTP_400_BAD_REQUEST)
 
-    event_type = event.get("type")
-    obj = event.get("data", {}).get("object", {})
+    event_type = event.type
+    obj = event.data.object
 
     if event_type == "checkout.session.completed":
-        session_id = obj.get("id")
-        payment_intent_id = obj.get("payment_intent") or ""
-        amount_total = obj.get("amount_total")
+        session_id = obj.id
+        payment_intent_id = getattr(obj, "payment_intent", None) or ""
+        amount_total = getattr(obj, "amount_total", None)
 
         txn = TransactionRecord.objects.filter(stripe_checkout_session_id=session_id).first()
         if txn:
@@ -1140,13 +1809,53 @@ def stripe_webhook(request):
             txn.paid_at = timezone.now()
             txn.stripe_payment_intent_id = payment_intent_id
             txn.save(update_fields=["amount", "status", "paid_at", "stripe_payment_intent_id"])
+            ref = (txn.booking_reference or "").strip()
+            if ref:
+                try:
+                    bid = int(ref)
+                except ValueError:
+                    bid = None
+                if bid is not None:
+                    booking = PropertyBooking.objects.filter(pk=bid).select_related("group", "listing").first()
+                    if booking and booking.group_id:
+                        _update_group_booking_payment_status(booking)
+                    else:
+                        PropertyBooking.objects.filter(
+                            pk=bid,
+                            sublessee_id=txn.user_id,
+                            deposit_paid_at__isnull=True,
+                            status=PropertyBooking.Status.CONFIRMED,
+                        ).update(deposit_paid_at=timezone.now())
 
     elif event_type == "checkout.session.expired":
-        session_id = obj.get("id")
+        session_id = obj.id
         txn = TransactionRecord.objects.filter(stripe_checkout_session_id=session_id).first()
         if txn and txn.status == TransactionRecord.Status.PENDING:
             txn.status = TransactionRecord.Status.CANCELED
             txn.save(update_fields=["status"])
+    elif event_type == "identity.verification_session.verified":
+        user = _user_for_identity_verification_session(obj)
+        if user:
+            user.identity_verification_status = User.IdentityVerificationStatus.VERIFIED
+            user.save(update_fields=["identity_verification_status"])
+    elif event_type == "identity.verification_session.canceled":
+        user = _user_for_identity_verification_session(obj)
+        if user:
+            user.identity_verification_status = User.IdentityVerificationStatus.FAILED
+            user.save(update_fields=["identity_verification_status"])
+    elif event_type == "identity.verification_session.processing":
+        user = _user_for_identity_verification_session(obj)
+        if user:
+            user.identity_verification_status = User.IdentityVerificationStatus.PENDING
+            user.save(update_fields=["identity_verification_status"])
+    elif event_type == "identity.verification_session.requires_input":
+        user = _user_for_identity_verification_session(obj)
+        if user:
+            if _identity_verification_last_error_present(obj):
+                user.identity_verification_status = User.IdentityVerificationStatus.FAILED
+            else:
+                user.identity_verification_status = User.IdentityVerificationStatus.PENDING
+            user.save(update_fields=["identity_verification_status"])
 
     return Response({"received": True}, status=status.HTTP_200_OK)
 
@@ -1522,6 +2231,18 @@ def unread_message_count(request):
         ).exclude(pk__in=deleted_conv_ids),
     ).exclude(sender=user).count()
     return Response({"unread_count": count})
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def company_status(request):
+    if request.user.user_type != User.UserType.MANAGEMENT:
+        return Response({"detail": "Only management users can access this."}, status=status.HTTP_403_FORBIDDEN)
+    if not _email_verified(request):
+        return Response({"detail": "Email verification required."}, status=status.HTTP_403_FORBIDDEN)
+    try:
+        company = request.user.management_company
+    except ManagementCompany.DoesNotExist:
+        return Response({"detail": "No company found for this user."}, status=status.HTTP_404_NOT_FOUND)
+    return Response(ManagementCompanySerializer(company).data)
 
 
 @api_view(["GET", "POST"])
@@ -1564,3 +2285,429 @@ def block_detail(request, user_id):
     if not deleted:
         return Response({"detail": "Block not found."}, status=status.HTTP_404_NOT_FOUND)
     return Response(status=status.HTTP_204_NO_CONTENT)
+def company_documents(request):
+    if request.user.user_type != User.UserType.MANAGEMENT:
+        return Response({"detail": "Only management users can access this."}, status=status.HTTP_403_FORBIDDEN)
+    if not _email_verified(request):
+        return Response({"detail": "Email verification required."}, status=status.HTTP_403_FORBIDDEN)
+    try:
+        company = request.user.management_company
+    except ManagementCompany.DoesNotExist:
+        return Response({"detail": "No company found for this user."}, status=status.HTTP_404_NOT_FOUND)
+    if request.method == "GET":
+        docs = company.documents.all().order_by("-uploaded_at")
+        return Response(CompanyDocumentSerializer(docs, many=True).data)
+    serializer = CompanyDocumentUploadSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    file = serializer.validated_data["file"]
+    doc = CompanyDocument.objects.create(
+        company=company,
+        file=file,
+        document_type=serializer.validated_data["document_type"],
+        original_filename=file.name,
+    )
+    return Response(CompanyDocumentSerializer(doc).data, status=status.HTTP_201_CREATED)
+
+
+@api_view(["DELETE"])
+@permission_classes([IsAuthenticated])
+def company_document_delete(request, pk):
+    if request.user.user_type != User.UserType.MANAGEMENT:
+        return Response({"detail": "Only management users can access this."}, status=status.HTTP_403_FORBIDDEN)
+    if not _email_verified(request):
+        return Response({"detail": "Email verification required."}, status=status.HTTP_403_FORBIDDEN)
+    try:
+        company = request.user.management_company
+    except ManagementCompany.DoesNotExist:
+        return Response({"detail": "No company found for this user."}, status=status.HTTP_404_NOT_FOUND)
+    try:
+        doc = company.documents.get(pk=pk)
+    except CompanyDocument.DoesNotExist:
+        return Response({"detail": "Document not found."}, status=status.HTTP_404_NOT_FOUND)
+    doc.delete()
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+@api_view(["GET", "POST"])
+@permission_classes([IsAuthenticated])
+def company_guidelines(request):
+    """List all guidelines for this company or create a new one."""
+    if not _is_approved_management(request):
+        return Response({"detail": "Only approved management companies can access this."}, status=status.HTTP_403_FORBIDDEN)
+    company = request.user.management_company
+    if request.method == "GET":
+        guidelines = company.guidelines.all().order_by("name")
+        return Response(GuidelineSerializer(guidelines, many=True).data)
+    is_valid, error = validate_guideline_data(request.data)
+    if not is_valid:
+        return Response({"detail": error}, status=status.HTTP_400_BAD_REQUEST)
+    serializer = GuidelineSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    serializer.save(company=company)
+    return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+@api_view(["GET", "PUT", "DELETE"])
+@permission_classes([IsAuthenticated])
+def company_guideline_detail(request, pk):
+    """Retrieve, update, or delete a single guideline."""
+    if not _is_approved_management(request):
+        return Response({"detail": "Only approved management companies can access this."}, status=status.HTTP_403_FORBIDDEN)
+    company = request.user.management_company
+    try:
+        guideline = company.guidelines.get(pk=pk)
+    except Guideline.DoesNotExist:
+        return Response({"detail": "Guideline not found."}, status=status.HTTP_404_NOT_FOUND)
+    if request.method == "GET":
+        return Response(GuidelineSerializer(guideline).data)
+    if request.method == "DELETE":
+        guideline.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+    is_valid, error = validate_guideline_data(request.data)
+    if not is_valid:
+        return Response({"detail": error}, status=status.HTTP_400_BAD_REQUEST)
+    serializer = GuidelineSerializer(guideline, data=request.data, partial=True)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    serializer.save()
+    return Response(serializer.data)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def browse_management_companies(request):
+    """List approved management companies with their building guidelines. Supports ?search= on company name."""
+    qs = ManagementCompany.objects.filter(status=ManagementCompany.Status.APPROVED).prefetch_related("guidelines")
+    search = request.query_params.get("search", "").strip()
+    if search:
+        qs = qs.filter(company_name__icontains=search)
+    qs = qs.order_by("company_name")
+    return Response(PublicManagementCompanySerializer(qs, many=True).data)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def management_company_detail(request, pk):
+    """Retrieve a single approved management company with full guideline details."""
+    # TODO: add company information here also
+    try:
+        company = ManagementCompany.objects.prefetch_related("guidelines").get(
+            pk=pk, status=ManagementCompany.Status.APPROVED
+        )
+    except ManagementCompany.DoesNotExist:
+        return Response({"detail": "Company not found."}, status=status.HTTP_404_NOT_FOUND)
+    return Response(PublicManagementCompanySerializer(company).data)
+
+
+def _check_guideline_compliance(listing, guideline):
+    """Return a list of compliance result dicts for each non-null guideline criterion."""
+    results = []
+
+    def _add(field, label, required, actual, passed):
+        results.append({"field": field, "label": label, "required": required, "actual": actual, "passed": passed})
+
+    if guideline.min_rent is not None:
+        _add("min_rent", "Minimum rent", str(guideline.min_rent), str(listing.monthly_rent),
+             listing.monthly_rent >= guideline.min_rent)
+
+    if guideline.max_rent is not None:
+        _add("max_rent", "Maximum rent", str(guideline.max_rent), str(listing.monthly_rent),
+             listing.monthly_rent <= guideline.max_rent)
+
+    if guideline.min_deposit is not None and listing.security_deposit is not None:
+        _add("min_deposit", "Minimum deposit", str(guideline.min_deposit), str(listing.security_deposit),
+             listing.security_deposit >= guideline.min_deposit)
+
+    if guideline.max_deposit is not None and listing.security_deposit is not None:
+        _add("max_deposit", "Maximum deposit", str(guideline.max_deposit), str(listing.security_deposit),
+             listing.security_deposit <= guideline.max_deposit)
+
+    if guideline.min_availability_days is not None:
+        from datetime import date
+        availability_days = (listing.availability_end_date - listing.availability_start_date).days
+        _add("min_availability_days", "Minimum availability (days)", guideline.min_availability_days,
+             availability_days, availability_days >= guideline.min_availability_days)
+
+    if guideline.utilities_included is not None:
+        _add("utilities_included", "Utilities included", guideline.utilities_included,
+             listing.utilities_included, listing.utilities_included == guideline.utilities_included)
+
+    if guideline.pets_allowed is not None:
+        _add("pets_allowed", "Pets allowed", guideline.pets_allowed,
+             listing.pets_allowed, listing.pets_allowed == guideline.pets_allowed)
+
+    if guideline.furnished_status:
+        _add("furnished_status", "Furnished status", guideline.furnished_status,
+             listing.furnished_status, listing.furnished_status == guideline.furnished_status)
+
+    if guideline.required_amenities:
+        listing_amenity_codes = set(
+            listing.amenity_links.values_list("amenity__code", flat=True)
+        )
+        missing = [code for code in guideline.required_amenities if code not in listing_amenity_codes]
+        _add("required_amenities", "Required amenities", guideline.required_amenities,
+             list(listing_amenity_codes), len(missing) == 0)
+
+    return results
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def submit_approval_request(request, listing_id):
+    """Subleaser submits a listing for approval by a management company."""
+    if request.user.user_type != User.UserType.SUBLEASER:
+        return Response({"detail": "Only subleasers can submit approval requests."}, status=status.HTTP_403_FORBIDDEN)
+    if _user_must_verify_identity(request.user):
+        return _identity_verification_required_response()
+
+    try:
+        listing = PropertyListing.objects.get(pk=listing_id, owner=request.user, deleted_at__isnull=True)
+    except PropertyListing.DoesNotExist:
+        return Response({"detail": "Listing not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    if ApprovalRequest.objects.filter(listing=listing, status=ApprovalRequest.Status.PENDING).exists():
+        return Response({"detail": "This listing already has a pending approval request."}, status=status.HTTP_400_BAD_REQUEST)
+
+    serializer = ApprovalRequestCreateSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    data = serializer.validated_data
+    company = ManagementCompany.objects.get(pk=data["management_company_id"])
+    guideline = Guideline.objects.get(pk=data["guideline_id"])
+
+    approval_request = ApprovalRequest.objects.create(
+        listing=listing,
+        management_company=company,
+        guideline=guideline,
+        subleaser_notes=data.get("subleaser_notes", ""),
+        status=ApprovalRequest.Status.PENDING,
+    )
+
+    listing.approval_status = PropertyListing.ApprovalStatus.PENDING
+    listing.save(update_fields=["approval_status", "updated_at"])
+
+    return Response(ApprovalRequestSummarySerializer(approval_request).data, status=status.HTTP_201_CREATED)
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def company_approval_request_list(request):
+    """Management company views their queue of approval requests."""
+    if not _is_approved_management(request):
+        return Response({"detail": "Only approved management companies can access this."}, status=status.HTTP_403_FORBIDDEN)
+
+    company = request.user.management_company
+    qs = ApprovalRequest.objects.filter(management_company=company).select_related(
+        "listing", "guideline", "management_company"
+    )
+
+    filter_status = request.query_params.get("status", "").strip()
+    if filter_status:
+        qs = qs.filter(status=filter_status)
+
+    qs = qs.order_by("-created_at")
+    return Response(ApprovalRequestSummarySerializer(qs, many=True).data)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def company_approval_request_detail(request, pk):
+    """Management company views full detail of one request, including compliance check."""
+    if not _is_approved_management(request):
+        return Response({"detail": "Only approved management companies can access this."}, status=status.HTTP_403_FORBIDDEN)
+
+    company = request.user.management_company
+    try:
+        approval_request = ApprovalRequest.objects.select_related(
+            "listing__owner", "listing__approved_by_company", "guideline", "management_company"
+        ).prefetch_related(
+            "listing__amenity_links__amenity", "listing__media"
+        ).get(pk=pk, management_company=company)
+    except ApprovalRequest.DoesNotExist:
+        return Response({"detail": "Approval request not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    serializer = ApprovalRequestDetailSerializer(
+        approval_request,
+        context={"check_compliance": _check_guideline_compliance},
+    )
+    return Response(serializer.data)
+
+
+@api_view(["PATCH"])
+@permission_classes([IsAuthenticated])
+def company_review_approval_request(request, pk):
+    """Management company approves or rejects an approval request."""
+    if not _is_approved_management(request):
+        return Response({"detail": "Only approved management companies can access this."}, status=status.HTTP_403_FORBIDDEN)
+
+    company = request.user.management_company
+    try:
+        approval_request = ApprovalRequest.objects.select_related("listing", "management_company").get(
+            pk=pk, management_company=company
+        )
+    except ApprovalRequest.DoesNotExist:
+        return Response({"detail": "Approval request not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    if approval_request.status != ApprovalRequest.Status.PENDING:
+        return Response({"detail": "This request has already been reviewed."}, status=status.HTTP_400_BAD_REQUEST)
+
+    action = request.data.get("action", "").strip()
+    reviewer_notes = request.data.get("reviewer_notes", "").strip()
+
+    if action not in ("approve", "reject"):
+        return Response({"detail": "action must be 'approve' or 'reject'."}, status=status.HTTP_400_BAD_REQUEST)
+
+    if action == "reject" and not reviewer_notes:
+        return Response({"detail": "reviewer_notes is required when rejecting."}, status=status.HTTP_400_BAD_REQUEST)
+
+    now = timezone.now()
+    listing = approval_request.listing
+
+    if action == "approve":
+        approval_request.status = ApprovalRequest.Status.APPROVED
+        approval_request.reviewer_notes = reviewer_notes
+        approval_request.reviewed_at = now
+        approval_request.save(update_fields=["status", "reviewer_notes", "reviewed_at", "updated_at"])
+
+        listing.approval_status = PropertyListing.ApprovalStatus.APPROVED
+        listing.approved_by_company = company
+        listing.status = PropertyListing.ListingStatus.PUBLISHED
+        listing.published_at = now
+        listing.save(update_fields=["approval_status", "approved_by_company", "status", "published_at", "updated_at"])
+
+    else:  # reject
+        approval_request.status = ApprovalRequest.Status.REJECTED
+        approval_request.reviewer_notes = reviewer_notes
+        approval_request.reviewed_at = now
+        approval_request.save(update_fields=["status", "reviewer_notes", "reviewed_at", "updated_at"])
+
+        listing.approval_status = PropertyListing.ApprovalStatus.REJECTED
+        listing.save(update_fields=["approval_status", "updated_at"])
+
+        try:
+            listing_url = f"{settings.FRONTEND_URL}/my-listings"
+            send_mail(
+                subject="Your listing was not approved",
+                message=(
+                    f"Hi {listing.owner.first_name or listing.owner.username},\n\n"
+                    f"Unfortunately, your listing '{listing.title}' was not approved by "
+                    f"{company.company_name}.\n\n"
+                    f"Reason: {reviewer_notes}\n\n"
+                    f"You can view your listing and resubmit for approval here:\n{listing_url}\n\n"
+                    f"— The BoilerLease Team"
+                ),
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[listing.owner.email],
+                fail_silently=True,
+            )
+        except Exception:
+            pass
+
+    return Response(ApprovalRequestSummarySerializer(approval_request).data)
+
+
+@api_view(["GET", "PATCH"])
+@permission_classes([IsAuthenticated])
+def my_profile(request):
+    if request.method == "GET":
+        serializer = UserProfileSerializer(request.user, context={"request": request})
+        return Response(serializer.data)
+    serializer = UserProfileUpdateSerializer(request.user, data=request.data, partial=True)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    serializer.save()
+    return Response(UserProfileSerializer(request.user, context={"request": request}).data)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def upload_profile_picture(request):
+    from django.core.files.storage import storages
+
+    file = request.FILES.get("file")
+    if not file:
+        return Response({"detail": "file is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+    allowed_types = ["image/jpeg", "image/png", "image/webp", "image/gif"]
+    content_type = file.content_type or "application/octet-stream"
+    if content_type not in allowed_types:
+        return Response(
+            {"detail": f"Unsupported file type. Allowed: {', '.join(allowed_types)}"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    if file.size > 5 * 1024 * 1024:
+        return Response({"detail": "File too large. Maximum size is 5 MB."}, status=status.HTTP_400_BAD_REQUEST)
+
+    ext = file.name.rsplit(".", 1)[-1] if "." in file.name else "jpg"
+    storage_key = f"profile-pictures/{request.user.pk}/{uuid.uuid4().hex}.{ext}"
+
+    try:
+        storage = storages["listing_media_public"]
+    except KeyError:
+        return Response({"detail": "Storage backend not configured."}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+    saved_name = storage.save(storage_key, file)
+    base = getattr(settings, "LISTING_MEDIA_PUBLIC_BASE_URL", "")
+    file_url = f"{base}/{saved_name}" if base else storage.url(saved_name)
+
+    request.user.profile_picture_url = file_url
+    request.user.save(update_fields=["profile_picture_url"])
+    return Response({"profile_picture_url": file_url})
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def user_profile(request, user_id):
+    try:
+        user = User.objects.get(pk=user_id)
+    except User.DoesNotExist:
+        return Response({"detail": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+    serializer = UserProfileSerializer(user, context={"request": request})
+    return Response(serializer.data)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def rate_user(request, user_id):
+    if request.user.pk == user_id:
+        return Response({"detail": "You cannot rate yourself."}, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        rated_user = User.objects.get(pk=user_id)
+    except User.DoesNotExist:
+        return Response({"detail": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+    serializer = UserRatingSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    UserRating.objects.update_or_create(
+        rater=request.user,
+        rated_user=rated_user,
+        defaults={"score": serializer.validated_data["score"]},
+    )
+    return Response(UserProfileSerializer(rated_user, context={"request": request}).data)
+
+
+@api_view(["POST", "DELETE"])
+@permission_classes([IsAuthenticated])
+def block_user_toggle(request, user_id):
+    if request.user.pk == user_id:
+        return Response({"detail": "You cannot block yourself."}, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        target = User.objects.get(pk=user_id)
+    except User.DoesNotExist:
+        return Response({"detail": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+    if request.method == "DELETE":
+        UserBlock.objects.filter(blocker=request.user, blocked_user=target).delete()
+        return Response({"blocked": False})
+    UserBlock.objects.get_or_create(blocker=request.user, blocked_user=target)
+    return Response({"blocked": True}, status=status.HTTP_201_CREATED)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def blocked_users_list(request):
+    blocks = UserBlock.objects.filter(blocker=request.user).select_related("blocked_user")
+    serializer = BlockedUserSerializer(blocks, many=True)
+    return Response(serializer.data)

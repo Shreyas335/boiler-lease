@@ -1,4 +1,5 @@
 import { Box, Button, Card, CardContent, Chip, Stack, Typography, type ChipProps } from "@mui/material";
+import VerifiedIcon from "@mui/icons-material/Verified";
 import FavoriteBorderRoundedIcon from "@mui/icons-material/FavoriteBorderRounded";
 import FavoriteRoundedIcon from "@mui/icons-material/FavoriteRounded";
 import { Link as RouterLink } from "react-router-dom";
@@ -23,6 +24,12 @@ interface PropertySummaryCardProps {
     disabled?: boolean;
     color?: "primary" | "error";
   };
+  secondaryActionButton?: {
+    label: string;
+    onClick: () => Promise<void> | void;
+    disabled?: boolean;
+    color?: "primary" | "error";
+  };
 }
 
 export default function PropertySummaryCard({
@@ -33,6 +40,7 @@ export default function PropertySummaryCard({
   statusLabel,
   statusColor = "default",
   actionButton,
+  secondaryActionButton,
 }: PropertySummaryCardProps) {
   return (
     <Card>
@@ -103,7 +111,7 @@ export default function PropertySummaryCard({
               </Typography>
               {statusLabel && <Chip size="small" label={statusLabel} color={statusColor} variant="outlined" />}
             </Stack>
-            <Stack direction="row" spacing={1}>
+            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
               {actionButton && (
                 <Button
                   variant="outlined"
@@ -115,11 +123,31 @@ export default function PropertySummaryCard({
                   {actionButton.label}
                 </Button>
               )}
+              {secondaryActionButton && (
+                <Button
+                  variant="outlined"
+                  size="small"
+                  color={secondaryActionButton.color || "primary"}
+                  onClick={secondaryActionButton.onClick}
+                  disabled={secondaryActionButton.disabled}
+                >
+                  {secondaryActionButton.label}
+                </Button>
+              )}
               <Button component={RouterLink} to={`/properties/${listing.id}`} variant="text" size="small">
                 View details
               </Button>
             </Stack>
           </Stack>
+
+          {listing.approved_by_company_name && (
+            <Stack direction="row" spacing={0.5} alignItems="center">
+              <VerifiedIcon fontSize="small" color="success" />
+              <Typography variant="caption" color="success.main" sx={{ fontWeight: 600 }}>
+                Approved by {listing.approved_by_company_name}
+              </Typography>
+            </Stack>
+          )}
 
           {footerText && (
             <Typography variant="body2" color="text.secondary">

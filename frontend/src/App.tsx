@@ -23,6 +23,22 @@ import FavoritesPage from "./pages/FavoritesPage";
 import PropertyDetailPage from "./pages/PropertyDetailPage";
 import InboxPage from "./pages/InboxPage";
 import ConversationPage from "./pages/ConversationPage";
+import CompanyVerificationPage from "./pages/CompanyVerificationPage";
+import GuidelineSettingsPage from "./pages/GuidelineSettingsPage";
+import ManagementCompaniesPage from "./pages/ManagementCompaniesPage";
+import ManagementCompanyDetailPage from "./pages/ManagementCompanyDetailPage";
+import SubmitApprovalPage from "./pages/SubmitApprovalPage";
+import ManagementApprovalQueuePage from "./pages/ManagementApprovalQueuePage";
+import ApprovalRequestDetailPage from "./pages/ApprovalRequestDetailPage";
+import PaymentHistoryPage from "./pages/PaymentHistoryPage";
+import GroupsPage from "./pages/GroupsPage";
+import ListingDepositHistoryPage from "./pages/ListingDepositHistoryPage";
+import BookingRequestsPage from "./pages/BookingRequestsPage";
+import CompanyBookingRequestsPage from "./pages/CompanyBookingRequestsPage";
+import ProfilePage from "./pages/ProfilePage";
+import EditProfilePage from "./pages/EditProfilePage";
+import PrivacySettingsPage from "./pages/PrivacySettingsPage";
+import OffersPage from "./pages/OffersPage";
 
 function App() {
   return (
@@ -71,6 +87,14 @@ function App() {
                 }
               />
               <Route
+                path="/listings/:id/deposits"
+                element={
+                  <ProtectedRoute>
+                    <ListingDepositHistoryPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
                 path="/listings/:id/edit"
                 element={
                   <ProtectedRoute>
@@ -83,6 +107,14 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <MyListingsPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/booking-requests"
+                element={
+                  <ProtectedRoute>
+                    <BookingRequestsPage />
                   </ProtectedRoute>
                 }
               />
@@ -112,6 +144,22 @@ function App() {
                 }
               />
               <Route
+                path="/payments/history"
+                element={
+                  <ProtectedRoute>
+                    <PaymentHistoryPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/groups"
+                element={
+                  <ProtectedRoute>
+                    <GroupsPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
                 path="/properties/:id"
                 element={
                   <ProtectedRoute>
@@ -128,10 +176,106 @@ function App() {
                 }
               />
               <Route
+                path="/company/verify"
+                element={
+                  <ProtectedRoute>
+                    <CompanyVerificationPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
                 path="/messages/:id"
                 element={
                   <ProtectedRoute>
                     <ConversationPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/company/guidelines"
+                element={
+                  <ProtectedRoute>
+                    <GuidelineSettingsPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/companies"
+                element={
+                  <ProtectedRoute>
+                    <ManagementCompaniesPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/companies/:id"
+                element={
+                  <ProtectedRoute>
+                    <ManagementCompanyDetailPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/listings/:id/request-approval"
+                element={
+                  <ProtectedRoute>
+                    <SubmitApprovalPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/company/bookings"
+                element={
+                  <ProtectedRoute>
+                    <CompanyBookingRequestsPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/company/approvals"
+                element={
+                  <ProtectedRoute>
+                    <ManagementApprovalQueuePage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/company/approvals/:id"
+                element={
+                  <ProtectedRoute>
+                    <ApprovalRequestDetailPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/profile/edit"
+                element={
+                  <ProtectedRoute>
+                    <EditProfilePage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/profile/:id"
+                element={
+                  <ProtectedRoute>
+                    <ProfilePage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/settings/privacy"
+                element={
+                  <ProtectedRoute>
+                    <PrivacySettingsPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/offers"
+                element={
+                  <ProtectedRoute>
+                    <OffersPage />
                   </ProtectedRoute>
                 }
               />

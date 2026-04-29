@@ -1,10 +1,16 @@
 import { useEffect, useState } from "react";
-import type { ReactNode } from "react";
+import type { ReactNode, MouseEvent } from "react";
 import { Link as RouterLink, useNavigate } from "react-router-dom";
 import {
   AppBar,
+  Avatar,
   Badge,
   Box,
+  Divider,
+  ListItemIcon,
+  ListItemText,
+  Menu,
+  MenuItem,
   Toolbar,
   Typography,
   Button,
@@ -17,16 +23,24 @@ import PersonAddRoundedIcon from "@mui/icons-material/PersonAddRounded";
 import LogoutRoundedIcon from "@mui/icons-material/LogoutRounded";
 import SettingsRoundedIcon from "@mui/icons-material/SettingsRounded";
 import AccountCircleRoundedIcon from "@mui/icons-material/AccountCircleRounded";
+import PersonRoundedIcon from "@mui/icons-material/PersonRounded";
+import LockRoundedIcon from "@mui/icons-material/LockRounded";
 import RateReviewRoundedIcon from "@mui/icons-material/RateReviewRounded";
 import AddHomeRoundedIcon from "@mui/icons-material/AddHomeRounded";
 import ApartmentRoundedIcon from "@mui/icons-material/ApartmentRounded";
+import LocalOfferRoundedIcon from "@mui/icons-material/LocalOfferRounded";
 import MessageRoundedIcon from "@mui/icons-material/MessageRounded";
 import EventAvailableRoundedIcon from "@mui/icons-material/EventAvailableRounded";
 import HistoryRoundedIcon from "@mui/icons-material/HistoryRounded";
 import FavoriteRoundedIcon from "@mui/icons-material/FavoriteRounded";
+import PaymentsRoundedIcon from "@mui/icons-material/PaymentsRounded";
+import GroupsRoundedIcon from "@mui/icons-material/GroupsRounded";
+import BusinessRoundedIcon from "@mui/icons-material/BusinessRounded";
+import FactCheckRoundedIcon from "@mui/icons-material/FactCheckRounded";
 import { useAuth } from "../contexts/AuthContext";
 import AccountSettingsModal from "./AccountSettingsModal";
 import { getUnreadCount } from "../api/messaging";
+import { listOffers } from "../api/offers";
 
 interface LayoutProps {
   children: ReactNode;
@@ -37,6 +51,17 @@ export default function Layout({ children }: LayoutProps) {
   const navigate = useNavigate();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [pendingOfferCount, setPendingOfferCount] = useState(0);
+  const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+  const menuOpen = Boolean(anchorEl);
+
+  function handleMenuOpen(event: MouseEvent<HTMLElement>) {
+    setAnchorEl(event.currentTarget);
+  }
+
+  function handleMenuClose() {
+    setAnchorEl(null);
+  }
 
   useEffect(() => {
     if (!user) return;
@@ -51,8 +76,21 @@ export default function Layout({ children }: LayoutProps) {
       }
     }
 
+    async function fetchPendingOffers() {
+      try {
+        const offers = await listOffers("pending");
+        if (!cancelled) setPendingOfferCount(offers.length);
+      } catch {
+        // ignore
+      }
+    }
+
     fetchUnread();
-    const interval = setInterval(fetchUnread, 30000);
+    fetchPendingOffers();
+    const interval = setInterval(() => {
+      fetchUnread();
+      fetchPendingOffers();
+    }, 30000);
     return () => {
       cancelled = true;
       clearInterval(interval);
@@ -60,6 +98,7 @@ export default function Layout({ children }: LayoutProps) {
   }, [user]);
 
   async function handleLogout() {
+    handleMenuClose();
     await logout();
     navigate("/login");
   }
@@ -96,34 +135,6 @@ export default function Layout({ children }: LayoutProps) {
             <Box sx={{ display: "flex", gap: 0.5, alignItems: "center" }}>
               {user ? (
                 <>
-                  <Typography
-                    variant="body2"
-                    sx={{
-                      alignSelf: "center",
-                      mr: 0.5,
-                      color: "text.secondary",
-                    }}
-                  >
-                    {user.first_name || user.username}
-                  </Typography>
-                  <Button
-                    component={RouterLink}
-                    to="/account"
-                    color="inherit"
-                    startIcon={<AccountCircleRoundedIcon />}
-                    sx={{ color: "text.secondary" }}
-                  >
-                    Account
-                  </Button>
-                  <Button
-                    component={RouterLink}
-                    to="/feedback"
-                    color="inherit"
-                    startIcon={<RateReviewRoundedIcon />}
-                    sx={{ color: "text.secondary" }}
-                  >
-                    Feedback
-                  </Button>
                   <Button
                     component={RouterLink}
                     to="/browse"
@@ -146,8 +157,30 @@ export default function Layout({ children }: LayoutProps) {
                   >
                     Messages
                   </Button>
+                  <Button
+                    component={RouterLink}
+                    to="/offers"
+                    color="inherit"
+                    startIcon={
+                      <Badge badgeContent={pendingOfferCount || 0} color="error" max={99}>
+                        <LocalOfferRoundedIcon />
+                      </Badge>
+                    }
+                    sx={{ color: "text.secondary" }}
+                  >
+                    Offers
+                  </Button>
                   {user.user_type === "subleaser" && (
                     <>
+                      <Button
+                        component={RouterLink}
+                        to="/companies"
+                        color="inherit"
+                        startIcon={<BusinessRoundedIcon />}
+                        sx={{ color: "text.secondary" }}
+                      >
+                        Companies
+                      </Button>
                       <Button
                         component={RouterLink}
                         to="/listings/new"
@@ -165,6 +198,15 @@ export default function Layout({ children }: LayoutProps) {
                         sx={{ color: "text.secondary" }}
                       >
                         My Listings
+                      </Button>
+                      <Button
+                        component={RouterLink}
+                        to="/booking-requests"
+                        color="inherit"
+                        startIcon={<FactCheckRoundedIcon />}
+                        sx={{ color: "text.secondary" }}
+                      >
+                        Booking Requests
                       </Button>
                     </>
                   )}
@@ -197,27 +239,138 @@ export default function Layout({ children }: LayoutProps) {
                       >
                         Favorites
                       </Button>
+                      <Button
+                        component={RouterLink}
+                        to="/payments/history"
+                        color="inherit"
+                        startIcon={<PaymentsRoundedIcon />}
+                        sx={{ color: "text.secondary" }}
+                      >
+                        Payments
+                      </Button>
+                      <Button
+                        component={RouterLink}
+                        to="/groups"
+                        color="inherit"
+                        startIcon={<GroupsRoundedIcon />}
+                        sx={{ color: "text.secondary" }}
+                      >
+                        Groups
+                      </Button>
                     </>
                   )}
+
+                  {/* Profile avatar dropdown */}
                   <IconButton
-                    aria-label="Account settings"
-                    onClick={() => setSettingsOpen(true)}
-                    sx={{ color: "text.secondary" }}
+                    onClick={handleMenuOpen}
+                    size="small"
+                    aria-controls={menuOpen ? "profile-menu" : undefined}
+                    aria-haspopup="true"
+                    aria-expanded={menuOpen ? "true" : undefined}
+                    sx={{ ml: 1 }}
                   >
-                    <SettingsRoundedIcon />
+                    <Avatar
+                      src={user.profile_picture_url || undefined}
+                      sx={{
+                        width: 34,
+                        height: 34,
+                        bgcolor: "primary.main",
+                        fontSize: "0.95rem",
+                        fontWeight: 600,
+                      }}
+                    >
+                      {!user.profile_picture_url && (user.first_name?.[0] || user.username[0]).toUpperCase()}
+                    </Avatar>
                   </IconButton>
+
+                  <Menu
+                    id="profile-menu"
+                    anchorEl={anchorEl}
+                    open={menuOpen}
+                    onClose={handleMenuClose}
+                    onClick={handleMenuClose}
+                    transformOrigin={{ horizontal: "right", vertical: "top" }}
+                    anchorOrigin={{ horizontal: "right", vertical: "bottom" }}
+                    slotProps={{
+                      paper: {
+                        elevation: 4,
+                        sx: { minWidth: 180, mt: 1 },
+                      },
+                    }}
+                  >
+                    <Box sx={{ px: 2, py: 1 }}>
+                      <Typography variant="subtitle2" noWrap>
+                        {user.first_name || user.username}
+                      </Typography>
+                      <Typography
+                        variant="caption"
+                        color="text.secondary"
+                        noWrap
+                      >
+                        {user.email}
+                      </Typography>
+                    </Box>
+                    <Divider />
+                    <MenuItem
+                      component={RouterLink}
+                      to={`/profile/${user.id}`}
+                    >
+                      <ListItemIcon>
+                        <PersonRoundedIcon fontSize="small" />
+                      </ListItemIcon>
+                      <ListItemText>My Profile</ListItemText>
+                    </MenuItem>
+                    <MenuItem
+                      component={RouterLink}
+                      to="/account"
+                    >
+                      <ListItemIcon>
+                        <AccountCircleRoundedIcon fontSize="small" />
+                      </ListItemIcon>
+                      <ListItemText>My Account</ListItemText>
+                    </MenuItem>
+                    <MenuItem
+                      onClick={() => {
+                        handleMenuClose();
+                        setSettingsOpen(true);
+                      }}
+                    >
+                      <ListItemIcon>
+                        <SettingsRoundedIcon fontSize="small" />
+                      </ListItemIcon>
+                      <ListItemText>Settings</ListItemText>
+                    </MenuItem>
+                    <MenuItem
+                      component={RouterLink}
+                      to="/settings/privacy"
+                    >
+                      <ListItemIcon>
+                        <LockRoundedIcon fontSize="small" />
+                      </ListItemIcon>
+                      <ListItemText>Privacy</ListItemText>
+                    </MenuItem>
+                    <MenuItem
+                      component={RouterLink}
+                      to="/feedback"
+                    >
+                      <ListItemIcon>
+                        <RateReviewRoundedIcon fontSize="small" />
+                      </ListItemIcon>
+                      <ListItemText>Feedback</ListItemText>
+                    </MenuItem>
+                    <Divider />
+                    <MenuItem onClick={handleLogout}>
+                      <ListItemIcon>
+                        <LogoutRoundedIcon fontSize="small" />
+                      </ListItemIcon>
+                      <ListItemText>Log out</ListItemText>
+                    </MenuItem>
+                  </Menu>
+
                   <AccountSettingsModal
                     open={settingsOpen}
                     onClose={() => setSettingsOpen(false)}
                   />
-                  <Button
-                    color="inherit"
-                    startIcon={<LogoutRoundedIcon />}
-                    onClick={handleLogout}
-                    sx={{ color: "text.secondary" }}
-                  >
-                    Log out
-                  </Button>
                 </>
               ) : (
                 <>

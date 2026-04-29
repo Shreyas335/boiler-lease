@@ -1,4 +1,5 @@
 import api from "./axios";
+import type { ApprovalRequestSummary } from "./company";
 
 export interface ListingAmenity {
   id: number;
@@ -8,7 +9,8 @@ export interface ListingAmenity {
 
 export interface PropertyListing {
   id: number;
-  owner_id: number;
+  /** Present on full listing payloads from the API (e.g. detail, mine, create). */
+  owner?: number;
   title: string;
   description: string;
   property_type: string;
@@ -42,6 +44,12 @@ export interface PropertyListing {
   virtual_tour_url: string;
   status: string;
   approval_status: string;
+  approved_by_company_name: string | null;
+  approved_by_company_user_id: number | null;
+  owner_id: number;
+  owner_username: string;
+  owner_first_name: string;
+  owner_last_name: string;
   published_at: string | null;
   created_at: string;
   updated_at: string;
@@ -56,10 +64,12 @@ export interface PropertyListingSummary {
   city: string;
   state: string;
   monthly_rent: string;
+  security_deposit: string | null;
   availability_start_date: string;
   availability_end_date: string;
   status: string;
   approval_status: string;
+  approved_by_company_name?: string | null;
   created_at: string;
   primary_photo_url: string;
   is_favorited: boolean;
@@ -72,10 +82,21 @@ export interface BookingRecord {
   end_date: string;
   booked_at: string;
   monthly_rent_snapshot: string | null;
-  status: "pending" | "confirmed" | "declined" | "cancelled";
+  security_deposit_snapshot: string | null;
+  deposit_paid_at: string | null;
+  status: "pending" | "confirmed" | "partially_paid" | "fully_paid" | "declined" | "cancelled";
   status_label: string;
   price: string;
   is_cancelable: boolean;
+  group_id: number | null;
+  group_name: string | null;
+  group_confirmed_user_ids: number[];
+  group_paid_user_ids: number[];
+}
+
+export interface ManagedBookingRecord extends BookingRecord {
+  sublessee_name: string;
+  sublessee_email: string;
 }
 
 export interface CreateBookingPayload {
@@ -122,7 +143,6 @@ export interface CreatePropertyListingPayload {
   contact_email?: string;
   contact_phone?: string;
   virtual_tour_url?: string;
-  status: string;
   amenity_codes?: string[];
 }
 
@@ -166,6 +186,26 @@ export async function setPrimaryListingMedia(
 
 export async function getMyListings(): Promise<PropertyListing[]> {
   const { data } = await api.get<PropertyListing[]>("/listings/mine/");
+  return data;
+}
+
+/** Security deposit payments received for bookings on this listing (subleaser only). */
+export interface OwnerListingTransaction {
+  id: number;
+  amount: string;
+  currency: string;
+  booking_id: number | null;
+  paid_at: string | null;
+  status: string;
+  sublessee_display: string;
+}
+
+export async function fetchListingOwnerTransactions(
+  listingId: number,
+): Promise<OwnerListingTransaction[]> {
+  const { data } = await api.get<OwnerListingTransaction[]>(
+    `/listings/${listingId}/transactions/`,
+  );
   return data;
 }
 
@@ -309,6 +349,27 @@ export async function createBooking(payload: CreateBookingPayload): Promise<Book
   return data;
 }
 
+export async function getManageableBookings(): Promise<ManagedBookingRecord[]> {
+  const { data } = await api.get<ManagedBookingRecord[]>("/bookings/manage/");
+  return data;
+}
+
+export async function getCompanyManageableBookings(): Promise<ManagedBookingRecord[]> {
+  const { data } = await api.get<ManagedBookingRecord[]>("/company/bookings/");
+  return data;
+}
+
+export async function updateBookingStatus(
+  bookingId: number,
+  status: "confirmed" | "declined",
+): Promise<ManagedBookingRecord> {
+  const { data } = await api.patch<ManagedBookingRecord>(
+    `/bookings/${bookingId}/status/`,
+    { status },
+  );
+  return data;
+}
+
 export async function cancelBooking(bookingId: number): Promise<{ detail: string }> {
   const { data } = await api.delete<{ detail: string }>(`/bookings/${bookingId}/`);
   return data;
@@ -354,5 +415,18 @@ export async function getFavorites(sortBy: FavoriteSortBy, order: SortOrder): Pr
   const { data } = await api.get<FavoriteRecord[]>("/favorites/", {
     params: { sort_by: sortBy, order },
   });
+  return data;
+}
+
+export type { ApprovalRequestSummary } from "./company";
+
+export async function submitApprovalRequest(
+  listingId: number,
+  payload: { management_company_id: number; guideline_id: number; subleaser_notes?: string },
+): Promise<ApprovalRequestSummary> {
+  const { data } = await api.post<ApprovalRequestSummary>(
+    `/listings/${listingId}/request-approval/`,
+    payload,
+  );
   return data;
 }

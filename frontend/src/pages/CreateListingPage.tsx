@@ -15,7 +15,7 @@ import {
   Typography,
 } from "@mui/material";
 import type { AxiosError } from "axios";
-import { useNavigate } from "react-router-dom";
+import { Link as RouterLink, useNavigate } from "react-router-dom";
 import {
   createListing,
   getListingAmenities,
@@ -32,7 +32,6 @@ import { getListingWarnings, validateListingForm } from "../utils/listingFormVal
 
 const PROPERTY_TYPES = ["apartment", "house", "condo", "studio", "other"];
 const FURNISHED_OPTIONS = ["furnished", "unfurnished", "partially_furnished"];
-const STATUS_OPTIONS = ["draft", "published", "unpublished"];
 
 const INITIAL_FORM: CreatePropertyListingPayload = {
   title: "",
@@ -53,7 +52,6 @@ const INITIAL_FORM: CreatePropertyListingPayload = {
   postal_code: "",
   country_code: "US",
   parking_available: false,
-  status: "draft",
   amenity_codes: [],
 };
 
@@ -116,6 +114,8 @@ export default function CreateListingPage() {
     );
   }
 
+  const identityBlocked = user.identity_verification_status !== "verified";
+
   function handleChange<K extends keyof CreatePropertyListingPayload>(key: K, value: CreatePropertyListingPayload[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
     setFieldErrors((prev) => ({ ...prev, [key as string]: "" }));
@@ -163,6 +163,14 @@ export default function CreateListingPage() {
     event.preventDefault();
     setPageMessage(null);
 
+    if (identityBlocked) {
+      setPageMessage({
+        type: "error",
+        text: "Verify your identity before creating a listing. Open Dashboard to start verification.",
+      });
+      return;
+    }
+
     if (!validateForm()) {
       setPageMessage({ type: "error", text: "Please fix the highlighted fields." });
       return;
@@ -199,7 +207,6 @@ export default function CreateListingPage() {
         }
       }
 
-      setPageMessage({ type: "success", text: "Listing created successfully." });
       navigate("/my-listings");
     } catch (error) {
       const axiosError = error as AxiosError<Record<string, unknown>>;
@@ -232,6 +239,16 @@ export default function CreateListingPage() {
         <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
           Add complete listing details so sublessees can evaluate your unit clearly.
         </Typography>
+
+        {identityBlocked && (
+          <Alert severity="warning" sx={{ mb: 3 }}>
+            Identity verification is required before you can create a listing.{" "}
+            <RouterLink to="/dashboard" style={{ fontWeight: 600 }}>
+              Go to Dashboard to verify
+            </RouterLink>
+            .
+          </Alert>
+        )}
 
         <Card>
           <CardContent>
@@ -412,21 +429,6 @@ export default function CreateListingPage() {
                     error={Boolean(fieldErrors.lease_term_max_months)}
                     helperText={fieldErrors.lease_term_max_months}
                   />
-                </Grid>
-                <Grid size={{ xs: 12, md: 3 }}>
-                  <TextField
-                    select
-                    fullWidth
-                    label="Status"
-                    value={form.status}
-                    onChange={(e) => handleChange("status", e.target.value)}
-                  >
-                    {STATUS_OPTIONS.map((status) => (
-                      <MenuItem key={status} value={status}>
-                        {status}
-                      </MenuItem>
-                    ))}
-                  </TextField>
                 </Grid>
               </Grid>
 
@@ -630,7 +632,11 @@ export default function CreateListingPage() {
               />
 
               <Stack direction="row" spacing={2}>
-                <Button type="submit" variant="contained" disabled={submitting || uploading}>
+                <Button
+                  type="submit"
+                  variant="contained"
+                  disabled={submitting || uploading || identityBlocked}
+                >
                   {submitting ? "Saving..." : "Create listing"}
                 </Button>
                 <Button type="button" variant="outlined" color="inherit" onClick={handleCancel}>

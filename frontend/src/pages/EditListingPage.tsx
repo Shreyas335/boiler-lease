@@ -9,13 +9,14 @@ import {
   Container,
   FormControlLabel,
   Grid,
+  Link,
   MenuItem,
   Stack,
   TextField,
   Typography,
 } from "@mui/material";
 import type { AxiosError } from "axios";
-import { useNavigate, useLocation } from "react-router-dom";
+import { Link as RouterLink, useNavigate, useLocation } from "react-router-dom";
 import {
   updateListing,
   getListingAmenities,
@@ -282,7 +283,11 @@ export default function EditListingPage() {
           Edit Property Listing
         </Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-          Update listing details to keep your unit information current.
+          Update listing details to keep your unit information current.{" "}
+          <Link component={RouterLink} to={`/listings/${listing.id}/deposits`} fontWeight={600}>
+            View deposit payments
+          </Link>{" "}
+          for this listing.
         </Typography>
 
         <Card>

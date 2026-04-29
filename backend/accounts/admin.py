@@ -4,6 +4,10 @@ from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.utils import timezone
 
 from .models import (
+    ApprovalRequest,
+    BookingGroup,
+    BookingGroupConfirmation,
+    BookingGroupMembership,
     CompanyDocument,
     FavoriteListing,
     FeedbackSubmission,
@@ -65,6 +69,17 @@ class ManagementCompanyAdmin(admin.ModelAdmin):
     actions = [approve_selected, reject_selected]
 
 
+@admin.register(ApprovalRequest)
+class ApprovalRequestAdmin(admin.ModelAdmin):
+    list_display = ("id", "listing", "management_company", "guideline", "status", "reviewed_at", "created_at")
+    list_filter = ("status",)
+    search_fields = ("listing__title", "management_company__company_name")
+    readonly_fields = ("created_at", "updated_at")
+
+    def has_add_permission(self, request):
+        return False
+
+
 @admin.register(FeedbackSubmission)
 class FeedbackSubmissionAdmin(admin.ModelAdmin):
     list_display = ("id", "user", "subject", "rating", "created_at")
@@ -109,9 +124,27 @@ class ListingMediaAdmin(admin.ModelAdmin):
 
 @admin.register(PropertyBooking)
 class PropertyBookingAdmin(admin.ModelAdmin):
-    list_display = ("sublessee", "listing", "status", "start_date", "end_date", "monthly_rent_snapshot", "booked_at")
-    list_filter = ("status", "start_date", "end_date", "booked_at")
-    search_fields = ("sublessee__email", "sublessee__username", "listing__title")
+    list_display = ("sublessee", "listing", "group", "status", "start_date", "end_date", "monthly_rent_snapshot", "booked_at")
+    list_filter = ("status", "group", "start_date", "end_date", "booked_at")
+    search_fields = ("sublessee__email", "sublessee__username", "listing__title", "group__name")
+
+
+class BookingGroupMembershipInline(admin.TabularInline):
+    model = BookingGroupMembership
+    extra = 0
+
+
+@admin.register(BookingGroup)
+class BookingGroupAdmin(admin.ModelAdmin):
+    list_display = ("name", "created_by", "created_at")
+    search_fields = ("name", "created_by__email", "created_by__username")
+    inlines = [BookingGroupMembershipInline]
+
+
+@admin.register(BookingGroupConfirmation)
+class BookingGroupConfirmationAdmin(admin.ModelAdmin):
+    list_display = ("booking", "user", "confirmed_at")
+    search_fields = ("booking__listing__title", "user__email", "user__username")
 
 
 @admin.register(FavoriteListing)
