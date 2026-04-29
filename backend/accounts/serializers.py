@@ -810,11 +810,13 @@ class BookingExtensionRequestDecisionSerializer(serializers.Serializer):
 class ManagedPropertyBookingSerializer(PropertyBookingSerializer):
     sublessee_name = serializers.SerializerMethodField()
     sublessee_email = serializers.EmailField(source="sublessee.email", read_only=True)
+    sublessee_id = serializers.IntegerField(source="sublessee.id", read_only=True)
 
     class Meta(PropertyBookingSerializer.Meta):
         fields = PropertyBookingSerializer.Meta.fields + (
             "sublessee_name",
             "sublessee_email",
+            "sublessee_id",
         )
 
     def get_sublessee_name(self, obj):

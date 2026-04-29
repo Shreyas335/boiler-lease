@@ -7,6 +7,11 @@ import {
   CardContent,
   Chip,
   Container,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  Rating,
   Stack,
   Tab,
   Tabs,
@@ -21,6 +26,7 @@ import {
   type ManagedBookingRecord,
 } from "../api/listings";
 import { useAuth } from "../contexts/AuthContext";
+import api from "../api/axios";
 
 function getBookingStatusMeta(status: ManagedBookingRecord["status"]): {
   label: string;
@@ -60,6 +66,16 @@ export default function CompanyBookingRequestsPage() {
   const [busyExtensionId, setBusyExtensionId] = useState<number | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [ratingDialog, setRatingDialog] = useState<{
+    open: boolean;
+    bookingId: number | null;
+    sublesseeId: number | null;
+  }>({ open: false, bookingId: null, sublesseeId: null });
+  const [ratingScore, setRatingScore] = useState<number | null>(null);
+  const [ratingReview, setRatingReview] = useState('');
+  const [ratingSaving, setRatingSaving] = useState(false);
+  const [ratingSuccess, setRatingSuccess] = useState<Record<number, boolean>>({});
+  const [ratingError, setRatingError] = useState<string | null>(null);
 
   const canAccess = user?.user_type === "management" && user.company_status === "approved";
 
@@ -104,6 +120,26 @@ export default function CompanyBookingRequestsPage() {
       window.clearInterval(intervalId);
     };
   }, [canAccess]);
+
+  const handleSubmitRating = async () => {
+    if (!ratingDialog.sublesseeId || !ratingScore) return;
+    setRatingSaving(true);
+    setRatingError(null);
+    try {
+      await api.post(`/profiles/${ratingDialog.sublesseeId}/rate/`, {
+        score: ratingScore,
+        review: ratingReview,
+      });
+      setRatingSuccess(prev => ({ ...prev, [ratingDialog.bookingId!]: true }));
+      setRatingDialog({ open: false, bookingId: null, sublesseeId: null });
+      setRatingScore(null);
+      setRatingReview('');
+    } catch {
+      setRatingError('Failed to submit rating. Please try again.');
+    } finally {
+      setRatingSaving(false);
+    }
+  };
 
   async function handleStatusUpdate(
     bookingId: number,
@@ -334,6 +370,24 @@ export default function CompanyBookingRequestsPage() {
                             </Button>
                           </Stack>
                         )}
+
+                        {booking.status === 'confirmed' && new Date(booking.end_date) < new Date() && (
+                          ratingSuccess[booking.id]
+                            ? <Chip label="Rated" color="success" size="small" />
+                            : (
+                              <Button
+                                size="small"
+                                variant="outlined"
+                                onClick={() => setRatingDialog({
+                                  open: true,
+                                  bookingId: booking.id,
+                                  sublesseeId: booking.sublessee_id,
+                                })}
+                              >
+                                Rate Tenant
+                              </Button>
+                            )
+                        )}
                       </Stack>
                     </CardContent>
                   </Card>
@@ -344,6 +398,51 @@ export default function CompanyBookingRequestsPage() {
           })()}
         </Stack>
       </Container>
+
+      <Dialog
+        open={ratingDialog.open}
+        onClose={() => setRatingDialog({ open: false, bookingId: null, sublesseeId: null })}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Rate Tenant</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Rate this tenant's conduct during their stay.
+          </Typography>
+          {ratingError && <Alert severity="error" sx={{ mb: 2 }}>{ratingError}</Alert>}
+          <Rating
+            value={ratingScore}
+            onChange={(_, v) => setRatingScore(v)}
+            size="large"
+          />
+          <TextField
+            label="Optional review"
+            value={ratingReview}
+            onChange={e => setRatingReview(e.target.value)}
+            multiline
+            rows={3}
+            fullWidth
+            inputProps={{ maxLength: 500 }}
+            sx={{ mt: 2 }}
+            helperText={`${ratingReview.length}/500`}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => setRatingDialog({ open: false, bookingId: null, sublesseeId: null })}
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={() => void handleSubmitRating()}
+            disabled={!ratingScore || ratingSaving}
+            variant="contained"
+          >
+            {ratingSaving ? 'Saving...' : 'Submit Rating'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }
