@@ -63,12 +63,17 @@ class Migration(migrations.Migration):
             fields=[
                 ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
                 ('created_at', models.DateTimeField(auto_now_add=True)),
-                ('blocked', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='blocks_received', to=settings.AUTH_USER_MODEL)),
-                ('blocker', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='blocks_initiated', to=settings.AUTH_USER_MODEL)),
+                ('blocked_user', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='blocks_received', to=settings.AUTH_USER_MODEL)),
+                ('blocker', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='blocks_given', to=settings.AUTH_USER_MODEL)),
             ],
-            options={
-                'db_table': 'messaging_user_block',
-            },
+        ),
+        migrations.AddConstraint(
+            model_name='userblock',
+            constraint=models.UniqueConstraint(fields=('blocker', 'blocked_user'), name='one_block_per_user_pair'),
+        ),
+        migrations.AddConstraint(
+            model_name='userblock',
+            constraint=models.CheckConstraint(condition=~models.Q(blocker=models.F('blocked_user')), name='cannot_block_self'),
         ),
         migrations.AddIndex(
             model_name='conversation',
@@ -97,13 +102,5 @@ class Migration(migrations.Migration):
         migrations.AddIndex(
             model_name='message',
             index=models.Index(fields=['conversation', 'is_read'], name='msg_conv_read_idx'),
-        ),
-        migrations.AddIndex(
-            model_name='userblock',
-            index=models.Index(fields=['blocker', 'blocked'], name='block_lookup_idx'),
-        ),
-        migrations.AddConstraint(
-            model_name='userblock',
-            constraint=models.UniqueConstraint(fields=('blocker', 'blocked'), name='userblock_unique'),
         ),
     ]
