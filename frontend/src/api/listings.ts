@@ -80,6 +80,14 @@ export interface BookingExtensionPendingSummary {
   status: string;
 }
 
+export interface BookingExtensionLatestSummary {
+  id: number;
+  requested_end_date: string;
+  status: "pending" | "approved" | "declined";
+  reviewer_notes: string;
+  decided_at: string | null;
+}
+
 export interface BookingRecord {
   id: number;
   listing: PropertyListingSummary;
@@ -96,6 +104,7 @@ export interface BookingRecord {
   /** True when booking is confirmed and the listing has availability after checkout with no pending extension. */
   can_request_extension?: boolean;
   pending_extension_request?: BookingExtensionPendingSummary | null;
+  latest_extension_request?: BookingExtensionLatestSummary | null;
 }
 
 export interface ManagedBookingRecord extends BookingRecord {
