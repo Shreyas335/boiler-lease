@@ -35,6 +35,12 @@ function getBookingStatusMeta(status: ManagedBookingRecord["status"]): {
   return { label: "Pending", color: "warning" };
 }
 
+function formatMoney(value: string | null): string {
+  const amount = Number(value ?? "");
+  if (Number.isNaN(amount)) return "$0.00";
+  return `$${amount.toFixed(2)}`;
+}
+
 export default function BookingRequestsPage() {
   const { user } = useAuth();
   const [bookings, setBookings] = useState<ManagedBookingRecord[]>([]);
@@ -122,7 +128,7 @@ export default function BookingRequestsPage() {
         nextStatus === "declined"
           ? window.prompt("Optional decline reason to share with the sublessee:", "") || ""
           : "";
-      await reviewBookingExtensionRequest(extensionRequestId, {
+      const reviewed = await reviewBookingExtensionRequest(extensionRequestId, {
         status: nextStatus,
         reviewer_notes: reviewerNotes || undefined,
       });
@@ -130,7 +136,7 @@ export default function BookingRequestsPage() {
       setBookings(refreshed);
       setSuccessMessage(
         nextStatus === "approved"
-          ? "Extension approved and booking dates updated."
+          ? `Extension approved. Additional amount due: ${formatMoney(reviewed.additional_amount_due)}.`
           : "Extension request declined.",
       );
     } catch {

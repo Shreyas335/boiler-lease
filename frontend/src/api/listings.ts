@@ -78,12 +78,14 @@ export interface BookingExtensionPendingSummary {
   id: number;
   requested_end_date: string;
   status: string;
+  additional_amount_due: string;
 }
 
 export interface BookingExtensionLatestSummary {
   id: number;
   requested_end_date: string;
   status: "pending" | "approved" | "declined";
+  additional_amount_due: string;
   reviewer_notes: string;
   decided_at: string | null;
 }
@@ -118,6 +120,7 @@ export interface BookingExtensionRequestRecord {
   requested_end_date: string;
   sublessee_notes: string;
   status: "pending" | "approved" | "declined";
+  additional_amount_due: string | null;
   reviewer_notes: string;
   decided_at: string | null;
   created_at: string;
