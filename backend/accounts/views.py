@@ -59,6 +59,7 @@ from .serializers import (
     PasswordResetConfirmSerializer,
     PasswordResetRequestSerializer,
     BookingExtensionRequestCreateSerializer,
+    BookingExtensionRequestDecisionSerializer,
     BookingExtensionRequestSerializer,
     PropertyBookingCreateSerializer,
     PropertyBookingStatusUpdateSerializer,
@@ -1202,6 +1203,45 @@ def update_booking_status(request, booking_id):
     serializer.save()
     response_serializer = ManagedPropertyBookingSerializer(booking)
     return Response(response_serializer.data, status=status.HTTP_200_OK)
+
+
+@api_view(["PATCH"])
+@permission_classes([IsAuthenticated])
+def review_booking_extension_request(request, extension_request_id):
+    ext = (
+        BookingExtensionRequest.objects.filter(pk=extension_request_id)
+        .select_related("booking", "booking__listing", "booking__sublessee")
+        .first()
+    )
+    if not ext:
+        return Response({"detail": "Extension request not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    if ext.status != BookingExtensionRequest.Status.PENDING:
+        return Response(
+            {"detail": "Only pending extension requests can be reviewed."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    booking = ext.booking
+    can_review = _can_user_update_booking_status(request, booking)
+    if not can_review:
+        return Response(
+            {"detail": "You do not have permission to review this extension request."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    serializer = BookingExtensionRequestDecisionSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    ext.status = serializer.validated_data["status"]
+    ext.reviewer_notes = serializer.validated_data.get("reviewer_notes") or ""
+    ext.decided_at = timezone.now()
+    ext.save(update_fields=["status", "reviewer_notes", "decided_at"])
+
+    if ext.status == BookingExtensionRequest.Status.APPROVED:
+        booking.end_date = ext.requested_end_date
+        booking.save(update_fields=["end_date"])
+
+    return Response(BookingExtensionRequestSerializer(ext).data, status=status.HTTP_200_OK)
 
 
 @api_view(["GET"])
