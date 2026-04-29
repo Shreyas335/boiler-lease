@@ -103,6 +103,7 @@ export interface CreateBookingPayload {
   listing: number;
   start_date: string;
   end_date: string;
+  offer_id?: number;
 }
 
 export interface FavoriteRecord {
