@@ -122,8 +122,21 @@ export default function BookingsPageContent({
   function bookingFooterText(booking: BookingRecord): string {
     const base = buildFooterText(booking);
     const pe = booking.pending_extension_request;
-    if (!pe) return base;
-    return `${base}\nExtension request pending (requested checkout through ${pe.requested_end_date}).`;
+    if (pe) {
+      return `${base}\nExtension request pending (requested checkout through ${pe.requested_end_date}).`;
+    }
+    const latest = booking.latest_extension_request;
+    if (!latest) return base;
+    if (latest.status === "approved") {
+      return `${base}\nExtension approved through ${latest.requested_end_date}.`;
+    }
+    if (latest.status === "declined") {
+      const reason = latest.reviewer_notes?.trim();
+      return reason
+        ? `${base}\nExtension declined: ${reason}`
+        : `${base}\nExtension declined.`;
+    }
+    return base;
   }
 
   function effectiveDepositAmount(booking: BookingRecord): number | null {

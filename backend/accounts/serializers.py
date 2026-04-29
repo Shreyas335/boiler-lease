@@ -485,6 +485,7 @@ class PropertyBookingSerializer(serializers.ModelSerializer):
     is_cancelable = serializers.SerializerMethodField()
     can_request_extension = serializers.SerializerMethodField()
     pending_extension_request = serializers.SerializerMethodField()
+    latest_extension_request = serializers.SerializerMethodField()
 
     class Meta:
         model = PropertyBooking
@@ -503,6 +504,7 @@ class PropertyBookingSerializer(serializers.ModelSerializer):
             "is_cancelable",
             "can_request_extension",
             "pending_extension_request",
+            "latest_extension_request",
         )
 
     def get_price(self, obj):
@@ -538,6 +540,19 @@ class PropertyBookingSerializer(serializers.ModelSerializer):
             "id": er.id,
             "requested_end_date": er.requested_end_date.isoformat(),
             "status": er.status,
+        }
+
+    def get_latest_extension_request(self, obj):
+        ers = obj.extension_requests.all()
+        er = ers[0] if ers else None
+        if er is None:
+            return None
+        return {
+            "id": er.id,
+            "requested_end_date": er.requested_end_date.isoformat(),
+            "status": er.status,
+            "reviewer_notes": er.reviewer_notes,
+            "decided_at": er.decided_at.isoformat() if er.decided_at else None,
         }
 
 
