@@ -540,6 +540,7 @@ class PropertyBookingSerializer(serializers.ModelSerializer):
             "id": er.id,
             "requested_end_date": er.requested_end_date.isoformat(),
             "status": er.status,
+            "additional_amount_due": str(er.additional_amount_due or "0.00"),
         }
 
     def get_latest_extension_request(self, obj):
@@ -551,6 +552,7 @@ class PropertyBookingSerializer(serializers.ModelSerializer):
             "id": er.id,
             "requested_end_date": er.requested_end_date.isoformat(),
             "status": er.status,
+            "additional_amount_due": str(er.additional_amount_due or "0.00"),
             "reviewer_notes": er.reviewer_notes,
             "decided_at": er.decided_at.isoformat() if er.decided_at else None,
         }
@@ -566,6 +568,7 @@ class BookingExtensionRequestSerializer(serializers.ModelSerializer):
             "sublessee_notes",
             "status",
             "reviewer_notes",
+            "additional_amount_due",
             "decided_at",
             "created_at",
         )
@@ -576,6 +579,7 @@ class BookingExtensionRequestSerializer(serializers.ModelSerializer):
             "sublessee_notes",
             "status",
             "reviewer_notes",
+            "additional_amount_due",
             "decided_at",
             "created_at",
         )

@@ -2,6 +2,7 @@ import random
 import secrets
 import hashlib
 import uuid
+from decimal import Decimal, ROUND_HALF_UP
 from datetime import timedelta
 import stripe
 from django.contrib.auth import login, logout
@@ -1235,11 +1236,22 @@ def review_booking_extension_request(request, extension_request_id):
     ext.status = serializer.validated_data["status"]
     ext.reviewer_notes = serializer.validated_data.get("reviewer_notes") or ""
     ext.decided_at = timezone.now()
-    ext.save(update_fields=["status", "reviewer_notes", "decided_at"])
 
     if ext.status == BookingExtensionRequest.Status.APPROVED:
+        extra_days = (ext.requested_end_date - booking.end_date).days
+        monthly_rent = booking.monthly_rent_snapshot or booking.listing.monthly_rent
+        monthly_rent_dec = Decimal(str(monthly_rent))
+        daily_rent = monthly_rent_dec / Decimal("30")
+        ext.additional_amount_due = (daily_rent * Decimal(extra_days)).quantize(
+            Decimal("0.01"),
+            rounding=ROUND_HALF_UP,
+        )
         booking.end_date = ext.requested_end_date
         booking.save(update_fields=["end_date"])
+    else:
+        ext.additional_amount_due = None
+
+    ext.save(update_fields=["status", "reviewer_notes", "decided_at", "additional_amount_due"])
 
     return Response(BookingExtensionRequestSerializer(ext).data, status=status.HTTP_200_OK)
 
