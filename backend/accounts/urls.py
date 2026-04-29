@@ -56,9 +56,13 @@ urlpatterns = [
     path("messaging/conversations/<int:conversation_id>/", views.conversation_detail),
     path("messaging/conversations/<int:conversation_id>/messages/", views.conversation_messages),
     path("messaging/conversations/<int:conversation_id>/read/", views.mark_messages_read),
+    path("messaging/conversations/<int:conversation_id>/offers/", views.submit_offer),
     path("messaging/unread-count/", views.unread_message_count),
     path("messaging/blocks/", views.blocks),
     path("messaging/blocks/<int:user_id>/", views.block_detail),
+    # Offers
+    path("offers/", views.list_offers),
+    path("offers/<int:offer_id>/", views.respond_to_offer),
     path("company/status/", views.company_status),
     path("company/documents/", views.company_documents),
     path("company/documents/<int:pk>/", views.company_document_delete),

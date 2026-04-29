@@ -23,6 +23,9 @@ from rest_framework.response import Response
 from .email_verification import (
     send_2fa_code_email,
     send_new_message_notification,
+    send_offer_accepted_email,
+    send_offer_declined_email,
+    send_offer_received_email,
     send_password_reset_email,
     send_verification_email,
 )
@@ -43,6 +46,7 @@ from .models import (
     Message,
     ManagementCompany,
     PasswordResetToken,
+    PriceOffer,
     PropertyBooking,
     PropertyListing,
     TransactionRecord,
@@ -73,6 +77,7 @@ from .serializers import (
     PasswordChangeSerializer,
     PasswordResetConfirmSerializer,
     PasswordResetRequestSerializer,
+    PriceOfferSerializer,
     PropertyBookingCreateSerializer,
     PropertyBookingStatusUpdateSerializer,
     PropertyListingBrowseSerializer,
@@ -2267,7 +2272,7 @@ def blocks(request):
     if not blocked_user:
         return Response({"detail": "User not found."}, status=status.HTTP_404_NOT_FOUND)
 
-    _, created = UserBlock.objects.get_or_create(blocker=user, blocked=blocked_user)
+    _, created = UserBlock.objects.get_or_create(blocker=user, blocked_user=blocked_user)
     return Response({"detail": "User blocked."}, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
 
 
@@ -2711,3 +2716,143 @@ def blocked_users_list(request):
     blocks = UserBlock.objects.filter(blocker=request.user).select_related("blocked_user")
     serializer = BlockedUserSerializer(blocks, many=True)
     return Response(serializer.data)
+
+
+# ─── Price offer views ────────────────────────────────────────────────────────
+
+def _broadcast_offer_update(offer):
+    """Push offer status change to both conversation participants via WebSocket."""
+    try:
+        from channels.layers import get_channel_layer
+        from asgiref.sync import async_to_sync
+        import json
+        from rest_framework.renderers import JSONRenderer
+
+        channel_layer = get_channel_layer()
+        if channel_layer is None:
+            return
+
+        offer_data = json.loads(JSONRenderer().render(PriceOfferSerializer(offer).data))
+        async_to_sync(channel_layer.group_send)(
+            f"conversation_{offer.conversation_id}",
+            {"type": "offer.update", "offer": offer_data},
+        )
+    except Exception:
+        pass
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def submit_offer(request, conversation_id):
+    """Subleasee submits a price offer within an existing conversation."""
+    if not _is_sublessee(request):
+        return Response({"detail": "Only sublessees can make offers."}, status=status.HTTP_403_FORBIDDEN)
+
+    conversation = _get_conversation_for_user(conversation_id, request.user)
+    if not conversation:
+        return Response({"detail": "Conversation not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    if not conversation.listing_id:
+        return Response({"detail": "This conversation is not linked to a listing."}, status=status.HTTP_400_BAD_REQUEST)
+
+    listing = PropertyListing.objects.filter(
+        pk=conversation.listing_id,
+        deleted_at__isnull=True,
+        status=PropertyListing.ListingStatus.PUBLISHED,
+        approval_status=PropertyListing.ApprovalStatus.APPROVED,
+    ).first()
+    if not listing:
+        return Response({"detail": "Listing is not available for offers."}, status=status.HTTP_400_BAD_REQUEST)
+
+    offered_price = request.data.get("offered_price")
+    note = request.data.get("note", "").strip()
+
+    try:
+        offered_price = float(offered_price)
+        if offered_price <= 0:
+            raise ValueError
+    except (TypeError, ValueError):
+        return Response({"detail": "offered_price must be a positive number."}, status=status.HTTP_400_BAD_REQUEST)
+
+    from django.db import transaction
+    with transaction.atomic():
+        offer = PriceOffer.objects.create(
+            conversation=conversation,
+            listing=listing,
+            sublessee=request.user,
+            offered_price=offered_price,
+            note=note,
+            status=PriceOffer.Status.PENDING,
+        )
+        msg = Message.objects.create(
+            conversation=conversation,
+            sender=request.user,
+            content=f"Sent a price offer: ${offered_price:,.2f}/mo",
+            offer=offer,
+        )
+        conversation.save(update_fields=["updated_at"])
+
+    recipient = conversation.get_other_participant(request.user)
+    _broadcast_new_message(msg, recipient)
+    send_offer_received_email(recipient, offer)
+
+    return Response(PriceOfferSerializer(offer).data, status=status.HTTP_201_CREATED)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def list_offers(request):
+    """List offers relevant to the current user, optionally filtered by status."""
+    user = request.user
+    status_filter = request.query_params.get("status")
+
+    if user.user_type == User.UserType.SUBLESSEE:
+        qs = PriceOffer.objects.filter(sublessee=user)
+    else:
+        qs = PriceOffer.objects.filter(listing__owner=user)
+
+    if status_filter:
+        qs = qs.filter(status=status_filter)
+
+    qs = qs.select_related("listing", "sublessee").order_by("-created_at")
+    return Response(PriceOfferSerializer(qs, many=True).data)
+
+
+@api_view(["PATCH"])
+@permission_classes([IsAuthenticated])
+def respond_to_offer(request, offer_id):
+    """Subleaser accepts or declines a pending offer."""
+    offer = PriceOffer.objects.select_related("listing", "sublessee", "conversation").filter(pk=offer_id).first()
+    if not offer:
+        return Response({"detail": "Offer not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    if offer.listing.owner_id != request.user.id:
+        return Response({"detail": "Only the listing owner can respond to offers."}, status=status.HTTP_403_FORBIDDEN)
+
+    if offer.status != PriceOffer.Status.PENDING:
+        return Response({"detail": "This offer has already been responded to."}, status=status.HTTP_400_BAD_REQUEST)
+
+    action = request.data.get("action")
+    if action not in ("accepted", "declined"):
+        return Response({"detail": "action must be 'accepted' or 'declined'."}, status=status.HTTP_400_BAD_REQUEST)
+
+    offer.status = action
+    offer.responded_at = timezone.now()
+    offer.save(update_fields=["status", "responded_at"])
+
+    status_label = "accepted" if action == "accepted" else "declined"
+    Message.objects.create(
+        conversation=offer.conversation,
+        sender=request.user,
+        content=f"Offer of ${offer.offered_price:,.2f}/mo was {status_label}.",
+    )
+    offer.conversation.save(update_fields=["updated_at"])
+
+    _broadcast_offer_update(offer)
+
+    if action == "accepted":
+        send_offer_accepted_email(offer.sublessee, offer)
+    else:
+        send_offer_declined_email(offer.sublessee, offer)
+
+    return Response(PriceOfferSerializer(offer).data)
