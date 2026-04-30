@@ -1470,10 +1470,25 @@ class ApprovalRequestDetailSerializer(serializers.ModelSerializer):
         return []
 
 
+class UserRatingDetailSerializer(serializers.ModelSerializer):
+    rater_display = serializers.SerializerMethodField()
+    rater_username = serializers.CharField(source="rater.username")
+
+    class Meta:
+        model = UserRating
+        fields = ("id", "rater_display", "rater_username", "score", "review", "created_at")
+
+    def get_rater_display(self, obj):
+        name = f"{obj.rater.first_name} {obj.rater.last_name}".strip()
+        return name or obj.rater.username
+
+
 class UserProfileSerializer(serializers.ModelSerializer):
     average_rating = serializers.SerializerMethodField()
     rating_count = serializers.SerializerMethodField()
     my_rating = serializers.SerializerMethodField()
+    my_review = serializers.SerializerMethodField()
+    reviews = serializers.SerializerMethodField()
     is_blocked = serializers.SerializerMethodField()
 
     class Meta:
@@ -1490,6 +1505,8 @@ class UserProfileSerializer(serializers.ModelSerializer):
             "average_rating",
             "rating_count",
             "my_rating",
+            "my_review",
+            "reviews",
             "is_blocked",
         )
         read_only_fields = fields
@@ -1507,6 +1524,17 @@ class UserProfileSerializer(serializers.ModelSerializer):
             return None
         rating = UserRating.objects.filter(rater=request.user, rated_user=obj).first()
         return rating.score if rating else None
+
+    def get_my_review(self, obj):
+        request = self.context.get("request")
+        if not request or not request.user.is_authenticated:
+            return None
+        rating = UserRating.objects.filter(rater=request.user, rated_user=obj).first()
+        return rating.review if rating else None
+
+    def get_reviews(self, obj):
+        qs = obj.ratings_received.select_related("rater").order_by("-created_at")
+        return UserRatingDetailSerializer(qs, many=True).data
 
     def get_is_blocked(self, obj):
         request = self.context.get("request")
