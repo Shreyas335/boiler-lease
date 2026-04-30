@@ -671,6 +671,8 @@ class PriceOffer(models.Model):
         User, on_delete=models.CASCADE, related_name="sent_offers"
     )
     offered_price = models.DecimalField(max_digits=10, decimal_places=2)
+    start_date    = models.DateField(null=True, blank=True)
+    end_date      = models.DateField(null=True, blank=True)
     note          = models.TextField(blank=True)
     status        = models.CharField(
         max_length=16, choices=Status.choices, default=Status.PENDING, db_index=True

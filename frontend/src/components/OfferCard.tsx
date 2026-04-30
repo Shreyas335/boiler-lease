@@ -107,12 +107,12 @@ export default function OfferCard({ offer, viewerIsSublessee, onOfferUpdated }: 
       {viewerIsSublessee && offer.status === "accepted" && (
         <Button
           component={RouterLink}
-          to={`/properties/${offer.listing_id}?offer_id=${offer.id}`}
+          to="/bookings/current"
           size="small"
           variant="contained"
           sx={{ mt: 1 }}
         >
-          Book at {formatPrice(offer.offered_price)}
+          View Booking
         </Button>
       )}
     </Box>

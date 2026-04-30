@@ -1,6 +1,4 @@
-import axios from "axios";
-
-const API = "/api";
+import api from "./axios";
 
 export interface AppNotification {
   id: number;
@@ -29,38 +27,38 @@ export interface NotificationPreferences {
 }
 
 export async function getNotifications(): Promise<AppNotification[]> {
-  const { data } = await axios.get(`${API}/notifications/`, { withCredentials: true });
+  const { data } = await api.get<AppNotification[]>("/notifications/");
   return data;
 }
 
 export async function getUnreadNotifCount(): Promise<{ unread_count: number }> {
-  const { data } = await axios.get(`${API}/notifications/unread-count/`, { withCredentials: true });
+  const { data } = await api.get<{ unread_count: number }>("/notifications/unread-count/");
   return data;
 }
 
 export async function markNotificationRead(id: number): Promise<void> {
-  await axios.post(`${API}/notifications/${id}/read/`, {}, { withCredentials: true });
+  await api.post(`/notifications/${id}/read/`, {});
 }
 
 export async function markAllNotificationsRead(): Promise<void> {
-  await axios.post(`${API}/notifications/read-all/`, {}, { withCredentials: true });
+  await api.post("/notifications/read-all/", {});
 }
 
 export async function getNotificationPreferences(): Promise<NotificationPreferences> {
-  const { data } = await axios.get(`${API}/notifications/preferences/`, { withCredentials: true });
+  const { data } = await api.get<NotificationPreferences>("/notifications/preferences/");
   return data;
 }
 
 export async function updateNotificationPreferences(
   patch: Partial<NotificationPreferences>
 ): Promise<NotificationPreferences> {
-  const { data } = await axios.patch(`${API}/notifications/preferences/`, patch, { withCredentials: true });
+  const { data } = await api.patch<NotificationPreferences>("/notifications/preferences/", patch);
   return data;
 }
 
 export async function sendBroadcast(title: string, body: string, listingId?: number): Promise<{ sent_to: number }> {
   const payload: Record<string, unknown> = { title, body };
   if (listingId) payload.listing_id = listingId;
-  const { data } = await axios.post(`${API}/company/broadcast/`, payload, { withCredentials: true });
+  const { data } = await api.post<{ sent_to: number }>("/company/broadcast/", payload);
   return data;
 }

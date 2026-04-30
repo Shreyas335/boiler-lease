@@ -7,10 +7,6 @@ import {
   Chip,
   CircularProgress,
   Container,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
   Divider,
   Paper,
   Stack,
@@ -18,7 +14,6 @@ import {
   TableBody,
   TableCell,
   TableRow,
-  TextField,
   Typography,
 } from "@mui/material";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
@@ -28,8 +23,8 @@ import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircleOutline";
 import CancelOutlinedIcon from "@mui/icons-material/CancelOutlined";
 import RemoveIcon from "@mui/icons-material/Remove";
 import { getManagementCompany, type PublicManagementCompany, type PublicGuideline } from "../api/company";
-import { sendBroadcast } from "../api/notifications";
 import { useAuth } from "../contexts/AuthContext";
+import BroadcastDialog from "../components/BroadcastDialog";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -189,12 +184,7 @@ export default function ManagementCompanyDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Broadcast dialog
   const [broadcastOpen, setBroadcastOpen] = useState(false);
-  const [broadcastTitle, setBroadcastTitle] = useState("");
-  const [broadcastBody, setBroadcastBody] = useState("");
-  const [broadcastBusy, setBroadcastBusy] = useState(false);
-  const [broadcastResult, setBroadcastResult] = useState<string | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -204,23 +194,7 @@ export default function ManagementCompanyDetailPage() {
       .finally(() => setLoading(false));
   }, [id]);
 
-  async function handleBroadcast() {
-    if (!broadcastTitle.trim()) return;
-    setBroadcastBusy(true);
-    setBroadcastResult(null);
-    try {
-      const { sent_to } = await sendBroadcast(broadcastTitle.trim(), broadcastBody.trim());
-      setBroadcastResult(`Sent to ${sent_to} sublessee${sent_to !== 1 ? "s" : ""}.`);
-      setBroadcastTitle("");
-      setBroadcastBody("");
-    } catch {
-      setBroadcastResult("Failed to send. Please try again.");
-    } finally {
-      setBroadcastBusy(false);
-    }
-  }
-
-  const isCompanyOwner = user?.user_type === "management" && user.company_status === "verified";
+  const isCompanyOwner = user?.user_type === "management" && user.company_status === "approved";
 
   if (loading) {
     return (
@@ -288,50 +262,7 @@ export default function ManagementCompanyDetailPage() {
         </Stack>
       )}
 
-      {/* Broadcast dialog */}
-      <Dialog open={broadcastOpen} onClose={() => !broadcastBusy && setBroadcastOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Send Broadcast Notification</DialogTitle>
-        <DialogContent>
-          <Stack spacing={2} sx={{ pt: 1 }}>
-            {broadcastResult && (
-              <Alert severity={broadcastResult.startsWith("Failed") ? "error" : "success"}>
-                {broadcastResult}
-              </Alert>
-            )}
-            <TextField
-              label="Title"
-              value={broadcastTitle}
-              onChange={(e) => setBroadcastTitle(e.target.value)}
-              fullWidth
-              autoFocus
-              inputProps={{ maxLength: 200 }}
-            />
-            <TextField
-              label="Message (optional)"
-              multiline
-              rows={3}
-              value={broadcastBody}
-              onChange={(e) => setBroadcastBody(e.target.value)}
-              fullWidth
-              inputProps={{ maxLength: 1000 }}
-            />
-            <Typography variant="caption" color="text.secondary">
-              This will notify all sublessees with active bookings on your managed listings.
-            </Typography>
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setBroadcastOpen(false)} disabled={broadcastBusy}>Cancel</Button>
-          <Button
-            variant="contained"
-            onClick={handleBroadcast}
-            disabled={broadcastBusy || !broadcastTitle.trim()}
-            startIcon={<CampaignRoundedIcon />}
-          >
-            {broadcastBusy ? "Sending..." : "Send"}
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <BroadcastDialog open={broadcastOpen} onClose={() => setBroadcastOpen(false)} />
     </Container>
   );
 }

@@ -11,6 +11,7 @@ import {
   Alert,
   Stack,
   Tooltip,
+  Divider,
   type ChipProps,
 } from "@mui/material";
 import { Link as RouterLink, useNavigate, useSearchParams } from "react-router-dom";
@@ -19,9 +20,18 @@ import HomeWorkRoundedIcon from "@mui/icons-material/HomeWorkRounded";
 import PersonSearchRoundedIcon from "@mui/icons-material/PersonSearchRounded";
 import BusinessRoundedIcon from "@mui/icons-material/BusinessRounded";
 import WarningAmberRoundedIcon from "@mui/icons-material/WarningAmberRounded";
+import CheckCircleOutlineRoundedIcon from "@mui/icons-material/CheckCircleOutlineRounded";
+import CancelOutlinedIcon from "@mui/icons-material/CancelOutlined";
+import BookmarkAddedRoundedIcon from "@mui/icons-material/BookmarkAddedRounded";
+import CampaignRoundedIcon from "@mui/icons-material/CampaignRounded";
+import NotificationsNoneRoundedIcon from "@mui/icons-material/NotificationsNoneRounded";
+import MailOutlineRoundedIcon from "@mui/icons-material/MailOutlineRounded";
 import PropertySummaryCard from "../components/PropertySummaryCard";
 import { getBookingHistory, type BookingRecord } from "../api/listings";
+import { getNotifications, markNotificationRead, type AppNotification } from "../api/notifications";
 import { useAuth } from "../contexts/AuthContext";
+import { notifDestination } from "../utils/notifDestination";
+import BroadcastDialog from "../components/BroadcastDialog";
 
 const USER_TYPE_CONFIG: Record<
   string,
@@ -56,6 +66,9 @@ export default function DashboardPage() {
   const [bookingsLoading, setBookingsLoading] = useState(false);
   const [bookingsError, setBookingsError] = useState<string | null>(null);
   const [depositNotice, setDepositNotice] = useState<"success" | "canceled" | null>(null);
+  const [inboxNotifs, setInboxNotifs] = useState<AppNotification[]>([]);
+  const [inboxLoading, setInboxLoading] = useState(false);
+  const [broadcastOpen, setBroadcastOpen] = useState(false);
   const userType = user?.user_type;
 
   useEffect(() => {
@@ -155,6 +168,15 @@ export default function DashboardPage() {
   }, [userType]);
 
   useEffect(() => {
+    if (userType !== "management") return;
+    setInboxLoading(true);
+    getNotifications()
+      .then((data) => setInboxNotifs(data.slice(0, 10)))
+      .catch(() => {})
+      .finally(() => setInboxLoading(false));
+  }, [userType]);
+
+  useEffect(() => {
     if (userType !== "sublessee") return;
     const d = searchParams.get("deposit");
     if (d === "success" || d === "canceled") {
@@ -166,6 +188,35 @@ export default function DashboardPage() {
   if (!user) return null;
 
   const config = USER_TYPE_CONFIG[user.user_type] || USER_TYPE_CONFIG.sublessee;
+
+  function notifIcon(type: string) {
+    if (type === "listing_approved") return <CheckCircleOutlineRoundedIcon fontSize="small" color="success" />;
+    if (type === "listing_rejected") return <CancelOutlinedIcon fontSize="small" color="error" />;
+    if (type === "booking_request" || type === "booking_confirmed" || type === "booking_declined")
+      return <BookmarkAddedRoundedIcon fontSize="small" color="primary" />;
+    if (type === "broadcast") return <CampaignRoundedIcon fontSize="small" color="secondary" />;
+    if (type === "new_message") return <MailOutlineRoundedIcon fontSize="small" color="action" />;
+    return <NotificationsNoneRoundedIcon fontSize="small" color="action" />;
+  }
+
+  function timeAgo(dateStr: string) {
+    const diff = Date.now() - new Date(dateStr).getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return "just now";
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    return `${Math.floor(hrs / 24)}d ago`;
+  }
+
+  async function handleInboxClick(n: AppNotification) {
+    if (!n.is_read) {
+      await markNotificationRead(n.id).catch(() => {});
+      setInboxNotifs((prev) => prev.map((x) => x.id === n.id ? { ...x, is_read: true } : x));
+    }
+    const dest = notifDestination(n);
+    if (dest) navigate(dest);
+  }
 
   const showIdentityCta =
     (user.user_type === "sublessee" || user.user_type === "subleaser") &&
@@ -361,6 +412,75 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
+        {user.user_type === "management" && user.company_status === "approved" && (
+          <Card sx={{ mb: 4 }}>
+            <CardContent sx={{ p: 4 }}>
+              <Stack spacing={2}>
+                <Stack direction="row" justifyContent="space-between" alignItems="center">
+                  <Box>
+                    <Typography variant="h6">Inbox</Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Recent notifications about your managed properties.
+                    </Typography>
+                  </Box>
+                  <Button component={RouterLink} to="/notifications" size="small" variant="text">
+                    View all
+                  </Button>
+                </Stack>
+
+                {inboxLoading ? (
+                  <Typography variant="body2" color="text.secondary">Loading…</Typography>
+                ) : inboxNotifs.length === 0 ? (
+                  <Alert severity="info">No notifications yet.</Alert>
+                ) : (
+                  <Stack divider={<Divider />}>
+                    {inboxNotifs.map((n) => (
+                      <Box
+                        key={n.id}
+                        onClick={() => void handleInboxClick(n)}
+                        sx={{
+                          display: "flex",
+                          gap: 1.5,
+                          alignItems: "flex-start",
+                          py: 1.5,
+                          cursor: notifDestination(n) ? "pointer" : "default",
+                          borderRadius: 1,
+                          "&:hover": notifDestination(n) ? { bgcolor: "action.hover" } : {},
+                          px: 1,
+                        }}
+                      >
+                        <Box sx={{ mt: 0.25, flexShrink: 0 }}>{notifIcon(n.notification_type)}</Box>
+                        <Box sx={{ flex: 1, minWidth: 0 }}>
+                          <Stack direction="row" justifyContent="space-between" alignItems="baseline" gap={1}>
+                            <Typography
+                              variant="body2"
+                              fontWeight={n.is_read ? 400 : 700}
+                              noWrap
+                            >
+                              {n.title}
+                            </Typography>
+                            <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0 }}>
+                              {timeAgo(n.created_at)}
+                            </Typography>
+                          </Stack>
+                          {n.body && (
+                            <Typography variant="caption" color="text.secondary" display="block" noWrap>
+                              {n.body}
+                            </Typography>
+                          )}
+                        </Box>
+                        {!n.is_read && (
+                          <Box sx={{ width: 8, height: 8, borderRadius: "50%", bgcolor: "primary.main", mt: 0.75, flexShrink: 0 }} />
+                        )}
+                      </Box>
+                    ))}
+                  </Stack>
+                )}
+              </Stack>
+            </CardContent>
+          </Card>
+        )}
+
         {user.user_type === "sublessee" && (
           <Card sx={{ mb: 4 }}>
             <CardContent sx={{ p: 4 }}>
@@ -499,10 +619,23 @@ export default function DashboardPage() {
                   </Button>
                 </span>
               </Tooltip>
+              <Tooltip title={user.company_status !== "approved" ? "Company verification required" : ""}>
+                <span>
+                  <Button
+                    variant="outlined"
+                    disabled={user.company_status !== "approved"}
+                    startIcon={<CampaignRoundedIcon />}
+                    onClick={() => setBroadcastOpen(true)}
+                  >
+                    Send Broadcast
+                  </Button>
+                </span>
+              </Tooltip>
             </>
           )}
         </Box>
       </Container>
+      <BroadcastDialog open={broadcastOpen} onClose={() => setBroadcastOpen(false)} />
     </Box>
   );
 }

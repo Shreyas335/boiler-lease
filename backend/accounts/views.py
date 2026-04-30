@@ -1243,6 +1243,19 @@ def create_booking(request):
         )
     except Exception:
         pass
+    if listing.approved_by_company_id:
+        try:
+            company = listing.approved_by_company
+            create_notification(
+                company.user,
+                "booking_request",
+                f"New booking on managed property '{listing.title}'",
+                body=f"{sublessee_name} submitted a booking request for a property managed by {company.company_name}.",
+                related_listing_id=listing.id,
+                related_booking_id=booking.id,
+            )
+        except Exception:
+            pass
     response_serializer = PropertyBookingSerializer(
         booking,
         context={"user": request.user},
@@ -1431,10 +1444,9 @@ def manageable_bookings(request):
     bookings = (
         PropertyBooking.objects.filter(
             listing__owner=request.user,
-            listing__approved_by_company__isnull=True,
             listing__deleted_at__isnull=True,
         )
-        .select_related("listing", "sublessee")
+        .select_related("listing", "sublessee", "listing__approved_by_company")
         .prefetch_related("listing__media")
         .order_by("status", "-booked_at")
     )
@@ -2883,6 +2895,8 @@ def submit_offer(request, conversation_id):
 
     offered_price = request.data.get("offered_price")
     note = request.data.get("note", "").strip()
+    start_date_raw = request.data.get("start_date")
+    end_date_raw = request.data.get("end_date")
 
     try:
         offered_price = float(offered_price)
@@ -2891,6 +2905,24 @@ def submit_offer(request, conversation_id):
     except (TypeError, ValueError):
         return Response({"detail": "offered_price must be a positive number."}, status=status.HTTP_400_BAD_REQUEST)
 
+    from datetime import date as date_type
+    try:
+        from datetime import datetime
+        start_date = datetime.strptime(start_date_raw, "%Y-%m-%d").date() if start_date_raw else None
+        end_date = datetime.strptime(end_date_raw, "%Y-%m-%d").date() if end_date_raw else None
+    except (ValueError, TypeError):
+        return Response({"detail": "start_date and end_date must be in YYYY-MM-DD format."}, status=status.HTTP_400_BAD_REQUEST)
+
+    if not start_date or not end_date:
+        return Response({"detail": "start_date and end_date are required."}, status=status.HTTP_400_BAD_REQUEST)
+    if end_date < start_date:
+        return Response({"detail": "end_date must be on or after start_date."}, status=status.HTTP_400_BAD_REQUEST)
+    if start_date < listing.availability_start_date or end_date > listing.availability_end_date:
+        return Response(
+            {"detail": f"Dates must be within listing availability ({listing.availability_start_date} – {listing.availability_end_date})."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
     from django.db import transaction
     with transaction.atomic():
         offer = PriceOffer.objects.create(
@@ -2898,6 +2930,8 @@ def submit_offer(request, conversation_id):
             listing=listing,
             sublessee=request.user,
             offered_price=offered_price,
+            start_date=start_date,
+            end_date=end_date,
             note=note,
             status=PriceOffer.Status.PENDING,
         )
@@ -2953,7 +2987,7 @@ def list_offers(request):
 @permission_classes([IsAuthenticated])
 def respond_to_offer(request, offer_id):
     """Subleaser accepts or declines a pending offer."""
-    offer = PriceOffer.objects.select_related("listing", "sublessee", "conversation").filter(pk=offer_id).first()
+    offer = PriceOffer.objects.select_related("listing", "listing__approved_by_company", "listing__approved_by_company__user", "sublessee", "conversation").filter(pk=offer_id).first()
     if not offer:
         return Response({"detail": "Offer not found."}, status=status.HTTP_404_NOT_FOUND)
 
@@ -2982,19 +3016,57 @@ def respond_to_offer(request, offer_id):
     _broadcast_offer_update(offer)
 
     if action == "accepted":
+        booking = None
+        if offer.start_date and offer.end_date:
+            booking = PropertyBooking.objects.create(
+                listing=offer.listing,
+                sublessee=offer.sublessee,
+                start_date=offer.start_date,
+                end_date=offer.end_date,
+                monthly_rent_snapshot=offer.offered_price,
+                security_deposit_snapshot=offer.listing.security_deposit,
+                status=PropertyBooking.Status.PENDING,
+            )
         send_offer_accepted_email(offer.sublessee, offer)
         try:
             create_notification(
                 offer.sublessee,
                 "offer_accepted",
                 f"Your offer was accepted for '{offer.listing.title}'",
-                body=f"Your offer of ${offer.offered_price:,.2f}/mo was accepted. Book now!",
+                body=f"Your offer of ${offer.offered_price:,.2f}/mo was accepted. A booking request has been created.",
                 related_listing_id=offer.listing_id,
+                related_booking_id=booking.id if booking else None,
                 related_offer_id=offer.id,
                 related_conversation_id=offer.conversation_id,
             )
         except Exception:
             pass
+        if booking:
+            sublessee_name = offer.sublessee.get_full_name() or offer.sublessee.username
+            try:
+                create_notification(
+                    offer.listing.owner,
+                    "booking_request",
+                    f"New booking request for '{offer.listing.title}'",
+                    body=f"{sublessee_name} submitted a booking request via an accepted offer.",
+                    related_listing_id=offer.listing_id,
+                    related_booking_id=booking.id,
+                )
+            except Exception:
+                pass
+            if offer.listing.approved_by_company_id:
+                try:
+                    company = offer.listing.approved_by_company
+                    create_notification(
+                        company.user,
+                        "booking_request",
+                        f"New booking on managed property '{offer.listing.title}'",
+                        body=f"{sublessee_name} booked via an accepted offer of ${offer.offered_price:,.2f}/mo.",
+                        related_listing_id=offer.listing_id,
+                        related_booking_id=booking.id,
+                    )
+                except Exception:
+                    pass
     else:
         send_offer_declined_email(offer.sublessee, offer)
         try:
@@ -3073,8 +3145,18 @@ def company_broadcast(request):
 
     company = request.user.management_company
 
+    listings_qs = PropertyListing.objects.filter(
+        approved_by_company=company,
+        deleted_at__isnull=True,
+    )
+    if listing_id:
+        listings_qs = listings_qs.filter(id=listing_id)
+
+    listing_ids = list(listings_qs.values_list("id", flat=True))
+
+    # Subleasees with active bookings on managed listings
     bookings_qs = PropertyBooking.objects.filter(
-        listing__approved_by_company=company,
+        listing_id__in=listing_ids,
         status__in=[
             PropertyBooking.Status.CONFIRMED,
             PropertyBooking.Status.PARTIALLY_PAID,
@@ -3082,22 +3164,29 @@ def company_broadcast(request):
         ],
     ).select_related("sublessee")
 
-    if listing_id:
-        bookings_qs = bookings_qs.filter(listing_id=listing_id)
+    # Subleasers who own managed listings
+    subleaser_qs = User.objects.filter(
+        property_listings__id__in=listing_ids,
+        property_listings__deleted_at__isnull=True,
+    ).distinct()
 
     seen_ids = set()
     count = 0
+
     for booking in bookings_qs:
         if booking.sublessee_id and booking.sublessee_id not in seen_ids:
             seen_ids.add(booking.sublessee_id)
             try:
-                create_notification(
-                    booking.sublessee,
-                    "broadcast",
-                    title,
-                    body=body,
-                    related_listing_id=booking.listing_id,
-                )
+                create_notification(booking.sublessee, "broadcast", title, body=body, related_listing_id=booking.listing_id)
+                count += 1
+            except Exception:
+                pass
+
+    for subleaser in subleaser_qs:
+        if subleaser.id not in seen_ids:
+            seen_ids.add(subleaser.id)
+            try:
+                create_notification(subleaser, "broadcast", title, body=body)
                 count += 1
             except Exception:
                 pass

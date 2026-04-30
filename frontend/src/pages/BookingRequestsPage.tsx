@@ -154,6 +154,7 @@ export default function BookingRequestsPage() {
                 const statusMeta = getBookingStatusMeta(booking.status);
                 const isPending = booking.status === "pending";
                 const isBusy = busyBookingId === booking.id;
+                const managedByCompany = booking.listing.approved_by_company_name;
 
                 return (
                   <Card key={booking.id}>
@@ -186,7 +187,11 @@ export default function BookingRequestsPage() {
                           </Typography>
                         </Stack>
 
-                        {isPending && (
+                        {managedByCompany ? (
+                          <Alert severity="info" sx={{ py: 0.5 }}>
+                            Managed by {managedByCompany} — they review and approve bookings on this listing.
+                          </Alert>
+                        ) : isPending && (
                           <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
                             <Button
                               variant="contained"

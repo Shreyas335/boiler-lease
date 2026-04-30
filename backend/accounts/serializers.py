@@ -1386,6 +1386,8 @@ class PriceOfferSerializer(serializers.ModelSerializer):
             "sublessee_id",
             "sublessee_name",
             "offered_price",
+            "start_date",
+            "end_date",
             "note",
             "status",
             "created_at",
@@ -1438,6 +1440,8 @@ class ConversationSerializer(serializers.ModelSerializer):
             "title": obj.listing.title,
             "city": obj.listing.city,
             "state": obj.listing.state,
+            "availability_start_date": str(obj.listing.availability_start_date),
+            "availability_end_date": str(obj.listing.availability_end_date),
         }
 
     def get_last_message(self, obj):
