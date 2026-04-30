@@ -63,6 +63,13 @@ urlpatterns = [
     # Offers
     path("offers/", views.list_offers),
     path("offers/<int:offer_id>/", views.respond_to_offer),
+    # Notifications
+    path("notifications/", views.list_notifications),
+    path("notifications/unread-count/", views.notifications_unread_count),
+    path("notifications/read-all/", views.mark_all_notifications_read),
+    path("notifications/<int:notification_id>/read/", views.mark_notification_read),
+    path("notifications/preferences/", views.notification_preferences),
+    path("company/broadcast/", views.company_broadcast),
     path("company/status/", views.company_status),
     path("company/documents/", views.company_documents),
     path("company/documents/<int:pk>/", views.company_document_delete),
