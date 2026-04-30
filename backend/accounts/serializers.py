@@ -35,6 +35,20 @@ def _validate_tags_field(value):
         raise serializers.ValidationError(str(exc)) from exc
 
 
+def _listing_platform_fee_percent_str():
+    v = getattr(settings, "PLATFORM_BOOKING_FEE_PERCENT", None)
+    return str(v) if v is not None else "3.00"
+
+
+def _listing_management_fee_percent_str(obj):
+    if not getattr(obj, "approved_by_company_id", None):
+        return None
+    company = getattr(obj, "approved_by_company", None)
+    if company is None:
+        return None
+    return str(company.booking_fee_percent)
+
+
 class UserSerializer(serializers.ModelSerializer):
     company_name = serializers.SerializerMethodField()
     company_status = serializers.SerializerMethodField()
@@ -369,6 +383,8 @@ class PropertyListingSerializer(serializers.ModelSerializer):
     media = serializers.SerializerMethodField()
     approved_by_company_name = serializers.SerializerMethodField()
     approved_by_company_user_id = serializers.SerializerMethodField()
+    platform_fee_percent = serializers.SerializerMethodField()
+    management_fee_percent = serializers.SerializerMethodField()
     owner_id = serializers.IntegerField(source="owner.id", read_only=True)
     owner_username = serializers.CharField(source="owner.username", read_only=True)
     owner_first_name = serializers.CharField(source="owner.first_name", read_only=True)
@@ -422,9 +438,17 @@ class PropertyListingSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
             "tags",
+            "platform_fee_percent",
+            "management_fee_percent",
             "amenities",
             "media",
         )
+
+    def get_platform_fee_percent(self, obj):
+        return _listing_platform_fee_percent_str()
+
+    def get_management_fee_percent(self, obj):
+        return _listing_management_fee_percent_str(obj)
 
     def get_amenities(self, obj):
         amenities = ListingAmenity.objects.filter(listing_links__listing=obj, is_active=True).distinct()
@@ -448,6 +472,8 @@ class PropertyListingSerializer(serializers.ModelSerializer):
 class PropertyListingSummarySerializer(serializers.ModelSerializer):
     primary_photo_url = serializers.SerializerMethodField()
     is_favorited = serializers.SerializerMethodField()
+    platform_fee_percent = serializers.SerializerMethodField()
+    management_fee_percent = serializers.SerializerMethodField()
 
     class Meta:
         model = PropertyListing
@@ -463,10 +489,18 @@ class PropertyListingSummarySerializer(serializers.ModelSerializer):
             "status",
             "approval_status",
             "tags",
+            "platform_fee_percent",
+            "management_fee_percent",
             "created_at",
             "primary_photo_url",
             "is_favorited",
         )
+
+    def get_platform_fee_percent(self, obj):
+        return _listing_platform_fee_percent_str()
+
+    def get_management_fee_percent(self, obj):
+        return _listing_management_fee_percent_str(obj)
 
     def get_primary_photo_url(self, obj):
         media = (
@@ -1093,6 +1127,8 @@ class PropertyListingBrowseSerializer(serializers.ModelSerializer):
     media = ListingMediaSerializer(many=True, read_only=True)
     approved_by_company_name = serializers.SerializerMethodField()
     approved_by_company_user_id = serializers.SerializerMethodField()
+    platform_fee_percent = serializers.SerializerMethodField()
+    management_fee_percent = serializers.SerializerMethodField()
     owner_id = serializers.IntegerField(source="owner.id", read_only=True)
     owner_username = serializers.CharField(source="owner.username", read_only=True)
     owner_first_name = serializers.CharField(source="owner.first_name", read_only=True)
@@ -1130,10 +1166,18 @@ class PropertyListingBrowseSerializer(serializers.ModelSerializer):
             "owner_first_name",
             "owner_last_name",
             "tags",
+            "platform_fee_percent",
+            "management_fee_percent",
             "amenities",
             "media",
         )
         read_only_fields = fields
+
+    def get_platform_fee_percent(self, obj):
+        return _listing_platform_fee_percent_str()
+
+    def get_management_fee_percent(self, obj):
+        return _listing_management_fee_percent_str(obj)
 
     def get_amenities(self, obj):
         amenities = ListingAmenity.objects.filter(listing_links__listing=obj, is_active=True).distinct()
@@ -1253,8 +1297,20 @@ class OwnerListingTransactionSerializer(serializers.ModelSerializer):
 class ManagementCompanySerializer(serializers.ModelSerializer):
     class Meta:
         model = ManagementCompany
-        fields = ("id", "company_name", "status", "rejection_reason", "reviewed_at", "created_at")
-        read_only_fields = ("id", "status", "rejection_reason", "reviewed_at", "created_at")
+        fields = (
+            "id",
+            "company_name",
+            "booking_fee_percent",
+            "status",
+            "rejection_reason",
+            "reviewed_at",
+            "created_at",
+        )
+        read_only_fields = ("id", "company_name", "status", "rejection_reason", "reviewed_at", "created_at")
+
+
+class CompanyBookingFeeUpdateSerializer(serializers.Serializer):
+    booking_fee_percent = serializers.DecimalField(max_digits=5, decimal_places=2, min_value=0, max_value=100)
 
 
 class PublicGuidelineSerializer(serializers.ModelSerializer):

@@ -34,6 +34,9 @@ import {
   createGuideline,
   updateGuideline,
   deleteGuideline,
+  getCompanyStatus,
+  updateCompanyBookingFee,
+  type CompanyProfile,
 } from "../api/company";
 import { getListingAmenities } from "../api/listings";
 import type { ListingAmenity } from "../api/listings";
@@ -282,6 +285,10 @@ function GuidelineSummary({ g, amenities }: { g: GuidelineRecord; amenities: Lis
 export default function GuidelineSettingsPage() {
   const [guidelines, setGuidelines] = useState<GuidelineRecord[]>([]);
   const [amenities, setAmenities] = useState<ListingAmenity[]>([]);
+  const [companyProfile, setCompanyProfile] = useState<CompanyProfile | null>(null);
+  const [bookingFeeDraft, setBookingFeeDraft] = useState("");
+  const [feeSaving, setFeeSaving] = useState(false);
+  const [feeMessage, setFeeMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -291,11 +298,50 @@ export default function GuidelineSettingsPage() {
   const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
-    Promise.all([getGuidelines(), getListingAmenities()])
-      .then(([g, a]) => { setGuidelines(g); setAmenities(a); })
-      .catch(() => setError("Failed to load guidelines."))
-      .finally(() => setLoading(false));
+    let cancelled = false;
+    async function load() {
+      setError(null);
+      try {
+        const [g, a] = await Promise.all([getGuidelines(), getListingAmenities()]);
+        if (!cancelled) {
+          setGuidelines(g);
+          setAmenities(a);
+        }
+      } catch {
+        if (!cancelled) setError("Failed to load guidelines.");
+      }
+      try {
+        const c = await getCompanyStatus();
+        if (!cancelled) {
+          setCompanyProfile(c);
+          setBookingFeeDraft(c.booking_fee_percent ?? "0");
+        }
+      } catch {
+        /* non-management or missing company — ignore */
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    void load();
+    return () => {
+      cancelled = true;
+    };
   }, []);
+
+  async function handleSaveBookingFee() {
+    setFeeMessage(null);
+    setFeeSaving(true);
+    try {
+      const next = await updateCompanyBookingFee(bookingFeeDraft.trim());
+      setCompanyProfile(next);
+      setBookingFeeDraft(next.booking_fee_percent);
+      setFeeMessage({ type: "success", text: "Booking fee saved." });
+    } catch {
+      setFeeMessage({ type: "error", text: "Could not save booking fee. Use a number from 0 to 100." });
+    } finally {
+      setFeeSaving(false);
+    }
+  }
 
   async function handleCreate(form: GuidelineFormData) {
     const created = await createGuideline(form);
@@ -343,6 +389,36 @@ export default function GuidelineSettingsPage() {
       </Typography>
 
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+
+      {companyProfile?.status === "approved" && (
+        <Paper variant="outlined" sx={{ px: 2.5, py: 2, mb: 3 }}>
+          <Typography fontWeight={600} gutterBottom>
+            Listing booking fee
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Percent applied to prorated rent in the sublessee price breakdown for listings your company has approved.
+          </Typography>
+          {feeMessage && (
+            <Alert severity={feeMessage.type} sx={{ mb: 2 }} onClose={() => setFeeMessage(null)}>
+              {feeMessage.text}
+            </Alert>
+          )}
+          <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems={{ sm: "flex-end" }}>
+            <TextField
+              label="Fee (% of base rent)"
+              type="number"
+              size="small"
+              value={bookingFeeDraft}
+              onChange={(e) => setBookingFeeDraft(e.target.value)}
+              inputProps={{ min: 0, max: 100, step: 0.25 }}
+              sx={{ maxWidth: 220 }}
+            />
+            <Button variant="contained" onClick={() => void handleSaveBookingFee()} disabled={feeSaving}>
+              {feeSaving ? "Saving…" : "Save fee"}
+            </Button>
+          </Stack>
+        </Paper>
+      )}
 
       <Stack spacing={2} mb={3}>
         {guidelines.length === 0 ? (

@@ -61,6 +61,12 @@ class ManagementCompany(models.Model):
 
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="management_company")
     company_name = models.CharField(max_length=200)
+    booking_fee_percent = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=0,
+        help_text="Fee applied to the rent portion of a booking for listings approved by this company (0–100).",
+    )
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
     rejection_reason = models.TextField(blank=True)
     reviewed_at = models.DateTimeField(null=True, blank=True)

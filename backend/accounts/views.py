@@ -54,6 +54,7 @@ from .serializers import (
     BookingGroupCreateSerializer,
     BookingGroupInviteSerializer,
     BookingGroupSerializer,
+    CompanyBookingFeeUpdateSerializer,
     CompanyDocumentSerializer,
     CompanyDocumentUploadSerializer,
     FavoriteListingSerializer,
@@ -803,7 +804,11 @@ def my_property_listings(request):
             status=status.HTTP_403_FORBIDDEN,
         )
 
-    listings = request.user.property_listings.filter(deleted_at__isnull=True).order_by("-created_at")
+    listings = (
+        request.user.property_listings.filter(deleted_at__isnull=True)
+        .select_related("approved_by_company")
+        .order_by("-created_at")
+    )
     return Response(PropertyListingSerializer(listings, many=True).data)
 
 
@@ -936,7 +941,7 @@ def browse_property_listings(request):
     )
 
     # Optimization: select_related and prefetch_related
-    queryset = queryset.select_related('owner').prefetch_related(
+    queryset = queryset.select_related("owner", "approved_by_company").prefetch_related(
         Prefetch('media'),
         Prefetch('amenity_links__amenity', queryset=ListingAmenity.objects.filter(is_active=True))
     )
@@ -1959,7 +1964,9 @@ def property_listing_detail(request, listing_id):
     DELETE: Delete listing (owner only)
     """
     try:
-        listing = PropertyListing.objects.get(id=listing_id, deleted_at__isnull=True)
+        listing = PropertyListing.objects.select_related("owner", "approved_by_company").get(
+            id=listing_id, deleted_at__isnull=True
+        )
     except PropertyListing.DoesNotExist:
         return Response(
             {"detail": "Property listing not found."}, status=status.HTTP_404_NOT_FOUND
@@ -2090,7 +2097,7 @@ def my_favorite_listings(request):
 
     favorites = (
         FavoriteListing.objects.filter(user=request.user, listing__deleted_at__isnull=True)
-        .select_related("listing")
+        .select_related("listing", "listing__approved_by_company")
         .prefetch_related("listing__media")
     )
     sort_by = request.query_params.get("sort_by", "date_saved")
@@ -2110,7 +2117,7 @@ def my_favorite_listings(request):
     return Response(serializer.data)
 
 
-@api_view(["GET"])
+@api_view(["GET", "PATCH"])
 @permission_classes([IsAuthenticated])
 def company_status(request):
     if request.user.user_type != User.UserType.MANAGEMENT:
@@ -2121,6 +2128,20 @@ def company_status(request):
         company = request.user.management_company
     except ManagementCompany.DoesNotExist:
         return Response({"detail": "No company found for this user."}, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == "GET":
+        return Response(ManagementCompanySerializer(company).data)
+
+    if not _is_approved_management(request):
+        return Response(
+            {"detail": "Only approved management companies can update booking fees."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    serializer = CompanyBookingFeeUpdateSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    company.booking_fee_percent = serializer.validated_data["booking_fee_percent"]
+    company.save(update_fields=["booking_fee_percent", "updated_at"])
     return Response(ManagementCompanySerializer(company).data)
 
 
