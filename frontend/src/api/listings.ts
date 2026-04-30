@@ -52,6 +52,8 @@ export interface PropertyListing {
   published_at: string | null;
   created_at: string;
   updated_at: string;
+  /** Display labels (preset or custom); stored on the listing. */
+  tags?: string[];
   amenities: ListingAmenity[];
   media: ListingMedia[];
   is_favorited?: boolean;
@@ -72,6 +74,7 @@ export interface PropertyListingSummary {
   created_at: string;
   primary_photo_url: string;
   is_favorited: boolean;
+  tags?: string[];
 }
 
 export interface BookingExtensionPendingSummary {
@@ -175,6 +178,7 @@ export interface CreatePropertyListingPayload {
   contact_phone?: string;
   virtual_tour_url?: string;
   amenity_codes?: string[];
+  tags?: string[];
 }
 
 export async function createListing(
@@ -243,6 +247,11 @@ export async function fetchListingOwnerTransactions(
 export async function getListingAmenities(): Promise<ListingAmenity[]> {
   const { data } = await api.get<ListingAmenity[]>("/listings/amenities/");
   return data;
+}
+
+export async function getListingTagPresets(): Promise<string[]> {
+  const { data } = await api.get<{ presets: string[] }>("/listings/tag-presets/");
+  return data.presets ?? [];
 }
 
 // --- Media types & helpers ---

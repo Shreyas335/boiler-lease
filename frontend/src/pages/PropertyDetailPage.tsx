@@ -225,6 +225,13 @@ export default function PropertyDetailPage() {
               {listing.street_line_1}
               {listing.street_line_2 ? `, ${listing.street_line_2}` : ""}, {listing.city}, {listing.state} {listing.postal_code}
             </Typography>
+            {listing.tags && listing.tags.length > 0 && (
+              <Stack direction="row" flexWrap="wrap" gap={0.75} useFlexGap sx={{ mt: 1 }}>
+                {listing.tags.map((tag) => (
+                  <Chip key={tag} label={tag} size="small" variant="outlined" color="primary" />
+                ))}
+              </Stack>
+            )}
             {listing.approved_by_company_name && (
               <Stack direction="row" spacing={0.5} alignItems="center" sx={{ mt: 0.5 }}>
                 <VerifiedIcon fontSize="small" color="success" />
