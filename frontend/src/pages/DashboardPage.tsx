@@ -393,7 +393,7 @@ export default function DashboardPage() {
                 {statsError && <Alert severity='error' sx={{ mt: 1 }}>{statsError}</Alert>}
                 {dashStats && (
                   <Grid container spacing={2} sx={{ mt: 1 }}>
-                    <Grid item xs={12} sm={6} md={3}>
+                    <Grid size={{ xs: 12, sm: 6, md: 3 }}>
                       <Card variant='outlined'>
                         <CardContent sx={{ textAlign: 'center' }}>
                           <Typography variant='h3' color='primary'>{dashStats.total_listings}</Typography>
@@ -401,7 +401,7 @@ export default function DashboardPage() {
                         </CardContent>
                       </Card>
                     </Grid>
-                    <Grid item xs={12} sm={6} md={3}>
+                    <Grid size={{ xs: 12, sm: 6, md: 3 }}>
                       <Card variant='outlined'>
                         <CardContent sx={{ textAlign: 'center' }}>
                           <Typography variant='h3' color='warning.main'>{dashStats.pending_approvals}</Typography>
@@ -409,7 +409,7 @@ export default function DashboardPage() {
                         </CardContent>
                       </Card>
                     </Grid>
-                    <Grid item xs={12} sm={6} md={3}>
+                    <Grid size={{ xs: 12, sm: 6, md: 3 }}>
                       <Card variant='outlined'>
                         <CardContent sx={{ textAlign: 'center' }}>
                           <Typography variant='h3' color='success.main'>{dashStats.active_bookings}</Typography>
@@ -417,7 +417,7 @@ export default function DashboardPage() {
                         </CardContent>
                       </Card>
                     </Grid>
-                    <Grid item xs={12}>
+                    <Grid size={12}>
                       <Typography variant='subtitle2' sx={{ mt: 1, mb: 1 }}>Recent Transactions</Typography>
                       {dashStats.recent_transactions.length === 0 ? (
                         <Alert severity='info'>No recent transactions.</Alert>
