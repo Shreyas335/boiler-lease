@@ -381,8 +381,6 @@ export default function GuidelineSettingsPage() {
 
   return (
     <Container maxWidth="md" sx={{ py: 4 }}>
-      <FeeConfigSection />
-
       <Typography variant="h4" fontWeight={700} mb={1}>
         Guidelines / Fees
       </Typography>
@@ -390,6 +388,8 @@ export default function GuidelineSettingsPage() {
         Define listing requirements per building. Each guideline represents a building your
         company manages (e.g. Verve Apartments, The Hub).
       </Typography>
+
+      <FeeConfigSection />
 
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
 
