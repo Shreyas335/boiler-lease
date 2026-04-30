@@ -39,6 +39,8 @@ import ProfilePage from "./pages/ProfilePage";
 import EditProfilePage from "./pages/EditProfilePage";
 import PrivacySettingsPage from "./pages/PrivacySettingsPage";
 import OffersPage from "./pages/OffersPage";
+import NotificationsPage from "./pages/NotificationsPage";
+import NotificationSettingsPage from "./pages/NotificationSettingsPage";
 
 function App() {
   return (
@@ -276,6 +278,22 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <OffersPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/notifications"
+                element={
+                  <ProtectedRoute>
+                    <NotificationsPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/settings/notifications"
+                element={
+                  <ProtectedRoute>
+                    <NotificationSettingsPage />
                   </ProtectedRoute>
                 }
               />
