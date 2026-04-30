@@ -70,6 +70,13 @@ class ChatConsumer(AsyncWebsocketConsumer):
             "unread_count": event.get("unread_count", 0),
         }))
 
+    async def notification_new(self, event):
+        """Triggered by create_notification helper to push a new in-app notification."""
+        await self.send(text_data=json.dumps({
+            "type": "notification",
+            "notification": event["notification"],
+        }))
+
     # ── Helpers ───────────────────────────────────────────────────────────────
 
     @database_sync_to_async
@@ -80,3 +87,36 @@ class ChatConsumer(AsyncWebsocketConsumer):
         ).filter(
             Q(participant_1=self.user) | Q(participant_2=self.user)
         ).exists()
+
+
+class NotificationConsumer(AsyncWebsocketConsumer):
+    """
+    Global WebSocket consumer for real-time in-app notifications.
+
+    URL: ws/notifications/
+
+    Connects to the user's personal group (user_{id}) and forwards any
+    notification_new events dispatched by create_notification().
+    """
+
+    async def connect(self):
+        self.user = self.scope["user"]
+        if not self.user.is_authenticated:
+            await self.close(code=4001)
+            return
+        self.group = f"user_{self.user.id}"
+        await self.channel_layer.group_add(self.group, self.channel_name)
+        await self.accept()
+
+    async def disconnect(self, close_code):
+        if hasattr(self, "group"):
+            await self.channel_layer.group_discard(self.group, self.channel_name)
+
+    async def receive(self, text_data):
+        pass  # client never sends
+
+    async def notification_new(self, event):
+        await self.send(text_data=json.dumps({
+            "type": "notification",
+            "notification": event["notification"],
+        }))
