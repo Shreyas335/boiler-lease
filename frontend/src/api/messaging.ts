@@ -14,6 +14,8 @@ export interface ListingSummary {
   title: string;
   city: string;
   state: string;
+  availability_start_date: string;
+  availability_end_date: string;
 }
 
 export interface LastMessage {

@@ -65,6 +65,8 @@ export default function ConversationPage() {
   // Offer modal state
   const [offerModalOpen, setOfferModalOpen] = useState(false);
   const [offerPrice, setOfferPrice] = useState("");
+  const [offerStartDate, setOfferStartDate] = useState("");
+  const [offerEndDate, setOfferEndDate] = useState("");
   const [offerNote, setOfferNote] = useState("");
   const [offerSubmitting, setOfferSubmitting] = useState(false);
   const [offerError, setOfferError] = useState<string | null>(null);
@@ -158,10 +160,18 @@ export default function ConversationPage() {
       setOfferError("Please enter a valid price greater than 0.");
       return;
     }
+    if (!offerStartDate || !offerEndDate) {
+      setOfferError("Please select both a start date and an end date.");
+      return;
+    }
+    if (offerEndDate < offerStartDate) {
+      setOfferError("End date must be on or after the start date.");
+      return;
+    }
     setOfferSubmitting(true);
     setOfferError(null);
     try {
-      const offer = await submitOffer(convId, price, offerNote.trim());
+      const offer = await submitOffer(convId, price, offerStartDate, offerEndDate, offerNote.trim());
       // The backend also creates a message; it arrives via WebSocket, but optimistically add it
       const optimisticMsg: Message = {
         id: Date.now(), // temporary id; WS echo deduplication keeps the real one
@@ -177,6 +187,8 @@ export default function ConversationPage() {
       setMessages((prev) => [...prev, optimisticMsg]);
       setOfferModalOpen(false);
       setOfferPrice("");
+      setOfferStartDate("");
+      setOfferEndDate("");
       setOfferNote("");
     } catch (err: unknown) {
       const detail =
@@ -387,6 +399,35 @@ export default function ConversationPage() {
               fullWidth
               autoFocus
             />
+            <TextField
+              label="Start date"
+              type="date"
+              value={offerStartDate}
+              onChange={(e) => setOfferStartDate(e.target.value)}
+              InputLabelProps={{ shrink: true }}
+              inputProps={{
+                min: conversation?.listing_summary?.availability_start_date,
+                max: conversation?.listing_summary?.availability_end_date,
+              }}
+              fullWidth
+            />
+            <TextField
+              label="End date"
+              type="date"
+              value={offerEndDate}
+              onChange={(e) => setOfferEndDate(e.target.value)}
+              InputLabelProps={{ shrink: true }}
+              inputProps={{
+                min: offerStartDate || conversation?.listing_summary?.availability_start_date,
+                max: conversation?.listing_summary?.availability_end_date,
+              }}
+              fullWidth
+            />
+            {conversation?.listing_summary && (
+              <Typography variant="caption" color="text.secondary">
+                Available {conversation.listing_summary.availability_start_date} – {conversation.listing_summary.availability_end_date}
+              </Typography>
+            )}
             <TextField
               label="Note (optional)"
               multiline

@@ -7,6 +7,8 @@ export interface PriceOffer {
   sublessee_id: number;
   sublessee_name: string;
   offered_price: string;
+  start_date: string | null;
+  end_date: string | null;
   note: string;
   status: "pending" | "accepted" | "declined";
   created_at: string;
@@ -16,11 +18,13 @@ export interface PriceOffer {
 export async function submitOffer(
   conversationId: number,
   offeredPrice: number,
-  note: string
+  startDate: string,
+  endDate: string,
+  note: string,
 ): Promise<PriceOffer> {
   const { data } = await api.post<PriceOffer>(
     `/messaging/conversations/${conversationId}/offers/`,
-    { offered_price: offeredPrice, note }
+    { offered_price: offeredPrice, start_date: startDate, end_date: endDate, note }
   );
   return data;
 }

@@ -119,11 +119,11 @@ function OfferRow({ offer, isSublessee, onUpdated }: OfferRowProps) {
           {isSublessee && offer.status === "accepted" && (
             <Button
               component={RouterLink}
-              to={`/properties/${offer.listing_id}?offer_id=${offer.id}`}
+              to="/bookings/current"
               size="small"
               variant="contained"
             >
-              Book at {formatPrice(offer.offered_price)}
+              View Booking
             </Button>
           )}
 
