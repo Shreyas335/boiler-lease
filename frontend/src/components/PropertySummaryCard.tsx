@@ -66,6 +66,16 @@ export default function PropertySummaryCard({
               <Typography variant="body2" color="text.secondary">
                 {listing.city}, {listing.state}
               </Typography>
+              {listing.tags && listing.tags.length > 0 && (
+                <Stack direction="row" flexWrap="wrap" gap={0.5} useFlexGap sx={{ mt: 0.75 }}>
+                  {listing.tags.slice(0, 6).map((tag) => (
+                    <Chip key={tag} label={tag} size="small" variant="outlined" />
+                  ))}
+                  {listing.tags.length > 6 && (
+                    <Chip label={`+${listing.tags.length - 6}`} size="small" variant="outlined" />
+                  )}
+                </Stack>
+              )}
             </Box>
             <Stack direction="row" spacing={1}>
               <Chip size="small" label={`${formatCurrency(listing.monthly_rent)}/mo`} />

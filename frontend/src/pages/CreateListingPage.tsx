@@ -19,6 +19,7 @@ import { Link as RouterLink, useNavigate } from "react-router-dom";
 import {
   createListing,
   getListingAmenities,
+  getListingTagPresets,
   uploadListingMedia,
   type CreatePropertyListingPayload,
   type ListingAmenity,
@@ -27,6 +28,7 @@ import {
 import { useAuth } from "../contexts/AuthContext";
 import AddressAutocomplete, { type AddressComponents } from "../components/AddressAutocomplete";
 import PhotoManager, { type PendingPhoto } from "../components/PhotoManager";
+import ListingTagsEditor from "../components/ListingTagsEditor";
 import { getListingWarnings, validateListingForm } from "../utils/listingFormValidation";
 
 
@@ -53,6 +55,7 @@ const INITIAL_FORM: CreatePropertyListingPayload = {
   country_code: "US",
   parking_available: false,
   amenity_codes: [],
+  tags: [],
 };
 
 function extractFirstError(value: unknown): string | undefined {
@@ -67,6 +70,7 @@ export default function CreateListingPage() {
 
   const [form, setForm] = useState<CreatePropertyListingPayload>(INITIAL_FORM);
   const [amenities, setAmenities] = useState<ListingAmenity[]>([]);
+  const [tagPresets, setTagPresets] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [pageMessage, setPageMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -78,17 +82,23 @@ export default function CreateListingPage() {
   const [uploading, setUploading] = useState(false);
 
   useEffect(() => {
-    async function loadAmenities() {
+    async function loadAmenitiesAndTags() {
       try {
         const data = await getListingAmenities();
         setAmenities(data);
       } catch {
         setAmenities([]);
       }
+      try {
+        const presets = await getListingTagPresets();
+        setTagPresets(presets);
+      } catch {
+        setTagPresets([]);
+      }
     }
 
     if (user?.user_type === "subleaser") {
-      loadAmenities();
+      void loadAmenitiesAndTags();
     }
   }, [user]);
 
@@ -618,6 +628,19 @@ export default function CreateListingPage() {
                   </Grid>
                 ))}
               </Grid>
+
+              <Typography variant="subtitle1" sx={{ mt: 1 }}>
+                Tags
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                Add searchable labels like Furnished or Pet-Friendly. Presets appear as you type; you can also enter your own.
+              </Typography>
+              <ListingTagsEditor
+                presets={tagPresets}
+                value={form.tags ?? []}
+                onChange={(tags) => handleChange("tags", tags)}
+                error={fieldErrors.tags}
+              />
 
               {/* Photos */}
               <PhotoManager
