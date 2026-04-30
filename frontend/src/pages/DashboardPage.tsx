@@ -371,6 +371,64 @@ export default function DashboardPage() {
           </Stack>
         </Box>
 
+        {user.user_type === "management" && (
+          <Box sx={{ display: "flex", gap: 2, flexWrap: "wrap", mb: 3 }}>
+            {user.company_status !== "approved" && (
+              <Button component={RouterLink} to="/company/verify" variant="outlined">
+                Upload Documents
+              </Button>
+            )}
+            <Tooltip title={user.company_status !== "approved" ? "Company verification required" : ""}>
+              <span>
+                <Button
+                  component={user.company_status === "approved" ? RouterLink : "button"}
+                  to={user.company_status === "approved" ? "/company/guidelines" : undefined}
+                  variant="outlined"
+                  disabled={user.company_status !== "approved"}
+                >
+                  Guideline Settings
+                </Button>
+              </span>
+            </Tooltip>
+            <Tooltip title={user.company_status !== "approved" ? "Company verification required" : ""}>
+              <span>
+                <Button
+                  component={user.company_status === "approved" ? RouterLink : "button"}
+                  to={user.company_status === "approved" ? "/company/approvals" : undefined}
+                  variant="outlined"
+                  disabled={user.company_status !== "approved"}
+                >
+                  Approval Queue
+                </Button>
+              </span>
+            </Tooltip>
+            <Tooltip title={user.company_status !== "approved" ? "Company verification required" : ""}>
+              <span>
+                <Button
+                  component={user.company_status === "approved" ? RouterLink : "button"}
+                  to={user.company_status === "approved" ? "/company/bookings" : undefined}
+                  variant="outlined"
+                  disabled={user.company_status !== "approved"}
+                >
+                  Booking approvals
+                </Button>
+              </span>
+            </Tooltip>
+            <Tooltip title={user.company_status !== "approved" ? "Company verification required" : ""}>
+              <span>
+                <Button
+                  component={user.company_status === "approved" ? RouterLink : "button"}
+                  to={user.company_status === "approved" ? "/company/listings" : undefined}
+                  variant="outlined"
+                  disabled={user.company_status !== "approved"}
+                >
+                  My Listings
+                </Button>
+              </span>
+            </Tooltip>
+          </Box>
+        )}
+
         <Card sx={{ mb: 4 }}>
           <CardContent sx={{ p: 4 }}>
             <Box sx={{ display: "flex", alignItems: "center", gap: 2, mb: 2 }}>
@@ -528,67 +586,6 @@ export default function DashboardPage() {
               >
                 Booking requests
               </Button>
-            </>
-          )}
-          { user.user_type === "management" && user.company_status !== "approved" &&
-            <Button
-                component={RouterLink}
-                to="/company/verify"
-                variant="outlined"
-              >
-                Upload Documents
-              </Button>
-          }
-          {user.user_type === "management" && (
-            <>
-              <Tooltip title={user.company_status !== "approved" ? "Company verification required" : ""}>
-                <span>
-                  <Button
-                    component={user.company_status === "approved" ? RouterLink : "button"}
-                    to={user.company_status === "approved" ? "/company/guidelines" : undefined}
-                    variant="outlined"
-                    disabled={user.company_status !== "approved"}
-                  >
-                    Guideline Settings
-                  </Button>
-                </span>
-              </Tooltip>
-              <Tooltip title={user.company_status !== "approved" ? "Company verification required" : ""}>
-                <span>
-                  <Button
-                    component={user.company_status === "approved" ? RouterLink : "button"}
-                    to={user.company_status === "approved" ? "/company/approvals" : undefined}
-                    variant="outlined"
-                    disabled={user.company_status !== "approved"}
-                  >
-                    Approval Queue
-                  </Button>
-                </span>
-              </Tooltip>
-              <Tooltip title={user.company_status !== "approved" ? "Company verification required" : ""}>
-                <span>
-                  <Button
-                    component={user.company_status === "approved" ? RouterLink : "button"}
-                    to={user.company_status === "approved" ? "/company/bookings" : undefined}
-                    variant="outlined"
-                    disabled={user.company_status !== "approved"}
-                  >
-                    Booking approvals
-                  </Button>
-                </span>
-              </Tooltip>
-              <Tooltip title={user.company_status !== 'approved' ? 'Company verification required' : ''}>
-                <span>
-                  <Button
-                    component={user.company_status === 'approved' ? RouterLink : 'button'}
-                    to={user.company_status === 'approved' ? '/company/listings' : undefined}
-                    variant="outlined"
-                    disabled={user.company_status !== 'approved'}
-                  >
-                    My Listings
-                  </Button>
-                </span>
-              </Tooltip>
             </>
           )}
         </Box>
