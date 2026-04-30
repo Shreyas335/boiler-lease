@@ -35,9 +35,9 @@ def _validate_tags_field(value):
         raise serializers.ValidationError(str(exc)) from exc
 
 
-def _listing_platform_fee_percent_str():
-    v = getattr(settings, "PLATFORM_BOOKING_FEE_PERCENT", None)
-    return str(v) if v is not None else "3.00"
+def _listing_platform_fee_flat_str():
+    v = getattr(settings, "PLATFORM_BOOKING_FEE_FLAT", None)
+    return str(v) if v is not None else "3.99"
 
 
 def _listing_management_fee_percent_str(obj):
@@ -383,7 +383,7 @@ class PropertyListingSerializer(serializers.ModelSerializer):
     media = serializers.SerializerMethodField()
     approved_by_company_name = serializers.SerializerMethodField()
     approved_by_company_user_id = serializers.SerializerMethodField()
-    platform_fee_percent = serializers.SerializerMethodField()
+    platform_fee_flat = serializers.SerializerMethodField()
     management_fee_percent = serializers.SerializerMethodField()
     owner_id = serializers.IntegerField(source="owner.id", read_only=True)
     owner_username = serializers.CharField(source="owner.username", read_only=True)
@@ -438,14 +438,14 @@ class PropertyListingSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
             "tags",
-            "platform_fee_percent",
+            "platform_fee_flat",
             "management_fee_percent",
             "amenities",
             "media",
         )
 
-    def get_platform_fee_percent(self, obj):
-        return _listing_platform_fee_percent_str()
+    def get_platform_fee_flat(self, obj):
+        return _listing_platform_fee_flat_str()
 
     def get_management_fee_percent(self, obj):
         return _listing_management_fee_percent_str(obj)
@@ -472,7 +472,7 @@ class PropertyListingSerializer(serializers.ModelSerializer):
 class PropertyListingSummarySerializer(serializers.ModelSerializer):
     primary_photo_url = serializers.SerializerMethodField()
     is_favorited = serializers.SerializerMethodField()
-    platform_fee_percent = serializers.SerializerMethodField()
+    platform_fee_flat = serializers.SerializerMethodField()
     management_fee_percent = serializers.SerializerMethodField()
 
     class Meta:
@@ -489,15 +489,15 @@ class PropertyListingSummarySerializer(serializers.ModelSerializer):
             "status",
             "approval_status",
             "tags",
-            "platform_fee_percent",
+            "platform_fee_flat",
             "management_fee_percent",
             "created_at",
             "primary_photo_url",
             "is_favorited",
         )
 
-    def get_platform_fee_percent(self, obj):
-        return _listing_platform_fee_percent_str()
+    def get_platform_fee_flat(self, obj):
+        return _listing_platform_fee_flat_str()
 
     def get_management_fee_percent(self, obj):
         return _listing_management_fee_percent_str(obj)
@@ -1127,7 +1127,7 @@ class PropertyListingBrowseSerializer(serializers.ModelSerializer):
     media = ListingMediaSerializer(many=True, read_only=True)
     approved_by_company_name = serializers.SerializerMethodField()
     approved_by_company_user_id = serializers.SerializerMethodField()
-    platform_fee_percent = serializers.SerializerMethodField()
+    platform_fee_flat = serializers.SerializerMethodField()
     management_fee_percent = serializers.SerializerMethodField()
     owner_id = serializers.IntegerField(source="owner.id", read_only=True)
     owner_username = serializers.CharField(source="owner.username", read_only=True)
@@ -1166,15 +1166,15 @@ class PropertyListingBrowseSerializer(serializers.ModelSerializer):
             "owner_first_name",
             "owner_last_name",
             "tags",
-            "platform_fee_percent",
+            "platform_fee_flat",
             "management_fee_percent",
             "amenities",
             "media",
         )
         read_only_fields = fields
 
-    def get_platform_fee_percent(self, obj):
-        return _listing_platform_fee_percent_str()
+    def get_platform_fee_flat(self, obj):
+        return _listing_platform_fee_flat_str()
 
     def get_management_fee_percent(self, obj):
         return _listing_management_fee_percent_str(obj)

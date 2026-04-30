@@ -22,7 +22,7 @@ export interface BookingPriceBreakdown {
 
 export function computeBookingPriceBreakdown(
   monthlyRentStr: string,
-  platformFeePercentStr: string | undefined,
+  platformFeeFlatStr: string | undefined,
   managementFeePercentStr: string | null | undefined,
   startDate: string,
   endDate: string,
@@ -38,11 +38,11 @@ export function computeBookingPriceBreakdown(
   if (!Number.isFinite(monthly) || monthly < 0) return null;
 
   const baseRent = (monthly * nights) / 30;
-  const platPct = Number(platformFeePercentStr ?? "0");
+  const platformFlat = Number(platformFeeFlatStr ?? "0");
   const mgmtStr = managementFeePercentStr;
   const mgmtPct = mgmtStr != null && mgmtStr !== "" ? Number(mgmtStr) : 0;
 
-  const platformFee = (baseRent * (Number.isFinite(platPct) ? platPct : 0)) / 100;
+  const platformFee = Number.isFinite(platformFlat) && platformFlat > 0 ? platformFlat : 0;
   const managementFee = (baseRent * (Number.isFinite(mgmtPct) ? mgmtPct : 0)) / 100;
   const total = baseRent + platformFee + managementFee;
 
