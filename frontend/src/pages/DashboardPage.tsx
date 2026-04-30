@@ -162,6 +162,7 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (userType !== 'management') return undefined;
+    if (user?.company_status !== 'approved') return undefined;
     let isMounted = true;
     async function loadStats(showSpinner: boolean) {
       try {
@@ -178,7 +179,7 @@ export default function DashboardPage() {
     void loadStats(true);
     const intervalId = window.setInterval(() => void loadStats(false), 30000);
     return () => { isMounted = false; window.clearInterval(intervalId); };
-  }, [userType]);
+  }, [userType, user?.company_status]);
 
   useEffect(() => {
     if (userType !== "sublessee") return;
@@ -383,6 +384,11 @@ export default function DashboardPage() {
             </Box>
             {user.user_type === 'management' && (
               <>
+                {user.company_status !== 'approved' && (
+                  <Alert severity='warning' sx={{ mt: 1 }}>
+                    Your company must be approved before you can access dashboard stats and management features.
+                  </Alert>
+                )}
                 {statsLoading && <CircularProgress size={24} sx={{ mt: 1 }} />}
                 {statsError && <Alert severity='error' sx={{ mt: 1 }}>{statsError}</Alert>}
                 {dashStats && (
