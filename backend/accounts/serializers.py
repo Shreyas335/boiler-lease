@@ -4,6 +4,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db.models import Avg, Q
 from rest_framework import serializers
 
+from .listing_tags import MAX_TAG_LENGTH, normalize_listing_tags
 from .models import (
     ApprovalRequest,
     BookingGroup,
@@ -25,6 +26,13 @@ from .models import (
     UserBlock,
     UserRating,
 )
+
+
+def _validate_tags_field(value):
+    try:
+        return normalize_listing_tags(value)
+    except ValueError as exc:
+        raise serializers.ValidationError(str(exc)) from exc
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -413,6 +421,7 @@ class PropertyListingSerializer(serializers.ModelSerializer):
             "published_at",
             "created_at",
             "updated_at",
+            "tags",
             "amenities",
             "media",
         )
@@ -453,6 +462,7 @@ class PropertyListingSummarySerializer(serializers.ModelSerializer):
             "availability_end_date",
             "status",
             "approval_status",
+            "tags",
             "created_at",
             "primary_photo_url",
             "is_favorited",
@@ -863,6 +873,11 @@ class PropertyListingCreateSerializer(serializers.ModelSerializer):
         allow_empty=True,
         write_only=True,
     )
+    tags = serializers.ListField(
+        child=serializers.CharField(max_length=MAX_TAG_LENGTH),
+        required=False,
+        allow_empty=True,
+    )
 
     class Meta:
         model = PropertyListing
@@ -898,6 +913,7 @@ class PropertyListingCreateSerializer(serializers.ModelSerializer):
             "contact_email",
             "contact_phone",
             "virtual_tour_url",
+            "tags",
             "amenity_codes",
         )
         extra_kwargs = {
@@ -938,6 +954,9 @@ class PropertyListingCreateSerializer(serializers.ModelSerializer):
 
         return attrs
 
+    def validate_tags(self, value):
+        return _validate_tags_field(value)
+
     def create(self, validated_data):
         amenity_codes = validated_data.pop("amenity_codes", [])
         owner = self.context["request"].user
@@ -961,6 +980,11 @@ class PropertyListingUpdateSerializer(serializers.ModelSerializer):
         required=False,
         allow_empty=True,
         write_only=True,
+    )
+    tags = serializers.ListField(
+        child=serializers.CharField(max_length=MAX_TAG_LENGTH),
+        required=False,
+        allow_empty=True,
     )
 
     class Meta:
@@ -998,6 +1022,7 @@ class PropertyListingUpdateSerializer(serializers.ModelSerializer):
             "contact_phone",
             "virtual_tour_url",
             "status",
+            "tags",
             "amenity_codes",
         )
         extra_kwargs = {
@@ -1039,6 +1064,9 @@ class PropertyListingUpdateSerializer(serializers.ModelSerializer):
             )
 
         return attrs
+
+    def validate_tags(self, value):
+        return _validate_tags_field(value)
 
     def update(self, instance, validated_data):
         amenity_codes = validated_data.pop("amenity_codes", None)
@@ -1101,6 +1129,7 @@ class PropertyListingBrowseSerializer(serializers.ModelSerializer):
             "owner_username",
             "owner_first_name",
             "owner_last_name",
+            "tags",
             "amenities",
             "media",
         )
