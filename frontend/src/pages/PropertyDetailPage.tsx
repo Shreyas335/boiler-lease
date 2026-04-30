@@ -192,26 +192,6 @@ export default function PropertyDetailPage() {
     }
   }
 
-  if (loading) {
-    return (
-      <Box sx={{ py: 6, px: 2 }}>
-        <Container maxWidth="lg">
-          <Typography>Loading property details...</Typography>
-        </Container>
-      </Box>
-    );
-  }
-
-  if (error || !listing) {
-    return (
-      <Box sx={{ py: 6, px: 2 }}>
-        <Container maxWidth="lg">
-          <Alert severity="error">{error || "Property not found."}</Alert>
-        </Container>
-      </Box>
-    );
-  }
-
   const bookingIdentityBlocked =
     user?.user_type === "sublessee" && user.identity_verification_status !== "verified";
 
@@ -242,6 +222,26 @@ export default function PropertyDetailPage() {
   const platformPctLabel = listing?.platform_fee_percent ?? "3";
   const managementPctLabel =
     listing?.management_fee_percent != null ? listing.management_fee_percent : null;
+
+  if (loading) {
+    return (
+      <Box sx={{ py: 6, px: 2 }}>
+        <Container maxWidth="lg">
+          <Typography>Loading property details...</Typography>
+        </Container>
+      </Box>
+    );
+  }
+
+  if (error || !listing) {
+    return (
+      <Box sx={{ py: 6, px: 2 }}>
+        <Container maxWidth="lg">
+          <Alert severity="error">{error || "Property not found."}</Alert>
+        </Container>
+      </Box>
+    );
+  }
 
   return (
     <Box sx={{ py: 6, px: 2 }}>
