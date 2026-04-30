@@ -57,8 +57,8 @@ export interface PropertyListing {
   amenities: ListingAmenity[];
   media: ListingMedia[];
   is_favorited?: boolean;
-  /** Percent of prorated base rent; from server settings. */
-  platform_fee_percent?: string;
+  /** Flat platform fee amount from server settings. */
+  platform_fee_flat?: string;
   /** Percent of prorated base rent when a management company approved the listing; null if none. */
   management_fee_percent?: string | null;
 }
@@ -79,7 +79,8 @@ export interface PropertyListingSummary {
   primary_photo_url: string;
   is_favorited: boolean;
   tags?: string[];
-  platform_fee_percent?: string;
+  /** Flat platform fee amount from server settings. */
+  platform_fee_flat?: string;
   management_fee_percent?: string | null;
 }
 

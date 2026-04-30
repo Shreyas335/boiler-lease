@@ -212,14 +212,13 @@ export default function PropertyDetailPage() {
     if (!listing || !bookingDatesValidForPricing) return null;
     return computeBookingPriceBreakdown(
       listing.monthly_rent,
-      listing.platform_fee_percent,
+      listing.platform_fee_flat,
       listing.management_fee_percent,
       bookingDates.start_date,
       bookingDates.end_date,
     );
   }, [listing, bookingDates, bookingDatesValidForPricing]);
 
-  const platformPctLabel = listing?.platform_fee_percent ?? "3";
   const managementPctLabel =
     listing?.management_fee_percent != null ? listing.management_fee_percent : null;
 
@@ -493,7 +492,7 @@ export default function PropertyDetailPage() {
                           </Stack>
                           <Stack direction="row" justifyContent="space-between" alignItems="baseline" gap={2}>
                             <Typography variant="body2" color="text.secondary">
-                              Platform fee ({platformPctLabel}%)
+                              Platform fee (flat)
                             </Typography>
                             <Typography variant="body2">{formatUsd(priceBreakdown.platformFee)}</Typography>
                           </Stack>
