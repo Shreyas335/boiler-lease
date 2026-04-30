@@ -384,7 +384,7 @@ export default function GuidelineSettingsPage() {
       <FeeConfigSection />
 
       <Typography variant="h4" fontWeight={700} mb={1}>
-        Guideline Settings
+        Guidelines / Fees
       </Typography>
       <Typography variant="body1" color="text.secondary" mb={3}>
         Define listing requirements per building. Each guideline represents a building your

@@ -36,6 +36,7 @@ interface PropertySummaryCardProps {
     disabled?: boolean;
     color?: "primary" | "error";
   };
+  extraStatusChip?: { label: string; color: ChipProps["color"] };
 }
 
 export default function PropertySummaryCard({
@@ -48,6 +49,7 @@ export default function PropertySummaryCard({
   actionButton,
   secondaryActionButton,
   extensionButton,
+  extraStatusChip,
 }: PropertySummaryCardProps) {
   return (
     <Card>
@@ -127,6 +129,7 @@ export default function PropertySummaryCard({
                 Available {listing.availability_start_date} to {listing.availability_end_date}
               </Typography>
               {statusLabel && <Chip size="small" label={statusLabel} color={statusColor} variant="outlined" />}
+              {extraStatusChip && <Chip size="small" label={extraStatusChip.label} color={extraStatusChip.color} variant="outlined" />}
             </Stack>
             <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
               {actionButton && (

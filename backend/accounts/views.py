@@ -1619,19 +1619,24 @@ def my_payment_history(request):
             booking_ids.append(int(ref))
         except ValueError:
             pass
-    titles_by_booking_id = {}
+    bookings_by_id = {}
     if booking_ids:
         for b in PropertyBooking.objects.filter(
             pk__in=booking_ids,
-            sublessee=request.user,
-        ).select_related("listing"):
-            titles_by_booking_id[b.pk] = b.listing.title
+        ).filter(
+            Q(sublessee=request.user)
+            | Q(
+                group__memberships__user=request.user,
+                group__memberships__status=BookingGroupMembership.Status.CONFIRMED,
+            )
+        ).select_related("listing").distinct():
+            bookings_by_id[b.pk] = b
     serializer = TransactionRecordSerializer(
         transactions,
         many=True,
         context={
             "request": request,
-            "listing_titles_by_booking_id": titles_by_booking_id,
+            "bookings_by_id": bookings_by_id,
         },
     )
     return Response(serializer.data)

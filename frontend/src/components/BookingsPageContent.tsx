@@ -351,6 +351,10 @@ export default function BookingsPageContent({
             {bookings.map((booking) => {
               const statusMeta = getBookingStatusMeta(booking.status);
               const depositEligible = depositActionEligible(booking);
+              const depositPaid =
+                booking.status === "fully_paid" ||
+                Boolean(booking.deposit_paid_at) ||
+                (Boolean(booking.group_id) && booking.group_paid_user_ids.includes(user?.id ?? -1));
               const showPayDeposit = canPaySecurityDeposit(booking);
               const showPayBlockedIdentity =
                 depositEligible && (booking.status === "confirmed" || booking.status === "partially_paid") && !identityVerified;
@@ -417,6 +421,7 @@ export default function BookingsPageContent({
                       : undefined
                   }
                   footerText={bookingFooterText(booking)}
+                  extraStatusChip={depositPaid ? { label: "Deposit paid", color: "success" } : undefined}
                 />
               );
             })}

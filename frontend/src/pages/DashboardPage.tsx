@@ -386,7 +386,7 @@ export default function DashboardPage() {
                   variant="outlined"
                   disabled={user.company_status !== "approved"}
                 >
-                  Guideline Settings
+                  Guidelines / Fees
                 </Button>
               </span>
             </Tooltip>
