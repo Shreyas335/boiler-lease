@@ -30,6 +30,12 @@ interface PropertySummaryCardProps {
     disabled?: boolean;
     color?: "primary" | "error";
   };
+  extensionButton?: {
+    label: string;
+    onClick: () => Promise<void> | void;
+    disabled?: boolean;
+    color?: "primary" | "error";
+  };
 }
 
 export default function PropertySummaryCard({
@@ -41,6 +47,7 @@ export default function PropertySummaryCard({
   statusColor = "default",
   actionButton,
   secondaryActionButton,
+  extensionButton,
 }: PropertySummaryCardProps) {
   return (
     <Card>
@@ -59,6 +66,16 @@ export default function PropertySummaryCard({
               <Typography variant="body2" color="text.secondary">
                 {listing.city}, {listing.state}
               </Typography>
+              {listing.tags && listing.tags.length > 0 && (
+                <Stack direction="row" flexWrap="wrap" gap={0.5} useFlexGap sx={{ mt: 0.75 }}>
+                  {listing.tags.slice(0, 6).map((tag) => (
+                    <Chip key={tag} label={tag} size="small" variant="outlined" />
+                  ))}
+                  {listing.tags.length > 6 && (
+                    <Chip label={`+${listing.tags.length - 6}`} size="small" variant="outlined" />
+                  )}
+                </Stack>
+              )}
             </Box>
             <Stack direction="row" spacing={1}>
               <Chip size="small" label={`${formatCurrency(listing.monthly_rent)}/mo`} />
@@ -134,6 +151,17 @@ export default function PropertySummaryCard({
                   {secondaryActionButton.label}
                 </Button>
               )}
+              {extensionButton && (
+                <Button
+                  variant="outlined"
+                  size="small"
+                  color={extensionButton.color || "primary"}
+                  onClick={extensionButton.onClick}
+                  disabled={extensionButton.disabled}
+                >
+                  {extensionButton.label}
+                </Button>
+              )}
               <Button component={RouterLink} to={`/properties/${listing.id}`} variant="text" size="small">
                 View details
               </Button>
@@ -150,7 +178,7 @@ export default function PropertySummaryCard({
           )}
 
           {footerText && (
-            <Typography variant="body2" color="text.secondary">
+            <Typography variant="body2" color="text.secondary" sx={{ whiteSpace: "pre-line" }}>
               {footerText}
             </Typography>
           )}

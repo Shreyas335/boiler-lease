@@ -279,6 +279,17 @@ function PropertyCard({
             />
           )}
 
+          {listing.tags && listing.tags.length > 0 && (
+            <Stack direction="row" flexWrap="wrap" gap={0.5} useFlexGap sx={{ mt: 0.5 }}>
+              {listing.tags.slice(0, 5).map((tag) => (
+                <Chip key={tag} label={tag} size="small" variant="outlined" />
+              ))}
+              {listing.tags.length > 5 && (
+                <Chip label={`+${listing.tags.length - 5} more`} size="small" variant="outlined" />
+              )}
+            </Stack>
+          )}
+
           <Stack
             direction="row"
             spacing={1}

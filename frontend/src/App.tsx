@@ -116,6 +116,8 @@ function App() {
                 }
               />
               <Route path="/browse" element={<BrowseListingsPage />} />
+              {/* Public listing detail — shareable links work without signing in */}
+              <Route path="/properties/:id" element={<PropertyDetailPage />} />
               <Route
                 path="/bookings/current"
                 element={
@@ -153,14 +155,6 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <GroupsPage />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/properties/:id"
-                element={
-                  <ProtectedRoute>
-                    <PropertyDetailPage />
                   </ProtectedRoute>
                 }
               />

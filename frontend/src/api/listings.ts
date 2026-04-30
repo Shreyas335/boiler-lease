@@ -52,9 +52,15 @@ export interface PropertyListing {
   published_at: string | null;
   created_at: string;
   updated_at: string;
+  /** Display labels (preset or custom); stored on the listing. */
+  tags?: string[];
   amenities: ListingAmenity[];
   media: ListingMedia[];
   is_favorited?: boolean;
+  /** Flat platform fee amount from server settings. */
+  platform_fee_flat?: string;
+  /** Percent of prorated base rent when a management company approved the listing; null if none. */
+  management_fee_percent?: string | null;
 }
 
 export interface PropertyListingSummary {
@@ -72,6 +78,26 @@ export interface PropertyListingSummary {
   created_at: string;
   primary_photo_url: string;
   is_favorited: boolean;
+  tags?: string[];
+  /** Flat platform fee amount from server settings. */
+  platform_fee_flat?: string;
+  management_fee_percent?: string | null;
+}
+
+export interface BookingExtensionPendingSummary {
+  id: number;
+  requested_end_date: string;
+  status: string;
+  additional_amount_due: string;
+}
+
+export interface BookingExtensionLatestSummary {
+  id: number;
+  requested_end_date: string;
+  status: "pending" | "approved" | "declined";
+  additional_amount_due: string;
+  reviewer_notes: string;
+  decided_at: string | null;
 }
 
 export interface BookingRecord {
@@ -91,11 +117,27 @@ export interface BookingRecord {
   group_name: string | null;
   group_confirmed_user_ids: number[];
   group_paid_user_ids: number[];
+  /** True when booking is confirmed and the listing has availability after checkout with no pending extension. */
+  can_request_extension?: boolean;
+  pending_extension_request?: BookingExtensionPendingSummary | null;
+  latest_extension_request?: BookingExtensionLatestSummary | null;
 }
 
 export interface ManagedBookingRecord extends BookingRecord {
   sublessee_name: string;
   sublessee_email: string;
+}
+
+export interface BookingExtensionRequestRecord {
+  id: number;
+  booking: number;
+  requested_end_date: string;
+  sublessee_notes: string;
+  status: "pending" | "approved" | "declined";
+  additional_amount_due: string | null;
+  reviewer_notes: string;
+  decided_at: string | null;
+  created_at: string;
 }
 
 export interface CreateBookingPayload {
@@ -143,6 +185,7 @@ export interface CreatePropertyListingPayload {
   contact_phone?: string;
   virtual_tour_url?: string;
   amenity_codes?: string[];
+  tags?: string[];
 }
 
 export async function createListing(
@@ -211,6 +254,11 @@ export async function fetchListingOwnerTransactions(
 export async function getListingAmenities(): Promise<ListingAmenity[]> {
   const { data } = await api.get<ListingAmenity[]>("/listings/amenities/");
   return data;
+}
+
+export async function getListingTagPresets(): Promise<string[]> {
+  const { data } = await api.get<{ presets: string[] }>("/listings/tag-presets/");
+  return data.presets ?? [];
 }
 
 // --- Media types & helpers ---
@@ -374,6 +422,14 @@ export async function cancelBooking(bookingId: number): Promise<{ detail: string
   return data;
 }
 
+export async function createBookingExtensionRequest(
+  bookingId: number,
+  payload: { requested_end_date: string; sublessee_notes?: string },
+): Promise<{ id: number }> {
+  const { data } = await api.post<{ id: number }>(`/bookings/${bookingId}/extension-requests/`, payload);
+  return data;
+}
+
 export async function getBookingHistory(sortBy: BookingSortBy, order: SortOrder): Promise<BookingRecord[]> {
   const { data } = await api.get<BookingRecord[]>("/bookings/history/", {
     params: { sort_by: sortBy, order },
@@ -439,6 +495,17 @@ export async function submitApprovalRequest(
 ): Promise<ApprovalRequestSummary> {
   const { data } = await api.post<ApprovalRequestSummary>(
     `/listings/${listingId}/request-approval/`,
+    payload,
+  );
+  return data;
+}
+
+export async function reviewBookingExtensionRequest(
+  extensionRequestId: number,
+  payload: { status: "approved" | "declined"; reviewer_notes?: string },
+): Promise<BookingExtensionRequestRecord> {
+  const { data } = await api.patch<BookingExtensionRequestRecord>(
+    `/bookings/extension-requests/${extensionRequestId}/`,
     payload,
   );
   return data;
