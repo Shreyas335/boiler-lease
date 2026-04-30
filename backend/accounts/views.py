@@ -821,6 +821,14 @@ def listing_amenities(request):
     )
 
 
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def listing_tag_presets(request):
+    """Predefined tag labels for listing editors; custom tags are also allowed."""
+    from .listing_tags import LISTING_TAG_PRESETS
+
+    return Response({"presets": list(LISTING_TAG_PRESETS)})
+
 
 @api_view(["DELETE"])
 @permission_classes([IsAuthenticated])

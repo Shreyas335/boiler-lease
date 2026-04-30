@@ -26,6 +26,7 @@ urlpatterns = [
     path("listings/<int:listing_id>/transactions/", views.listing_owner_transactions),
     path("listings/<int:listing_id>/", views.property_listing_detail),
     path("listings/mine/", views.my_property_listings),
+    path("listings/tag-presets/", views.listing_tag_presets),
     path("listings/amenities/", views.listing_amenities),
     path("listings/media/reorder/", views.reorder_listing_media),
     path("listings/media/<int:media_id>/", views.delete_listing_media),
