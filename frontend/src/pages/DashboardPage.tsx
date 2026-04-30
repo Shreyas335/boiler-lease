@@ -10,9 +10,14 @@ import {
   Chip,
   Alert,
   Stack,
-  Tooltip,
+  Tab,
+  Tabs,
   type ChipProps,
 } from "@mui/material";
+import GuidelineSettingsPage from "./GuidelineSettingsPage";
+import ManagementApprovalQueuePage from "./ManagementApprovalQueuePage";
+import CompanyBookingRequestsPage from "./CompanyBookingRequestsPage";
+import CompanyListingsPage from "./CompanyListingsPage";
 import { Link as RouterLink, useNavigate, useSearchParams } from "react-router-dom";
 import VerifiedIcon from "@mui/icons-material/Verified";
 import HomeWorkRoundedIcon from "@mui/icons-material/HomeWorkRounded";
@@ -62,6 +67,7 @@ export default function DashboardPage() {
   const [dashStats, setDashStats] = useState<CompanyDashboardStats | null>(null);
   const [statsLoading, setStatsLoading] = useState(false);
   const [statsError, setStatsError] = useState<string | null>(null);
+  const [mgmtTab, setMgmtTab] = useState(0);
   const userType = user?.user_type;
 
   useEffect(() => {
@@ -371,131 +377,110 @@ export default function DashboardPage() {
           </Stack>
         </Box>
 
-        {user.user_type === "management" && (
-          <Box sx={{ display: "flex", gap: 2, flexWrap: "wrap", mb: 3 }}>
-            {user.company_status !== "approved" && (
-              <Button component={RouterLink} to="/company/verify" variant="outlined">
-                Upload Documents
-              </Button>
-            )}
-            <Tooltip title={user.company_status !== "approved" ? "Company verification required" : ""}>
-              <span>
-                <Button
-                  component={user.company_status === "approved" ? RouterLink : "button"}
-                  to={user.company_status === "approved" ? "/company/guidelines" : undefined}
-                  variant="outlined"
-                  disabled={user.company_status !== "approved"}
-                >
-                  Guidelines / Fees
-                </Button>
-              </span>
-            </Tooltip>
-            <Tooltip title={user.company_status !== "approved" ? "Company verification required" : ""}>
-              <span>
-                <Button
-                  component={user.company_status === "approved" ? RouterLink : "button"}
-                  to={user.company_status === "approved" ? "/company/approvals" : undefined}
-                  variant="outlined"
-                  disabled={user.company_status !== "approved"}
-                >
-                  Approval Queue
-                </Button>
-              </span>
-            </Tooltip>
-            <Tooltip title={user.company_status !== "approved" ? "Company verification required" : ""}>
-              <span>
-                <Button
-                  component={user.company_status === "approved" ? RouterLink : "button"}
-                  to={user.company_status === "approved" ? "/company/bookings" : undefined}
-                  variant="outlined"
-                  disabled={user.company_status !== "approved"}
-                >
-                  Booking approvals
-                </Button>
-              </span>
-            </Tooltip>
-            <Tooltip title={user.company_status !== "approved" ? "Company verification required" : ""}>
-              <span>
-                <Button
-                  component={user.company_status === "approved" ? RouterLink : "button"}
-                  to={user.company_status === "approved" ? "/company/listings" : undefined}
-                  variant="outlined"
-                  disabled={user.company_status !== "approved"}
-                >
-                  My Listings
-                </Button>
-              </span>
-            </Tooltip>
-          </Box>
-        )}
+        {user.user_type === "management" ? (
+          <Box sx={{ mb: 4 }}>
+            <Tabs
+              value={mgmtTab}
+              onChange={(_, v: number) => setMgmtTab(v)}
+              sx={{ borderBottom: 1, borderColor: "divider", mb: 0 }}
+            >
+              <Tab label="Overview" />
+              <Tab label="Guidelines / Fees" disabled={user.company_status !== "approved"} title={user.company_status !== "approved" ? "Company verification required" : undefined} />
+              <Tab label="Approval Queue" disabled={user.company_status !== "approved"} title={user.company_status !== "approved" ? "Company verification required" : undefined} />
+              <Tab label="Booking Approvals" disabled={user.company_status !== "approved"} title={user.company_status !== "approved" ? "Company verification required" : undefined} />
+              <Tab label="My Listings" disabled={user.company_status !== "approved"} title={user.company_status !== "approved" ? "Company verification required" : undefined} />
+            </Tabs>
 
-        <Card sx={{ mb: 4 }}>
-          <CardContent sx={{ p: 4 }}>
-            <Box sx={{ display: "flex", alignItems: "center", gap: 2, mb: 2 }}>
-              <Box sx={{ color: "primary.main" }}>{config.icon}</Box>
-              <Box>
-                <Typography variant="h6">Your dashboard</Typography>
-                <Typography variant="body2" color="text.secondary">
-                  {config.description}
-                </Typography>
-              </Box>
-            </Box>
-            {user.user_type === 'management' && (
-              <>
-                {user.company_status !== 'approved' && (
-                  <Alert severity='warning' sx={{ mt: 1 }}>
-                    Your company must be approved before you can access dashboard stats and management features.
-                  </Alert>
-                )}
-                {statsLoading && <CircularProgress size={24} sx={{ mt: 1 }} />}
-                {statsError && <Alert severity='error' sx={{ mt: 1 }}>{statsError}</Alert>}
-                {dashStats && (
-                  <Grid container spacing={2} sx={{ mt: 1 }}>
-                    <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-                      <Card variant='outlined'>
-                        <CardContent sx={{ textAlign: 'center' }}>
-                          <Typography variant='h3' color='primary'>{dashStats.total_listings}</Typography>
-                          <Typography variant='body2' color='text.secondary'>Total Listings</Typography>
-                        </CardContent>
-                      </Card>
+            {mgmtTab === 0 && (
+              <Card sx={{ mt: 0, borderTop: 0, borderRadius: "0 0 8px 8px" }}>
+                <CardContent sx={{ p: 4 }}>
+                  <Box sx={{ display: "flex", alignItems: "center", gap: 2, mb: 2 }}>
+                    <Box sx={{ color: "primary.main" }}>{config.icon}</Box>
+                    <Box>
+                      <Typography variant="h6">Your dashboard</Typography>
+                      <Typography variant="body2" color="text.secondary">{config.description}</Typography>
+                    </Box>
+                  </Box>
+                  {user.company_status !== "approved" && (
+                    <Stack spacing={2}>
+                      <Alert severity="warning">
+                        Your company must be approved before you can access dashboard stats and management features.
+                      </Alert>
+                      <Box>
+                        <Button component={RouterLink} to="/company/verify" variant="outlined">
+                          Upload Documents
+                        </Button>
+                      </Box>
+                    </Stack>
+                  )}
+                  {statsLoading && <CircularProgress size={24} sx={{ mt: 1 }} />}
+                  {statsError && <Alert severity="error" sx={{ mt: 1 }}>{statsError}</Alert>}
+                  {dashStats && (
+                    <Grid container spacing={2} sx={{ mt: 1 }}>
+                      <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+                        <Card variant="outlined">
+                          <CardContent sx={{ textAlign: "center" }}>
+                            <Typography variant="h3" color="primary">{dashStats.total_listings}</Typography>
+                            <Typography variant="body2" color="text.secondary">Total Listings</Typography>
+                          </CardContent>
+                        </Card>
+                      </Grid>
+                      <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+                        <Card variant="outlined">
+                          <CardContent sx={{ textAlign: "center" }}>
+                            <Typography variant="h3" color="warning.main">{dashStats.pending_approvals}</Typography>
+                            <Typography variant="body2" color="text.secondary">Pending Approvals</Typography>
+                          </CardContent>
+                        </Card>
+                      </Grid>
+                      <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+                        <Card variant="outlined">
+                          <CardContent sx={{ textAlign: "center" }}>
+                            <Typography variant="h3" color="success.main">{dashStats.active_bookings}</Typography>
+                            <Typography variant="body2" color="text.secondary">Active Bookings</Typography>
+                          </CardContent>
+                        </Card>
+                      </Grid>
+                      <Grid size={12}>
+                        <Typography variant="subtitle2" sx={{ mt: 1, mb: 1 }}>Recent Transactions</Typography>
+                        {dashStats.recent_transactions.length === 0 ? (
+                          <Alert severity="info">No recent transactions.</Alert>
+                        ) : (
+                          <Stack spacing={1}>
+                            {dashStats.recent_transactions.map(txn => (
+                              <Box key={txn.id} sx={{ display: "flex", justifyContent: "space-between", p: 1, border: "1px solid", borderColor: "divider", borderRadius: 1 }}>
+                                <Typography variant="body2">${txn.amount} {txn.currency.toUpperCase()}</Typography>
+                                <Chip label={txn.status} size="small" color={txn.status === "succeeded" ? "success" : "default"} />
+                              </Box>
+                            ))}
+                          </Stack>
+                        )}
+                      </Grid>
                     </Grid>
-                    <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-                      <Card variant='outlined'>
-                        <CardContent sx={{ textAlign: 'center' }}>
-                          <Typography variant='h3' color='warning.main'>{dashStats.pending_approvals}</Typography>
-                          <Typography variant='body2' color='text.secondary'>Pending Approvals</Typography>
-                        </CardContent>
-                      </Card>
-                    </Grid>
-                    <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-                      <Card variant='outlined'>
-                        <CardContent sx={{ textAlign: 'center' }}>
-                          <Typography variant='h3' color='success.main'>{dashStats.active_bookings}</Typography>
-                          <Typography variant='body2' color='text.secondary'>Active Bookings</Typography>
-                        </CardContent>
-                      </Card>
-                    </Grid>
-                    <Grid size={12}>
-                      <Typography variant='subtitle2' sx={{ mt: 1, mb: 1 }}>Recent Transactions</Typography>
-                      {dashStats.recent_transactions.length === 0 ? (
-                        <Alert severity='info'>No recent transactions.</Alert>
-                      ) : (
-                        <Stack spacing={1}>
-                          {dashStats.recent_transactions.map(txn => (
-                            <Box key={txn.id} sx={{ display: 'flex', justifyContent: 'space-between', p: 1, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
-                              <Typography variant='body2'>${txn.amount} {txn.currency.toUpperCase()}</Typography>
-                              <Chip label={txn.status} size='small' color={txn.status === 'succeeded' ? 'success' : 'default'} />
-                            </Box>
-                          ))}
-                        </Stack>
-                      )}
-                    </Grid>
-                  </Grid>
-                )}
-              </>
+                  )}
+                </CardContent>
+              </Card>
             )}
-          </CardContent>
-        </Card>
+            {mgmtTab === 1 && <GuidelineSettingsPage />}
+            {mgmtTab === 2 && <ManagementApprovalQueuePage />}
+            {mgmtTab === 3 && <CompanyBookingRequestsPage />}
+            {mgmtTab === 4 && <CompanyListingsPage />}
+          </Box>
+        ) : (
+          <Card sx={{ mb: 4 }}>
+            <CardContent sx={{ p: 4 }}>
+              <Box sx={{ display: "flex", alignItems: "center", gap: 2, mb: 2 }}>
+                <Box sx={{ color: "primary.main" }}>{config.icon}</Box>
+                <Box>
+                  <Typography variant="h6">Your dashboard</Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    {config.description}
+                  </Typography>
+                </Box>
+              </Box>
+            </CardContent>
+          </Card>
+        )}
 
         {user.user_type === "sublessee" && (
           <Card sx={{ mb: 4 }}>
