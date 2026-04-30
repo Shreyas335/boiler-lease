@@ -20,6 +20,8 @@ from .models import (
     ListingMedia,
     Message,
     ManagementCompany,
+    Notification,
+    NotificationPreference,
     PriceOffer,
     PropertyBooking,
     PropertyListing,
@@ -1488,3 +1490,38 @@ class UserBlockSerializer(serializers.ModelSerializer):
         model = UserBlock
         fields = ("id", "blocked_user", "created_at")
         read_only_fields = fields
+
+
+class NotificationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Notification
+        fields = (
+            "id",
+            "notification_type",
+            "title",
+            "body",
+            "is_read",
+            "created_at",
+            "related_listing_id",
+            "related_booking_id",
+            "related_offer_id",
+            "related_conversation_id",
+        )
+        read_only_fields = fields
+
+
+class NotificationPreferenceSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = NotificationPreference
+        fields = (
+            "new_message",
+            "booking_request",
+            "booking_confirmed",
+            "booking_declined",
+            "offer_received",
+            "offer_accepted",
+            "offer_declined",
+            "listing_approved",
+            "listing_rejected",
+            "broadcast",
+        )
