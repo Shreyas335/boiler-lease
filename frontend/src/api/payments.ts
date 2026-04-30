@@ -8,11 +8,12 @@ export interface PaymentTransaction {
   amount: string;
   currency: string;
   booking_reference: string;
-  /** Listing title when payment is tied to a booking the user still has. */
+  transaction_type: string;
   listing_title: string | null;
+  listing_address: string | null;
+  booking_start_date: string | null;
+  booking_end_date: string | null;
   status: TransactionStatus;
-  stripe_payment_intent_id: string;
-  stripe_checkout_session_id: string;
   paid_at: string | null;
   created_at: string;
 }

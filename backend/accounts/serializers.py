@@ -1247,6 +1247,10 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
 
 class TransactionRecordSerializer(serializers.ModelSerializer):
     listing_title = serializers.SerializerMethodField()
+    listing_address = serializers.SerializerMethodField()
+    booking_start_date = serializers.SerializerMethodField()
+    booking_end_date = serializers.SerializerMethodField()
+    transaction_type = serializers.SerializerMethodField()
 
     class Meta:
         model = TransactionRecord
@@ -1255,16 +1259,18 @@ class TransactionRecordSerializer(serializers.ModelSerializer):
             "amount",
             "currency",
             "booking_reference",
+            "transaction_type",
             "listing_title",
+            "listing_address",
+            "booking_start_date",
+            "booking_end_date",
             "status",
-            "stripe_payment_intent_id",
-            "stripe_checkout_session_id",
             "paid_at",
             "created_at",
         )
         read_only_fields = fields
 
-    def get_listing_title(self, obj):
+    def _get_booking(self, obj):
         ref = (obj.booking_reference or "").strip()
         if not ref:
             return None
@@ -1272,19 +1278,41 @@ class TransactionRecordSerializer(serializers.ModelSerializer):
             bid = int(ref)
         except ValueError:
             return None
-        titles = self.context.get("listing_titles_by_booking_id")
-        if titles is not None:
-            return titles.get(bid)
+        bookings = self.context.get("bookings_by_id")
+        if bookings is not None:
+            return bookings.get(bid)
         request = self.context.get("request")
         user = getattr(request, "user", None) if request else None
         if not user or not user.is_authenticated:
             return None
-        booking = (
+        return (
             PropertyBooking.objects.filter(pk=bid, sublessee=user)
             .select_related("listing")
             .first()
         )
+
+    def get_listing_title(self, obj):
+        booking = self._get_booking(obj)
         return booking.listing.title if booking else None
+
+    def get_listing_address(self, obj):
+        booking = self._get_booking(obj)
+        if not booking:
+            return None
+        l = booking.listing
+        parts = [p for p in [l.street_line_1, l.city, l.state] if p]
+        return ", ".join(parts) if parts else None
+
+    def get_booking_start_date(self, obj):
+        booking = self._get_booking(obj)
+        return str(booking.start_date) if booking else None
+
+    def get_booking_end_date(self, obj):
+        booking = self._get_booking(obj)
+        return str(booking.end_date) if booking else None
+
+    def get_transaction_type(self, obj):
+        return "Security Deposit"
 
 
 class OwnerListingTransactionSerializer(serializers.ModelSerializer):
