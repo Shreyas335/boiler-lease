@@ -92,6 +92,9 @@ from .serializers import (
     RegisterSerializer,
     ListingMediaSerializer,
     ListingMediaUploadSerializer,
+    ConversationSerializer,
+    ConversationParticipantSerializer,
+    CreateConversationSerializer,
     SendMessageSerializer,
     OwnerListingTransactionSerializer,
     TransactionRecordSerializer,
@@ -2093,7 +2096,7 @@ def my_favorite_listings(request):
 def _block_exists(user_a, user_b):
     """Return True if either user has blocked the other."""
     return UserBlock.objects.filter(
-        Q(blocker=user_a, blocked=user_b) | Q(blocker=user_b, blocked=user_a)
+        Q(blocker=user_a, blocked_user=user_b) | Q(blocker=user_b, blocked_user=user_a)
     ).exists()
 
 
@@ -2374,11 +2377,11 @@ def block_detail(request, user_id):
     user = request.user
 
     if request.method == "GET":
-        is_blocked = UserBlock.objects.filter(blocker=user, blocked__pk=user_id).exists()
+        is_blocked = UserBlock.objects.filter(blocker=user, blocked_user__pk=user_id).exists()
         return Response({"is_blocked": is_blocked})
 
     # DELETE — unblock
-    deleted, _ = UserBlock.objects.filter(blocker=user, blocked__pk=user_id).delete()
+    deleted, _ = UserBlock.objects.filter(blocker=user, blocked_user__pk=user_id).delete()
     if not deleted:
         return Response({"detail": "Block not found."}, status=status.HTTP_404_NOT_FOUND)
     return Response(status=status.HTTP_204_NO_CONTENT)
