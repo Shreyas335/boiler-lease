@@ -265,7 +265,7 @@ export async function updateListing(
 }
 
 export async function deleteListing(id: number): Promise<void> {
-  await api.delete(`/listings/${id}/delete/`);
+  await api.delete(`/listings/${id}/`);
 }
 
 export interface BrowseFilters {
