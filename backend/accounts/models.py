@@ -713,3 +713,44 @@ class Message(models.Model):
         ]
 
 
+class Notification(models.Model):
+    class Type(models.TextChoices):
+        NEW_MESSAGE       = "new_message",       "New Message"
+        BOOKING_REQUEST   = "booking_request",   "Booking Request"
+        BOOKING_CONFIRMED = "booking_confirmed",  "Booking Confirmed"
+        BOOKING_DECLINED  = "booking_declined",   "Booking Declined"
+        OFFER_RECEIVED    = "offer_received",    "Offer Received"
+        OFFER_ACCEPTED    = "offer_accepted",    "Offer Accepted"
+        OFFER_DECLINED    = "offer_declined",    "Offer Declined"
+        LISTING_APPROVED  = "listing_approved",  "Listing Approved"
+        LISTING_REJECTED  = "listing_rejected",  "Listing Rejected"
+        BROADCAST         = "broadcast",         "Broadcast"
+
+    recipient         = models.ForeignKey(User, on_delete=models.CASCADE, related_name="notifications")
+    notification_type = models.CharField(max_length=32, choices=Type.choices, db_index=True)
+    title             = models.CharField(max_length=200)
+    body              = models.TextField(blank=True)
+    is_read           = models.BooleanField(default=False, db_index=True)
+    created_at        = models.DateTimeField(auto_now_add=True)
+    related_listing_id      = models.IntegerField(null=True, blank=True)
+    related_booking_id      = models.IntegerField(null=True, blank=True)
+    related_offer_id        = models.IntegerField(null=True, blank=True)
+    related_conversation_id = models.IntegerField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+
+class NotificationPreference(models.Model):
+    user              = models.OneToOneField(User, on_delete=models.CASCADE, related_name="notification_preferences")
+    new_message       = models.BooleanField(default=True)
+    booking_request   = models.BooleanField(default=True)
+    booking_confirmed = models.BooleanField(default=True)
+    booking_declined  = models.BooleanField(default=True)
+    offer_received    = models.BooleanField(default=True)
+    offer_accepted    = models.BooleanField(default=True)
+    offer_declined    = models.BooleanField(default=True)
+    listing_approved  = models.BooleanField(default=True)
+    listing_rejected  = models.BooleanField(default=True)
+    broadcast         = models.BooleanField(default=True)
+
