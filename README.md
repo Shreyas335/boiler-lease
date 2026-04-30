@@ -122,3 +122,9 @@ docker compose up --build
 docker compose exec backend python manage.py migrate
 
 docker compose exec backend python manage.py createsuperuser
+
+## Stripe Checkout Commands
+
+stripe login
+
+stripe listen --forward-to localhost:8000/api/payments/webhook/
