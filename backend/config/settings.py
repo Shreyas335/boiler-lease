@@ -1,4 +1,5 @@
 import os
+from decimal import Decimal
 from pathlib import Path
 
 """
@@ -282,6 +283,9 @@ EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
 EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
 # Frontend base URL for verification links (e.g. http://localhost:5173)
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:5173")
+
+# Flat platform fee shown in booking price breakdown.
+PLATFORM_BOOKING_FEE_FLAT = Decimal(os.environ.get("PLATFORM_BOOKING_FEE_FLAT", "3.99"))
 # Backend base URL for links in emails (e.g. http://localhost:8000)
 BACKEND_URL = os.environ.get("BACKEND_URL", "http://localhost:8000").rstrip("/")
 

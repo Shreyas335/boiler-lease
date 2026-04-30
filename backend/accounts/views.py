@@ -27,6 +27,7 @@ from .models import (
     BookingGroup,
     BookingGroupConfirmation,
     BookingGroupMembership,
+    BookingExtensionRequest,
     CompanyDocument,
     FavoriteListing,
     Guideline,
@@ -53,6 +54,7 @@ from .serializers import (
     BookingGroupCreateSerializer,
     BookingGroupInviteSerializer,
     BookingGroupSerializer,
+    CompanyBookingFeeUpdateSerializer,
     CompanyDocumentSerializer,
     CompanyDocumentUploadSerializer,
     FavoriteListingSerializer,
@@ -64,6 +66,9 @@ from .serializers import (
     PasswordChangeSerializer,
     PasswordResetConfirmSerializer,
     PasswordResetRequestSerializer,
+    BookingExtensionRequestCreateSerializer,
+    BookingExtensionRequestDecisionSerializer,
+    BookingExtensionRequestSerializer,
     PropertyBookingCreateSerializer,
     PropertyBookingStatusUpdateSerializer,
     PropertyListingBrowseSerializer,
@@ -799,7 +804,11 @@ def my_property_listings(request):
             status=status.HTTP_403_FORBIDDEN,
         )
 
-    listings = request.user.property_listings.filter(deleted_at__isnull=True).order_by("-created_at")
+    listings = (
+        request.user.property_listings.filter(deleted_at__isnull=True)
+        .select_related("approved_by_company")
+        .order_by("-created_at")
+    )
     return Response(PropertyListingSerializer(listings, many=True).data)
 
 
@@ -816,6 +825,14 @@ def listing_amenities(request):
         [{"id": amenity.id, "code": amenity.code, "label": amenity.label} for amenity in amenities]
     )
 
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def listing_tag_presets(request):
+    """Predefined tag labels for listing editors; custom tags are also allowed."""
+    from .listing_tags import LISTING_TAG_PRESETS
+
+    return Response({"presets": list(LISTING_TAG_PRESETS)})
 
 
 @api_view(["DELETE"])
@@ -924,7 +941,7 @@ def browse_property_listings(request):
     )
 
     # Optimization: select_related and prefetch_related
-    queryset = queryset.select_related('owner').prefetch_related(
+    queryset = queryset.select_related("owner", "approved_by_company").prefetch_related(
         Prefetch('media'),
         Prefetch('amenity_links__amenity', queryset=ListingAmenity.objects.filter(is_active=True))
     )
@@ -1104,7 +1121,7 @@ def my_current_bookings(request):
             listing__deleted_at__isnull=True,
         )
         .select_related("listing")
-        .prefetch_related("listing__media")
+        .prefetch_related("listing__media", "extension_requests")
         .distinct()
     )
     sort_by = request.query_params.get("sort_by", "date_booked")
@@ -1141,7 +1158,7 @@ def my_booking_history(request):
             listing__deleted_at__isnull=True,
         )
         .select_related("listing")
-        .prefetch_related("listing__media")
+        .prefetch_related("listing__media", "extension_requests")
         .distinct()
     )
     sort_by = request.query_params.get("sort_by", "date_booked")
@@ -1358,6 +1375,50 @@ def cancel_booking(request, booking_id):
     return Response({"detail": "Booking cancelled successfully."}, status=status.HTTP_200_OK)
 
 
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def create_booking_extension_request(request, booking_id):
+    if not _is_sublessee(request):
+        return Response(
+            {"detail": "Only sublessees can request booking extensions."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    booking = (
+        PropertyBooking.objects.select_related("listing")
+        .filter(pk=booking_id, sublessee=request.user, listing__deleted_at__isnull=True)
+        .first()
+    )
+    if not booking:
+        return Response({"detail": "Booking not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    if booking.status != PropertyBooking.Status.CONFIRMED:
+        return Response(
+            {"detail": "Extensions can only be requested for confirmed bookings."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if booking.listing.availability_end_date <= booking.end_date:
+        return Response(
+            {"detail": "This listing has no availability beyond your current checkout."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if booking.extension_requests.filter(status=BookingExtensionRequest.Status.PENDING).exists():
+        return Response(
+            {"detail": "You already have a pending extension request for this booking."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    serializer = BookingExtensionRequestCreateSerializer(data=request.data, context={"booking": booking})
+    serializer.is_valid(raise_exception=True)
+
+    ext = BookingExtensionRequest.objects.create(
+        booking=booking,
+        requested_end_date=serializer.validated_data["requested_end_date"],
+        sublessee_notes=serializer.validated_data.get("sublessee_notes") or "",
+    )
+    return Response(BookingExtensionRequestSerializer(ext).data, status=status.HTTP_201_CREATED)
+
+
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def manageable_bookings(request):
@@ -1375,7 +1436,7 @@ def manageable_bookings(request):
             listing__deleted_at__isnull=True,
         )
         .select_related("listing", "sublessee")
-        .prefetch_related("listing__media")
+        .prefetch_related("listing__media", "extension_requests")
         .order_by("status", "-booked_at")
     )
     serializer = ManagedPropertyBookingSerializer(bookings, many=True)
@@ -1398,7 +1459,7 @@ def company_manageable_bookings(request):
             listing__deleted_at__isnull=True,
         )
         .select_related("listing", "sublessee", "listing__owner")
-        .prefetch_related("listing__media")
+        .prefetch_related("listing__media", "extension_requests")
         .order_by("status", "-booked_at")
     )
     serializer = ManagedPropertyBookingSerializer(bookings, many=True)
@@ -1431,6 +1492,56 @@ def update_booking_status(request, booking_id):
     return Response(response_serializer.data, status=status.HTTP_200_OK)
 
 
+@api_view(["PATCH"])
+@permission_classes([IsAuthenticated])
+def review_booking_extension_request(request, extension_request_id):
+    ext = (
+        BookingExtensionRequest.objects.filter(pk=extension_request_id)
+        .select_related("booking", "booking__listing", "booking__sublessee")
+        .first()
+    )
+    if not ext:
+        return Response({"detail": "Extension request not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    if ext.status != BookingExtensionRequest.Status.PENDING:
+        return Response(
+            {"detail": "Only pending extension requests can be reviewed."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    booking = ext.booking
+    can_review = _can_user_update_booking_status(request, booking)
+    if not can_review:
+        return Response(
+            {"detail": "You do not have permission to review this extension request."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    serializer = BookingExtensionRequestDecisionSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    ext.status = serializer.validated_data["status"]
+    ext.reviewer_notes = serializer.validated_data.get("reviewer_notes") or ""
+    ext.decided_at = timezone.now()
+
+    if ext.status == BookingExtensionRequest.Status.APPROVED:
+        extra_days = (ext.requested_end_date - booking.end_date).days
+        monthly_rent = booking.monthly_rent_snapshot or booking.listing.monthly_rent
+        monthly_rent_dec = Decimal(str(monthly_rent))
+        daily_rent = monthly_rent_dec / Decimal("30")
+        ext.additional_amount_due = (daily_rent * Decimal(extra_days)).quantize(
+            Decimal("0.01"),
+            rounding=ROUND_HALF_UP,
+        )
+        booking.end_date = ext.requested_end_date
+        booking.save(update_fields=["end_date"])
+    else:
+        ext.additional_amount_due = None
+
+    ext.save(update_fields=["status", "reviewer_notes", "decided_at", "additional_amount_due"])
+
+    return Response(BookingExtensionRequestSerializer(ext).data, status=status.HTTP_200_OK)
+
+
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def my_past_bookings(request):
@@ -1451,7 +1562,7 @@ def my_past_bookings(request):
             listing__deleted_at__isnull=True,
         )
         .select_related("listing")
-        .prefetch_related("listing__media")
+        .prefetch_related("listing__media", "extension_requests")
         .distinct()
     )
     bookings = bookings.filter(
@@ -1646,11 +1757,6 @@ def create_deposit_checkout_session(request):
         return Response(
             {"detail": "Only sublessees can start deposit payments."},
             status=status.HTTP_403_FORBIDDEN,
-        )
-    if not request.user.email_verified:
-        return Response(
-            {"detail": "Please verify your email before making a payment."},
-            status=status.HTTP_400_BAD_REQUEST,
         )
     if _user_must_verify_identity(request.user):
         return _identity_verification_required_response()
@@ -1858,7 +1964,9 @@ def property_listing_detail(request, listing_id):
     DELETE: Delete listing (owner only)
     """
     try:
-        listing = PropertyListing.objects.get(id=listing_id, deleted_at__isnull=True)
+        listing = PropertyListing.objects.select_related("owner", "approved_by_company").get(
+            id=listing_id, deleted_at__isnull=True
+        )
     except PropertyListing.DoesNotExist:
         return Response(
             {"detail": "Property listing not found."}, status=status.HTTP_404_NOT_FOUND
@@ -1871,8 +1979,10 @@ def property_listing_detail(request, listing_id):
 
     # GET: Retrieve listing
     if request.method == "GET":
-        # Check if sublessee can access this listing
-        if _is_sublessee(request):
+        is_owner = (
+            request.user.is_authenticated and listing.owner_id == request.user.id
+        )
+        if not is_owner:
             if (
                 listing.status != PropertyListing.ListingStatus.PUBLISHED
                 or listing.approval_status != PropertyListing.ApprovalStatus.APPROVED
@@ -1882,9 +1992,12 @@ def property_listing_detail(request, listing_id):
                 )
 
         data = PropertyListingSerializer(listing).data
-        data["is_favorited"] = FavoriteListing.objects.filter(
-            user=request.user, listing=listing
-        ).exists()
+        if request.user.is_authenticated:
+            data["is_favorited"] = FavoriteListing.objects.filter(
+                user=request.user, listing=listing
+            ).exists()
+        else:
+            data["is_favorited"] = False
         return Response(data)
 
     # PATCH: Update listing (owner only)
@@ -1984,7 +2097,7 @@ def my_favorite_listings(request):
 
     favorites = (
         FavoriteListing.objects.filter(user=request.user, listing__deleted_at__isnull=True)
-        .select_related("listing")
+        .select_related("listing", "listing__approved_by_company")
         .prefetch_related("listing__media")
     )
     sort_by = request.query_params.get("sort_by", "date_saved")
@@ -2004,7 +2117,7 @@ def my_favorite_listings(request):
     return Response(serializer.data)
 
 
-@api_view(["GET"])
+@api_view(["GET", "PATCH"])
 @permission_classes([IsAuthenticated])
 def company_status(request):
     if request.user.user_type != User.UserType.MANAGEMENT:
@@ -2015,6 +2128,20 @@ def company_status(request):
         company = request.user.management_company
     except ManagementCompany.DoesNotExist:
         return Response({"detail": "No company found for this user."}, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == "GET":
+        return Response(ManagementCompanySerializer(company).data)
+
+    if not _is_approved_management(request):
+        return Response(
+            {"detail": "Only approved management companies can update booking fees."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    serializer = CompanyBookingFeeUpdateSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    company.booking_fee_percent = serializer.validated_data["booking_fee_percent"]
+    company.save(update_fields=["booking_fee_percent", "updated_at"])
     return Response(ManagementCompanySerializer(company).data)
 
 

@@ -1,14 +1,32 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
-import { Alert, Avatar, Box, Button, Card, CardContent, Chip, Container, Grid, MenuItem, Stack, TextField, Typography } from "@mui/material";
+import {
+  Alert,
+  Avatar,
+  Box,
+  Button,
+  Card,
+  CardContent,
+  Chip,
+  Container,
+  Grid,
+  Snackbar,
+  MenuItem, Stack,
+  TextField,
+  Typography,
+  Paper,
+} from "@mui/material";
 import VerifiedIcon from "@mui/icons-material/Verified";
 import PersonIcon from "@mui/icons-material/Person";
 import FavoriteBorderRoundedIcon from "@mui/icons-material/FavoriteBorderRounded";
 import FavoriteRoundedIcon from "@mui/icons-material/FavoriteRounded";
+import MailOutlineIcon from "@mui/icons-material/MailOutline";
+import LinkIcon from "@mui/icons-material/Link";
 import { Link as RouterLink, useNavigate, useParams } from "react-router-dom";
 import { addFavorite, createBooking, getPropertyListingDetail, removeFavorite, type PropertyListing } from "../api/listings";
 import { createGroupBooking, getBookingGroups, type BookingGroup } from "../api/groups";
 import { useAuth } from "../contexts/AuthContext";
+import { computeBookingPriceBreakdown, formatUsd } from "../utils/bookingPriceBreakdown";
 
 const SOLO_BOOKING_VALUE = "solo";
 
@@ -32,6 +50,31 @@ export default function PropertyDetailPage() {
   const [bookingDates, setBookingDates] = useState({ start_date: "", end_date: "" });
   const [groups, setGroups] = useState<BookingGroup[]>([]);
   const [selectedGroupId, setSelectedGroupId] = useState(SOLO_BOOKING_VALUE);
+  const [copyLinkOpen, setCopyLinkOpen] = useState(false);
+
+  function shareListingUrl(): string {
+    if (!listing) return "";
+    return `${window.location.origin}/properties/${listing.id}`;
+  }
+
+  async function handleCopyShareLink() {
+    if (!listing) return;
+    const url = shareListingUrl();
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopyLinkOpen(true);
+    } catch {
+      setError("Unable to copy the link. You can copy it from the address bar instead.");
+    }
+  }
+
+  function handleShareByEmail() {
+    if (!listing) return;
+    const url = shareListingUrl();
+    const subject = encodeURIComponent(`Check out this listing: ${listing.title}`);
+    const body = encodeURIComponent(`I thought you might be interested in this sublease:\n\n${url}\n`);
+    window.location.href = `mailto:?subject=${subject}&body=${body}`;
+  }
 
   function validateBookingForm() {
     if (!listing) return "Property listing not found.";
@@ -149,6 +192,36 @@ export default function PropertyDetailPage() {
     }
   }
 
+  const bookingIdentityBlocked =
+    user?.user_type === "sublessee" && user.identity_verification_status !== "verified";
+
+  const bookingDatesValidForPricing = useMemo(() => {
+    if (!listing) return false;
+    if (!bookingDates.start_date || !bookingDates.end_date) return false;
+    if (bookingDates.end_date < bookingDates.start_date) return false;
+    if (
+      bookingDates.start_date < listing.availability_start_date ||
+      bookingDates.end_date > listing.availability_end_date
+    ) {
+      return false;
+    }
+    return true;
+  }, [listing, bookingDates]);
+
+  const priceBreakdown = useMemo(() => {
+    if (!listing || !bookingDatesValidForPricing) return null;
+    return computeBookingPriceBreakdown(
+      listing.monthly_rent,
+      listing.platform_fee_flat,
+      listing.management_fee_percent,
+      bookingDates.start_date,
+      bookingDates.end_date,
+    );
+  }, [listing, bookingDates, bookingDatesValidForPricing]);
+
+  const managementPctLabel =
+    listing?.management_fee_percent != null ? listing.management_fee_percent : null;
+
   if (loading) {
     return (
       <Box sx={{ py: 6, px: 2 }}>
@@ -169,9 +242,6 @@ export default function PropertyDetailPage() {
     );
   }
 
-  const bookingIdentityBlocked =
-    user?.user_type === "sublessee" && user.identity_verification_status !== "verified";
-
   return (
     <Box sx={{ py: 6, px: 2 }}>
       <Container maxWidth="lg">
@@ -184,6 +254,13 @@ export default function PropertyDetailPage() {
               {listing.street_line_1}
               {listing.street_line_2 ? `, ${listing.street_line_2}` : ""}, {listing.city}, {listing.state} {listing.postal_code}
             </Typography>
+            {listing.tags && listing.tags.length > 0 && (
+              <Stack direction="row" flexWrap="wrap" gap={0.75} useFlexGap sx={{ mt: 1 }}>
+                {listing.tags.map((tag) => (
+                  <Chip key={tag} label={tag} size="small" variant="outlined" color="primary" />
+                ))}
+              </Stack>
+            )}
             {listing.approved_by_company_name && (
               <Stack direction="row" spacing={0.5} alignItems="center" sx={{ mt: 0.5 }}>
                 <VerifiedIcon fontSize="small" color="success" />
@@ -193,8 +270,24 @@ export default function PropertyDetailPage() {
               </Stack>
             )}
           </Box>
-          <Stack direction="row" spacing={1}>
+          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ justifyContent: "flex-end" }}>
             <Chip label={`${formatMoney(listing.monthly_rent)}/mo`} size="small" />
+            <Button
+              variant="outlined"
+              size="small"
+              startIcon={<LinkIcon />}
+              onClick={() => void handleCopyShareLink()}
+            >
+              Copy link
+            </Button>
+            <Button
+              variant="outlined"
+              size="small"
+              startIcon={<MailOutlineIcon />}
+              onClick={handleShareByEmail}
+            >
+              Share by email
+            </Button>
             {user?.user_type === "sublessee" && (
               <Button
                 variant="outlined"
@@ -260,41 +353,68 @@ export default function PropertyDetailPage() {
             <Card sx={{ mb: 2 }}>
               <CardContent>
                 <Typography variant="h6" sx={{ mb: 1 }}>Posted by</Typography>
-                <Stack
-                  direction="row"
-                  spacing={1.5}
-                  alignItems="center"
-                  component={RouterLink}
-                  to={`/profile/${listing.owner_id}`}
-                  sx={{ textDecoration: "none", color: "inherit", "&:hover": { opacity: 0.8 } }}
-                >
-                  <Avatar sx={{ width: 36, height: 36, bgcolor: "primary.main" }}>
-                    <PersonIcon fontSize="small" />
-                  </Avatar>
-                  <Box>
-                    <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                      {listing.owner_first_name && listing.owner_last_name
-                        ? `${listing.owner_first_name} ${listing.owner_last_name}`
-                        : listing.owner_username}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      @{listing.owner_username}
-                    </Typography>
-                  </Box>
-                </Stack>
-                {listing.approved_by_company_name && listing.approved_by_company_user_id && (
+                {user ? (
                   <Stack
                     direction="row"
-                    spacing={0.5}
+                    spacing={1.5}
                     alignItems="center"
                     component={RouterLink}
-                    to={`/profile/${listing.approved_by_company_user_id}`}
-                    sx={{ mt: 1.5, textDecoration: "none", color: "success.main", "&:hover": { opacity: 0.8 } }}
+                    to={`/profile/${listing.owner_id}`}
+                    sx={{ textDecoration: "none", color: "inherit", "&:hover": { opacity: 0.8 } }}
                   >
-                    <VerifiedIcon fontSize="small" />
-                    <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                      {listing.approved_by_company_name}
-                    </Typography>
+                    <Avatar sx={{ width: 36, height: 36, bgcolor: "primary.main" }}>
+                      <PersonIcon fontSize="small" />
+                    </Avatar>
+                    <Box>
+                      <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                        {listing.owner_first_name && listing.owner_last_name
+                          ? `${listing.owner_first_name} ${listing.owner_last_name}`
+                          : listing.owner_username}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        @{listing.owner_username}
+                      </Typography>
+                    </Box>
+                  </Stack>
+                ) : (
+                  <Stack direction="row" spacing={1.5} alignItems="center">
+                    <Avatar sx={{ width: 36, height: 36, bgcolor: "primary.main" }}>
+                      <PersonIcon fontSize="small" />
+                    </Avatar>
+                    <Box>
+                      <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                        {listing.owner_first_name && listing.owner_last_name
+                          ? `${listing.owner_first_name} ${listing.owner_last_name}`
+                          : listing.owner_username}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        @{listing.owner_username}
+                      </Typography>
+                    </Box>
+                  </Stack>
+                )}
+                {listing.approved_by_company_name && listing.approved_by_company_user_id && (
+                  <Stack direction="row" spacing={0.5} alignItems="center" sx={{ mt: 1.5 }}>
+                    <VerifiedIcon fontSize="small" color="success" />
+                    {user ? (
+                      <Typography
+                        component={RouterLink}
+                        to={`/profile/${listing.approved_by_company_user_id}`}
+                        variant="body2"
+                        sx={{
+                          fontWeight: 600,
+                          color: "success.main",
+                          textDecoration: "none",
+                          "&:hover": { opacity: 0.8 },
+                        }}
+                      >
+                        {listing.approved_by_company_name}
+                      </Typography>
+                    ) : (
+                      <Typography variant="body2" sx={{ fontWeight: 600, color: "success.main" }}>
+                        {listing.approved_by_company_name}
+                      </Typography>
+                    )}
                   </Stack>
                 )}
               </CardContent>
@@ -356,6 +476,52 @@ export default function PropertyDetailPage() {
                       Available window: {listing.availability_start_date} to {listing.availability_end_date}
                     </Typography>
 
+                    {priceBreakdown && bookingDatesValidForPricing && (
+                      <Paper variant="outlined" sx={{ p: 2, bgcolor: "action.hover" }}>
+                        <Typography variant="subtitle2" fontWeight={600} sx={{ mb: 1 }}>
+                          Booking summary (read-only estimate)
+                        </Typography>
+                        <Stack spacing={0.75}>
+                          <Stack direction="row" justifyContent="space-between" alignItems="baseline" gap={2}>
+                            <Typography variant="body2" color="text.secondary">
+                              Base rent ({priceBreakdown.nights} nights @ monthly ÷ 30)
+                            </Typography>
+                            <Typography variant="body2" fontWeight={600}>
+                              {formatUsd(priceBreakdown.baseRent)}
+                            </Typography>
+                          </Stack>
+                          <Stack direction="row" justifyContent="space-between" alignItems="baseline" gap={2}>
+                            <Typography variant="body2" color="text.secondary">
+                              Platform fee (flat)
+                            </Typography>
+                            <Typography variant="body2">{formatUsd(priceBreakdown.platformFee)}</Typography>
+                          </Stack>
+                          {managementPctLabel != null && (
+                            <Stack direction="row" justifyContent="space-between" alignItems="baseline" gap={2}>
+                              <Typography variant="body2" color="text.secondary">
+                                Management fee ({managementPctLabel}%)
+                                {listing.approved_by_company_name
+                                  ? ` — ${listing.approved_by_company_name}`
+                                  : ""}
+                              </Typography>
+                              <Typography variant="body2">{formatUsd(priceBreakdown.managementFee)}</Typography>
+                            </Stack>
+                          )}
+                          <Stack direction="row" justifyContent="space-between" alignItems="baseline" gap={2} sx={{ pt: 0.5, borderTop: "1px solid", borderColor: "divider" }}>
+                            <Typography variant="body2" fontWeight={700}>
+                              Total (rent + fees)
+                            </Typography>
+                            <Typography variant="body2" fontWeight={700}>
+                              {formatUsd(priceBreakdown.total)}
+                            </Typography>
+                          </Stack>
+                        </Stack>
+                        <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 1.5 }}>
+                          Updates automatically when you change dates. Security deposit ({formatMoney(listing.security_deposit)}) is collected separately and not included in this total.
+                        </Typography>
+                      </Paper>
+                    )}
+
                     <TextField
                       label="Booking group"
                       select
@@ -403,6 +569,13 @@ export default function PropertyDetailPage() {
           </Grid>
         </Grid>
       </Container>
+      <Snackbar
+        open={copyLinkOpen}
+        autoHideDuration={4000}
+        onClose={() => setCopyLinkOpen(false)}
+        message="Link copied to clipboard"
+        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+      />
     </Box>
   );
 }

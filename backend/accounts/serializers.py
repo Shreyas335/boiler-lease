@@ -4,11 +4,13 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db.models import Avg, Q
 from rest_framework import serializers
 
+from .listing_tags import MAX_TAG_LENGTH, normalize_listing_tags
 from .models import (
     ApprovalRequest,
     BookingGroup,
     BookingGroupConfirmation,
     BookingGroupMembership,
+    BookingExtensionRequest,
     CompanyDocument,
     FavoriteListing,
     FeedbackSubmission,
@@ -24,6 +26,27 @@ from .models import (
     UserBlock,
     UserRating,
 )
+
+
+def _validate_tags_field(value):
+    try:
+        return normalize_listing_tags(value)
+    except ValueError as exc:
+        raise serializers.ValidationError(str(exc)) from exc
+
+
+def _listing_platform_fee_flat_str():
+    v = getattr(settings, "PLATFORM_BOOKING_FEE_FLAT", None)
+    return str(v) if v is not None else "3.99"
+
+
+def _listing_management_fee_percent_str(obj):
+    if not getattr(obj, "approved_by_company_id", None):
+        return None
+    company = getattr(obj, "approved_by_company", None)
+    if company is None:
+        return None
+    return str(company.booking_fee_percent)
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -360,6 +383,8 @@ class PropertyListingSerializer(serializers.ModelSerializer):
     media = serializers.SerializerMethodField()
     approved_by_company_name = serializers.SerializerMethodField()
     approved_by_company_user_id = serializers.SerializerMethodField()
+    platform_fee_flat = serializers.SerializerMethodField()
+    management_fee_percent = serializers.SerializerMethodField()
     owner_id = serializers.IntegerField(source="owner.id", read_only=True)
     owner_username = serializers.CharField(source="owner.username", read_only=True)
     owner_first_name = serializers.CharField(source="owner.first_name", read_only=True)
@@ -412,9 +437,18 @@ class PropertyListingSerializer(serializers.ModelSerializer):
             "published_at",
             "created_at",
             "updated_at",
+            "tags",
+            "platform_fee_flat",
+            "management_fee_percent",
             "amenities",
             "media",
         )
+
+    def get_platform_fee_flat(self, obj):
+        return _listing_platform_fee_flat_str()
+
+    def get_management_fee_percent(self, obj):
+        return _listing_management_fee_percent_str(obj)
 
     def get_amenities(self, obj):
         amenities = ListingAmenity.objects.filter(listing_links__listing=obj, is_active=True).distinct()
@@ -438,6 +472,8 @@ class PropertyListingSerializer(serializers.ModelSerializer):
 class PropertyListingSummarySerializer(serializers.ModelSerializer):
     primary_photo_url = serializers.SerializerMethodField()
     is_favorited = serializers.SerializerMethodField()
+    platform_fee_flat = serializers.SerializerMethodField()
+    management_fee_percent = serializers.SerializerMethodField()
 
     class Meta:
         model = PropertyListing
@@ -452,10 +488,19 @@ class PropertyListingSummarySerializer(serializers.ModelSerializer):
             "availability_end_date",
             "status",
             "approval_status",
+            "tags",
+            "platform_fee_flat",
+            "management_fee_percent",
             "created_at",
             "primary_photo_url",
             "is_favorited",
         )
+
+    def get_platform_fee_flat(self, obj):
+        return _listing_platform_fee_flat_str()
+
+    def get_management_fee_percent(self, obj):
+        return _listing_management_fee_percent_str(obj)
 
     def get_primary_photo_url(self, obj):
         media = (
@@ -489,6 +534,9 @@ class PropertyBookingSerializer(serializers.ModelSerializer):
     group_name = serializers.SerializerMethodField()
     group_confirmed_user_ids = serializers.SerializerMethodField()
     group_paid_user_ids = serializers.SerializerMethodField()
+    can_request_extension = serializers.SerializerMethodField()
+    pending_extension_request = serializers.SerializerMethodField()
+    latest_extension_request = serializers.SerializerMethodField()
 
     class Meta:
         model = PropertyBooking
@@ -509,6 +557,9 @@ class PropertyBookingSerializer(serializers.ModelSerializer):
             "group_name",
             "group_confirmed_user_ids",
             "group_paid_user_ids",
+            "can_request_extension",
+            "pending_extension_request",
+            "latest_extension_request",
         )
 
     def get_price(self, obj):
@@ -548,6 +599,44 @@ class PropertyBookingSerializer(serializers.ModelSerializer):
             .values_list("user_id", flat=True)
             .distinct()
         )
+
+    def _has_pending_extension(self, obj):
+        for er in obj.extension_requests.all():
+            if er.status == BookingExtensionRequest.Status.PENDING:
+                return er
+        return None
+
+    def get_can_request_extension(self, obj):
+        if obj.status != PropertyBooking.Status.CONFIRMED:
+            return False
+        if obj.listing.availability_end_date <= obj.end_date:
+            return False
+        return self._has_pending_extension(obj) is None
+
+    def get_pending_extension_request(self, obj):
+        er = self._has_pending_extension(obj)
+        if er is None:
+            return None
+        return {
+            "id": er.id,
+            "requested_end_date": er.requested_end_date.isoformat(),
+            "status": er.status,
+            "additional_amount_due": str(er.additional_amount_due or "0.00"),
+        }
+
+    def get_latest_extension_request(self, obj):
+        ers = obj.extension_requests.all()
+        er = ers[0] if ers else None
+        if er is None:
+            return None
+        return {
+            "id": er.id,
+            "requested_end_date": er.requested_end_date.isoformat(),
+            "status": er.status,
+            "additional_amount_due": str(er.additional_amount_due or "0.00"),
+            "reviewer_notes": er.reviewer_notes,
+            "decided_at": er.decided_at.isoformat() if er.decided_at else None,
+        }
 
 
 class BookingGroupMembershipSerializer(serializers.ModelSerializer):
@@ -634,6 +723,65 @@ class BookingGroupInviteSerializer(serializers.Serializer):
             raise serializers.ValidationError(f"Could not find sublessee(s): {', '.join(missing)}")
         self.context["invitee_users"] = users
         return value
+
+
+class BookingExtensionRequestSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = BookingExtensionRequest
+        fields = (
+            "id",
+            "booking",
+            "requested_end_date",
+            "sublessee_notes",
+            "status",
+            "reviewer_notes",
+            "additional_amount_due",
+            "decided_at",
+            "created_at",
+        )
+        read_only_fields = (
+            "id",
+            "booking",
+            "requested_end_date",
+            "sublessee_notes",
+            "status",
+            "reviewer_notes",
+            "additional_amount_due",
+            "decided_at",
+            "created_at",
+        )
+
+
+class BookingExtensionRequestCreateSerializer(serializers.Serializer):
+    requested_end_date = serializers.DateField()
+    sublessee_notes = serializers.CharField(required=False, allow_blank=True, max_length=2000)
+
+    def validate(self, attrs):
+        booking = self.context["booking"]
+        requested_end_date = attrs["requested_end_date"]
+        if requested_end_date <= booking.end_date:
+            raise serializers.ValidationError(
+                {"requested_end_date": "New end date must be after your current checkout."}
+            )
+        if requested_end_date > booking.listing.availability_end_date:
+            raise serializers.ValidationError(
+                {"requested_end_date": "Cannot extend beyond the listing's availability end date."}
+            )
+        if requested_end_date < booking.start_date:
+            raise serializers.ValidationError(
+                {"requested_end_date": "Invalid end date for this booking."}
+            )
+        return attrs
+
+
+class BookingExtensionRequestDecisionSerializer(serializers.Serializer):
+    status = serializers.ChoiceField(
+        choices=[
+            BookingExtensionRequest.Status.APPROVED,
+            BookingExtensionRequest.Status.DECLINED,
+        ]
+    )
+    reviewer_notes = serializers.CharField(required=False, allow_blank=True, max_length=2000)
 
 
 class ManagedPropertyBookingSerializer(PropertyBookingSerializer):
@@ -759,6 +907,11 @@ class PropertyListingCreateSerializer(serializers.ModelSerializer):
         allow_empty=True,
         write_only=True,
     )
+    tags = serializers.ListField(
+        child=serializers.CharField(max_length=MAX_TAG_LENGTH),
+        required=False,
+        allow_empty=True,
+    )
 
     class Meta:
         model = PropertyListing
@@ -794,6 +947,7 @@ class PropertyListingCreateSerializer(serializers.ModelSerializer):
             "contact_email",
             "contact_phone",
             "virtual_tour_url",
+            "tags",
             "amenity_codes",
         )
         extra_kwargs = {
@@ -834,6 +988,9 @@ class PropertyListingCreateSerializer(serializers.ModelSerializer):
 
         return attrs
 
+    def validate_tags(self, value):
+        return _validate_tags_field(value)
+
     def create(self, validated_data):
         amenity_codes = validated_data.pop("amenity_codes", [])
         owner = self.context["request"].user
@@ -857,6 +1014,11 @@ class PropertyListingUpdateSerializer(serializers.ModelSerializer):
         required=False,
         allow_empty=True,
         write_only=True,
+    )
+    tags = serializers.ListField(
+        child=serializers.CharField(max_length=MAX_TAG_LENGTH),
+        required=False,
+        allow_empty=True,
     )
 
     class Meta:
@@ -894,6 +1056,7 @@ class PropertyListingUpdateSerializer(serializers.ModelSerializer):
             "contact_phone",
             "virtual_tour_url",
             "status",
+            "tags",
             "amenity_codes",
         )
         extra_kwargs = {
@@ -936,6 +1099,9 @@ class PropertyListingUpdateSerializer(serializers.ModelSerializer):
 
         return attrs
 
+    def validate_tags(self, value):
+        return _validate_tags_field(value)
+
     def update(self, instance, validated_data):
         amenity_codes = validated_data.pop("amenity_codes", None)
 
@@ -961,6 +1127,8 @@ class PropertyListingBrowseSerializer(serializers.ModelSerializer):
     media = ListingMediaSerializer(many=True, read_only=True)
     approved_by_company_name = serializers.SerializerMethodField()
     approved_by_company_user_id = serializers.SerializerMethodField()
+    platform_fee_flat = serializers.SerializerMethodField()
+    management_fee_percent = serializers.SerializerMethodField()
     owner_id = serializers.IntegerField(source="owner.id", read_only=True)
     owner_username = serializers.CharField(source="owner.username", read_only=True)
     owner_first_name = serializers.CharField(source="owner.first_name", read_only=True)
@@ -997,10 +1165,19 @@ class PropertyListingBrowseSerializer(serializers.ModelSerializer):
             "owner_username",
             "owner_first_name",
             "owner_last_name",
+            "tags",
+            "platform_fee_flat",
+            "management_fee_percent",
             "amenities",
             "media",
         )
         read_only_fields = fields
+
+    def get_platform_fee_flat(self, obj):
+        return _listing_platform_fee_flat_str()
+
+    def get_management_fee_percent(self, obj):
+        return _listing_management_fee_percent_str(obj)
 
     def get_amenities(self, obj):
         amenities = ListingAmenity.objects.filter(listing_links__listing=obj, is_active=True).distinct()
@@ -1120,8 +1297,20 @@ class OwnerListingTransactionSerializer(serializers.ModelSerializer):
 class ManagementCompanySerializer(serializers.ModelSerializer):
     class Meta:
         model = ManagementCompany
-        fields = ("id", "company_name", "status", "rejection_reason", "reviewed_at", "created_at")
-        read_only_fields = ("id", "status", "rejection_reason", "reviewed_at", "created_at")
+        fields = (
+            "id",
+            "company_name",
+            "booking_fee_percent",
+            "status",
+            "rejection_reason",
+            "reviewed_at",
+            "created_at",
+        )
+        read_only_fields = ("id", "company_name", "status", "rejection_reason", "reviewed_at", "created_at")
+
+
+class CompanyBookingFeeUpdateSerializer(serializers.Serializer):
+    booking_fee_percent = serializers.DecimalField(max_digits=5, decimal_places=2, min_value=0, max_value=100)
 
 
 class PublicGuidelineSerializer(serializers.ModelSerializer):

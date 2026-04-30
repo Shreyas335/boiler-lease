@@ -20,6 +20,7 @@ import { Link as RouterLink, useNavigate, useLocation } from "react-router-dom";
 import {
   updateListing,
   getListingAmenities,
+  getListingTagPresets,
   type CreatePropertyListingPayload,
   type ListingAmenity,
   type ListingMedia,
@@ -28,6 +29,7 @@ import {
 import { useAuth } from "../contexts/AuthContext";
 import AddressAutocomplete, { type AddressComponents } from "../components/AddressAutocomplete";
 import PhotoManager, { type PendingPhoto } from "../components/PhotoManager";
+import ListingTagsEditor from "../components/ListingTagsEditor";
 import { getListingWarnings, validateListingForm } from "../utils/listingFormValidation";
 
 const PROPERTY_TYPES = ["apartment", "house", "condo", "studio", "other"];
@@ -68,9 +70,11 @@ export default function EditListingPage() {
     parking_available: false,
     status: "draft",
     amenity_codes: [],
+    tags: [],
   });
 
   const [amenities, setAmenities] = useState<ListingAmenity[]>([]);
+  const [tagPresets, setTagPresets] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [pageMessage, setPageMessage] = useState<{
     type: "success" | "error";
@@ -87,17 +91,23 @@ export default function EditListingPage() {
   const [uploading, setUploading] = useState(false);
 
   useEffect(() => {
-    async function loadAmenities() {
+    async function loadAmenitiesAndTags() {
       try {
         const data = await getListingAmenities();
         setAmenities(data);
       } catch {
         setAmenities([]);
       }
+      try {
+        const presets = await getListingTagPresets();
+        setTagPresets(presets);
+      } catch {
+        setTagPresets([]);
+      }
     }
 
     if (user?.user_type === "subleaser" && listing) {
-      loadAmenities();
+      void loadAmenitiesAndTags();
     }
   }, [user, listing]);
 
@@ -137,6 +147,7 @@ export default function EditListingPage() {
         virtual_tour_url: listing.virtual_tour_url || undefined,
         status: listing.status,
         amenity_codes: listing.amenities.map((a) => a.code),
+        tags: listing.tags?.length ? [...listing.tags] : [],
       });
       setExistingMedia(listing.media || []);
       const fullAddress = [
@@ -716,6 +727,19 @@ export default function EditListingPage() {
                   </Grid>
                 ))}
               </Grid>
+
+              <Typography variant="subtitle1" sx={{ mt: 1 }}>
+                Tags
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                Add searchable labels like Furnished or Pet-Friendly. Presets appear as you type; you can also enter your own.
+              </Typography>
+              <ListingTagsEditor
+                presets={tagPresets}
+                value={form.tags ?? []}
+                onChange={(tags) => handleChange("tags", tags)}
+                error={fieldErrors.tags}
+              />
 
               {/* Photos */}
               <PhotoManager

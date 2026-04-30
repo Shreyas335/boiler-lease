@@ -13,6 +13,7 @@ import {
 } from "@mui/material";
 import {
   getManageableBookings,
+  reviewBookingExtensionRequest,
   updateBookingStatus,
   type ManagedBookingRecord,
 } from "../api/listings";
@@ -40,6 +41,12 @@ function getBookingStatusMeta(status: ManagedBookingRecord["status"]): {
   return { label: "Pending", color: "warning" };
 }
 
+function formatMoney(value: string | null): string {
+  const amount = Number(value ?? "");
+  if (Number.isNaN(amount)) return "$0.00";
+  return `$${amount.toFixed(2)}`;
+}
+
 export default function BookingRequestsPage() {
   const { user } = useAuth();
   const [bookings, setBookings] = useState<ManagedBookingRecord[]>([]);
@@ -47,6 +54,7 @@ export default function BookingRequestsPage() {
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [busyBookingId, setBusyBookingId] = useState<number | null>(null);
+  const [busyExtensionId, setBusyExtensionId] = useState<number | null>(null);
 
   useEffect(() => {
     if (user?.user_type !== "subleaser") {
@@ -114,6 +122,36 @@ export default function BookingRequestsPage() {
     }
   }
 
+  async function handleExtensionReview(
+    extensionRequestId: number,
+    nextStatus: "approved" | "declined",
+  ) {
+    try {
+      setBusyExtensionId(extensionRequestId);
+      setError(null);
+      setSuccessMessage(null);
+      const reviewerNotes =
+        nextStatus === "declined"
+          ? window.prompt("Optional decline reason to share with the sublessee:", "") || ""
+          : "";
+      const reviewed = await reviewBookingExtensionRequest(extensionRequestId, {
+        status: nextStatus,
+        reviewer_notes: reviewerNotes || undefined,
+      });
+      const refreshed = await getManageableBookings();
+      setBookings(refreshed);
+      setSuccessMessage(
+        nextStatus === "approved"
+          ? `Extension approved. Additional amount due: ${formatMoney(reviewed.additional_amount_due)}.`
+          : "Extension request declined.",
+      );
+    } catch {
+      setError("Unable to review extension request. Please try again.");
+    } finally {
+      setBusyExtensionId(null);
+    }
+  }
+
   if (!user || user.user_type !== "subleaser") {
     return (
       <Box sx={{ py: 6, px: 2 }}>
@@ -154,6 +192,10 @@ export default function BookingRequestsPage() {
                 const statusMeta = getBookingStatusMeta(booking.status);
                 const isPending = booking.status === "pending";
                 const isBusy = busyBookingId === booking.id;
+                const pendingExtension = booking.pending_extension_request;
+                const isExtensionBusy = pendingExtension
+                  ? busyExtensionId === pendingExtension.id
+                  : false;
 
                 return (
                   <Card key={booking.id}>
@@ -185,6 +227,41 @@ export default function BookingRequestsPage() {
                             Submitted {new Date(booking.booked_at).toLocaleDateString()}
                           </Typography>
                         </Stack>
+
+                        {pendingExtension && (
+                          <Stack spacing={1}>
+                            <Alert severity="info">
+                              Extension requested through {pendingExtension.requested_end_date}.
+                            </Alert>
+                            <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
+                              <Button
+                                variant="contained"
+                                disabled={isExtensionBusy}
+                                onClick={() =>
+                                  handleExtensionReview(
+                                    pendingExtension.id,
+                                    "approved",
+                                  )
+                                }
+                              >
+                                {isExtensionBusy ? "Saving..." : "Approve extension"}
+                              </Button>
+                              <Button
+                                variant="outlined"
+                                color="error"
+                                disabled={isExtensionBusy}
+                                onClick={() =>
+                                  handleExtensionReview(
+                                    pendingExtension.id,
+                                    "declined",
+                                  )
+                                }
+                              >
+                                {isExtensionBusy ? "Saving..." : "Decline extension"}
+                              </Button>
+                            </Stack>
+                          </Stack>
+                        )}
 
                         {isPending && (
                           <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>

@@ -6,6 +6,8 @@ import type { PropertyListing } from "./listings";
 export interface CompanyProfile {
   id: number;
   company_name: string;
+  /** Booking fee % applied to prorated rent for listings this company approved (0–100). */
+  booking_fee_percent: string;
   status: CompanyStatus;
   rejection_reason: string;
   reviewed_at: string | null;
@@ -21,6 +23,11 @@ export interface CompanyDocument {
 
 export async function getCompanyStatus(): Promise<CompanyProfile> {
   const { data } = await api.get<CompanyProfile>("/company/status/");
+  return data;
+}
+
+export async function updateCompanyBookingFee(booking_fee_percent: string): Promise<CompanyProfile> {
+  const { data } = await api.patch<CompanyProfile>("/company/status/", { booking_fee_percent });
   return data;
 }
 
