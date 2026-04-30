@@ -45,6 +45,8 @@ from .models import (
     ListingMedia,
     Message,
     ManagementCompany,
+    Notification,
+    NotificationPreference,
     PasswordResetToken,
     PriceOffer,
     PropertyBooking,
@@ -97,10 +99,37 @@ from .serializers import (
     UserSerializer,
     TwoFactorVerifyLoginSerializer,
     BlockedUserSerializer,
+    NotificationSerializer,
+    NotificationPreferenceSerializer,
     UserProfileSerializer,
     UserProfileUpdateSerializer,
     UserRatingSerializer,
 )
+
+
+def create_notification(recipient, notification_type, title, body="", **related_ids):
+    """Create a Notification, respecting user preferences, and push via WebSocket."""
+    prefs, _ = NotificationPreference.objects.get_or_create(user=recipient)
+    if not getattr(prefs, notification_type, True):
+        return None
+    n = Notification.objects.create(
+        recipient=recipient,
+        notification_type=notification_type,
+        title=title,
+        body=body,
+        **related_ids,
+    )
+    try:
+        from channels.layers import get_channel_layer
+        from asgiref.sync import async_to_sync
+        channel_layer = get_channel_layer()
+        async_to_sync(channel_layer.group_send)(
+            f"user_{recipient.id}",
+            {"type": "notification_new", "notification": NotificationSerializer(n).data},
+        )
+    except Exception:
+        pass
+    return n
 
 
 def _make_2fa_temp_token(user):
@@ -1199,6 +1228,18 @@ def create_booking(request):
         return Response({'detail': 'Cannot book this listing.'}, status=status.HTTP_403_FORBIDDEN)
 
     booking = serializer.save()
+    try:
+        sublessee_name = request.user.get_full_name() or request.user.username
+        create_notification(
+            listing.owner,
+            "booking_request",
+            f"New booking request from {sublessee_name}",
+            body=f"{sublessee_name} requested to book '{listing.title}'.",
+            related_listing_id=listing.id,
+            related_booking_id=booking.id,
+        )
+    except Exception:
+        pass
     response_serializer = PropertyBookingSerializer(
         booking,
         context={"user": request.user},
@@ -1442,7 +1483,34 @@ def update_booking_status(request, booking_id):
     if not serializer.is_valid():
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+    old_status = booking.status
     serializer.save()
+    new_status = booking.status
+
+    if booking.sublessee and new_status != old_status:
+        try:
+            listing_title = booking.listing.title
+            if new_status == PropertyBooking.Status.CONFIRMED:
+                create_notification(
+                    booking.sublessee,
+                    "booking_confirmed",
+                    f"Booking confirmed for '{listing_title}'",
+                    body="Your booking request has been approved.",
+                    related_listing_id=booking.listing_id,
+                    related_booking_id=booking.id,
+                )
+            elif new_status == PropertyBooking.Status.DECLINED:
+                create_notification(
+                    booking.sublessee,
+                    "booking_declined",
+                    f"Booking declined for '{listing_title}'",
+                    body="Your booking request was not approved.",
+                    related_listing_id=booking.listing_id,
+                    related_booking_id=booking.id,
+                )
+        except Exception:
+            pass
+
     response_serializer = ManagedPropertyBookingSerializer(booking)
     return Response(response_serializer.data, status=status.HTTP_200_OK)
 
@@ -2140,6 +2208,18 @@ def list_conversations(request):
         except Exception:
             pass
 
+    try:
+        sender_name = user.get_full_name() or user.username
+        create_notification(
+            recipient,
+            "new_message",
+            f"New message from {sender_name}",
+            body=initial_message[:200],
+            related_conversation_id=conversation.id,
+        )
+    except Exception:
+        pass
+
     out_serializer = ConversationSerializer(conversation, context={"request": request})
     return Response(out_serializer.data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
 
@@ -2206,6 +2286,18 @@ def conversation_messages(request, conversation_id):
             send_new_message_notification(recipient, user, conversation, msg.content)
         except Exception:
             pass
+
+    try:
+        sender_name = user.get_full_name() or user.username
+        create_notification(
+            recipient,
+            "new_message",
+            f"New message from {sender_name}",
+            body=msg.content[:200],
+            related_conversation_id=conversation.id,
+        )
+    except Exception:
+        pass
 
     return Response(MessageSerializer(msg).data, status=status.HTTP_201_CREATED)
 
@@ -2582,6 +2674,17 @@ def company_review_approval_request(request, pk):
         listing.published_at = now
         listing.save(update_fields=["approval_status", "approved_by_company", "status", "published_at", "updated_at"])
 
+        try:
+            create_notification(
+                listing.owner,
+                "listing_approved",
+                f"Listing approved: '{listing.title}'",
+                body=f"Your listing was approved by {company.company_name} and is now published.",
+                related_listing_id=listing.id,
+            )
+        except Exception:
+            pass
+
     else:  # reject
         approval_request.status = ApprovalRequest.Status.REJECTED
         approval_request.reviewer_notes = reviewer_notes
@@ -2606,6 +2709,17 @@ def company_review_approval_request(request, pk):
                 from_email=settings.DEFAULT_FROM_EMAIL,
                 recipient_list=[listing.owner.email],
                 fail_silently=True,
+            )
+        except Exception:
+            pass
+
+        try:
+            create_notification(
+                listing.owner,
+                "listing_rejected",
+                f"Listing not approved: '{listing.title}'",
+                body=f"Your listing was not approved by {company.company_name}. Reason: {reviewer_notes}",
+                related_listing_id=listing.id,
             )
         except Exception:
             pass
@@ -2796,6 +2910,20 @@ def submit_offer(request, conversation_id):
     _broadcast_new_message(msg, recipient)
     send_offer_received_email(recipient, offer)
 
+    try:
+        sublessee_name = request.user.get_full_name() or request.user.username
+        create_notification(
+            recipient,
+            "offer_received",
+            f"Price offer from {sublessee_name}",
+            body=f"{sublessee_name} offered ${offered_price:,.2f}/mo for '{listing.title}'.",
+            related_listing_id=listing.id,
+            related_offer_id=offer.id,
+            related_conversation_id=conversation.id,
+        )
+    except Exception:
+        pass
+
     return Response(PriceOfferSerializer(offer).data, status=status.HTTP_201_CREATED)
 
 
@@ -2852,7 +2980,123 @@ def respond_to_offer(request, offer_id):
 
     if action == "accepted":
         send_offer_accepted_email(offer.sublessee, offer)
+        try:
+            create_notification(
+                offer.sublessee,
+                "offer_accepted",
+                f"Your offer was accepted for '{offer.listing.title}'",
+                body=f"Your offer of ${offer.offered_price:,.2f}/mo was accepted. Book now!",
+                related_listing_id=offer.listing_id,
+                related_offer_id=offer.id,
+                related_conversation_id=offer.conversation_id,
+            )
+        except Exception:
+            pass
     else:
         send_offer_declined_email(offer.sublessee, offer)
+        try:
+            create_notification(
+                offer.sublessee,
+                "offer_declined",
+                f"Your offer was declined for '{offer.listing.title}'",
+                body=f"Your offer of ${offer.offered_price:,.2f}/mo was declined.",
+                related_listing_id=offer.listing_id,
+                related_offer_id=offer.id,
+                related_conversation_id=offer.conversation_id,
+            )
+        except Exception:
+            pass
 
     return Response(PriceOfferSerializer(offer).data)
+
+
+# ── Notifications ──────────────────────────────────────────────────────────────
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def list_notifications(request):
+    qs = Notification.objects.filter(recipient=request.user).order_by("-created_at")[:50]
+    return Response(NotificationSerializer(qs, many=True).data)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def notifications_unread_count(request):
+    count = Notification.objects.filter(recipient=request.user, is_read=False).count()
+    return Response({"unread_count": count})
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def mark_notification_read(request, notification_id):
+    updated = Notification.objects.filter(pk=notification_id, recipient=request.user).update(is_read=True)
+    if not updated:
+        return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+    return Response({"ok": True})
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def mark_all_notifications_read(request):
+    Notification.objects.filter(recipient=request.user, is_read=False).update(is_read=True)
+    return Response({"ok": True})
+
+
+@api_view(["GET", "PATCH"])
+@permission_classes([IsAuthenticated])
+def notification_preferences(request):
+    prefs, _ = NotificationPreference.objects.get_or_create(user=request.user)
+    if request.method == "GET":
+        return Response(NotificationPreferenceSerializer(prefs).data)
+    serializer = NotificationPreferenceSerializer(prefs, data=request.data, partial=True)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    serializer.save()
+    return Response(serializer.data)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def company_broadcast(request):
+    if not _is_approved_management(request):
+        return Response({"detail": "Only approved management companies can broadcast."}, status=status.HTTP_403_FORBIDDEN)
+
+    title = request.data.get("title", "").strip()
+    body = request.data.get("body", "").strip()
+    listing_id = request.data.get("listing_id")
+
+    if not title:
+        return Response({"detail": "title is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+    company = request.user.management_company
+
+    bookings_qs = PropertyBooking.objects.filter(
+        listing__approved_by_company=company,
+        status__in=[
+            PropertyBooking.Status.CONFIRMED,
+            PropertyBooking.Status.PARTIALLY_PAID,
+            PropertyBooking.Status.FULLY_PAID,
+        ],
+    ).select_related("sublessee")
+
+    if listing_id:
+        bookings_qs = bookings_qs.filter(listing_id=listing_id)
+
+    seen_ids = set()
+    count = 0
+    for booking in bookings_qs:
+        if booking.sublessee_id and booking.sublessee_id not in seen_ids:
+            seen_ids.add(booking.sublessee_id)
+            try:
+                create_notification(
+                    booking.sublessee,
+                    "broadcast",
+                    title,
+                    body=body,
+                    related_listing_id=booking.listing_id,
+                )
+                count += 1
+            except Exception:
+                pass
+
+    return Response({"sent_to": count})
