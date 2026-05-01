@@ -384,7 +384,6 @@ class PropertyListingSerializer(serializers.ModelSerializer):
     media = serializers.SerializerMethodField()
     approved_by_company_name = serializers.SerializerMethodField()
     approved_by_company_user_id = serializers.SerializerMethodField()
-    platform_fee_flat = serializers.SerializerMethodField()
     management_fee_percent = serializers.SerializerMethodField()
     owner_id = serializers.IntegerField(source="owner.id", read_only=True)
     owner_username = serializers.CharField(source="owner.username", read_only=True)
@@ -441,16 +440,12 @@ class PropertyListingSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
             "tags",
-            "platform_fee_flat",
             "management_fee_percent",
             "amenities",
             "media",
             "platform_fee_percentage",
             "platform_fee_flat",
         )
-
-    def get_platform_fee_flat(self, obj):
-        return _listing_platform_fee_flat_str()
 
     def get_management_fee_percent(self, obj):
         return _listing_management_fee_percent_str(obj)
@@ -496,7 +491,9 @@ class PropertyListingSummarySerializer(serializers.ModelSerializer):
     primary_photo_url = serializers.SerializerMethodField()
     is_favorited = serializers.SerializerMethodField()
     platform_fee_flat = serializers.SerializerMethodField()
+    platform_fee_percentage = serializers.SerializerMethodField()
     management_fee_percent = serializers.SerializerMethodField()
+    approved_by_company_name = serializers.SerializerMethodField()
 
     class Meta:
         model = PropertyListing
@@ -513,17 +510,37 @@ class PropertyListingSummarySerializer(serializers.ModelSerializer):
             "approval_status",
             "tags",
             "platform_fee_flat",
+            "platform_fee_percentage",
             "management_fee_percent",
+            "approved_by_company_name",
             "created_at",
             "primary_photo_url",
             "is_favorited",
         )
 
+    def _fee_cfg(self, obj):
+        if not obj.approved_by_company_id:
+            return None
+        try:
+            return obj.approved_by_company.fee_config
+        except Exception:
+            return None
+
     def get_platform_fee_flat(self, obj):
-        return _listing_platform_fee_flat_str()
+        cfg = self._fee_cfg(obj)
+        return str(cfg.platform_fee_flat) if cfg and cfg.platform_fee_flat is not None else None
+
+    def get_platform_fee_percentage(self, obj):
+        cfg = self._fee_cfg(obj)
+        return str(cfg.platform_fee_percentage) if cfg and cfg.platform_fee_percentage is not None else None
 
     def get_management_fee_percent(self, obj):
         return _listing_management_fee_percent_str(obj)
+
+    def get_approved_by_company_name(self, obj):
+        if obj.approved_by_company_id:
+            return obj.approved_by_company.company_name
+        return None
 
     def get_primary_photo_url(self, obj):
         media = (
@@ -571,6 +588,8 @@ class PropertyBookingSerializer(serializers.ModelSerializer):
             "booked_at",
             "monthly_rent_snapshot",
             "security_deposit_snapshot",
+            "platform_fee_percentage_snapshot",
+            "platform_fee_flat_snapshot",
             "deposit_paid_at",
             "status",
             "status_label",

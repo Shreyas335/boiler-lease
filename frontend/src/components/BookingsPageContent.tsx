@@ -127,30 +127,46 @@ export default function BookingsPageContent({
     return { label: "Confirmed", color: "success" };
   }
 
-  function buildFooterText(booking: BookingRecord) {
-    const groupText = booking.group_name ? ` | Group ${booking.group_name}` : "";
-    return `Booked on ${new Date(booking.booked_at).toLocaleDateString()} | Stay ${booking.start_date} to ${booking.end_date} | Status ${booking.status_label}${groupText}`;
+  function buildBookingDetails(booking: BookingRecord): { label: string; value: string }[] {
+    const rent = booking.monthly_rent_snapshot ?? booking.listing.monthly_rent;
+    const deposit = booking.security_deposit_snapshot;
+    const feePct = booking.platform_fee_percentage_snapshot;
+    const feeFlat = booking.platform_fee_flat_snapshot;
+    const details: { label: string; value: string }[] = [
+      { label: "Booked on", value: new Date(booking.booked_at).toLocaleDateString() },
+      { label: "Stay", value: `${booking.start_date} → ${booking.end_date}` },
+      { label: "Monthly rent", value: `$${Number(rent).toLocaleString()}/mo` },
+    ];
+    if (deposit && Number(deposit) > 0) {
+      details.push({ label: "Security deposit", value: formatMoney(deposit) });
+    }
+    if (feePct && Number(feePct) > 0) {
+      details.push({ label: "Management fee", value: `${Number(feePct).toFixed(2)}%` });
+    }
+    if (feeFlat && Number(feeFlat) > 0) {
+      details.push({ label: "Management flat fee", value: formatMoney(feeFlat) });
+    }
+    if (booking.group_name) {
+      details.push({ label: "Group", value: booking.group_name });
+    }
+    return details;
   }
 
-  function bookingFooterText(booking: BookingRecord): string {
-    const base = buildFooterText(booking);
+  function buildFooterText(booking: BookingRecord) {
     const pe = booking.pending_extension_request;
-    if (pe) {
-      return `${base}\nExtension request pending (requested checkout through ${pe.requested_end_date}).`;
-    }
     const latest = booking.latest_extension_request;
-    if (!latest) return base;
+    if (pe) return `Extension request pending (requested checkout through ${pe.requested_end_date}).`;
+    if (!latest) return "";
     if (latest.status === "approved") {
-      return `${base}\nExtension approved through ${latest.requested_end_date}. Additional amount due: ${formatMoney(latest.additional_amount_due)}.`;
+      return `Extension approved through ${latest.requested_end_date}. Additional amount due: ${formatMoney(latest.additional_amount_due)}.`;
     }
     if (latest.status === "declined") {
       const reason = latest.reviewer_notes?.trim();
-      return reason
-        ? `${base}\nExtension declined: ${reason}`
-        : `${base}\nExtension declined.`;
+      return reason ? `Extension declined: ${reason}` : "Extension declined.";
     }
-    return base;
+    return "";
   }
+
 
   function effectiveDepositAmount(booking: BookingRecord): number | null {
     const snap = booking.security_deposit_snapshot;
@@ -420,7 +436,8 @@ export default function BookingsPageContent({
                         }
                       : undefined
                   }
-                  footerText={bookingFooterText(booking)}
+                  bookingDetails={buildBookingDetails(booking)}
+                  footerText={buildFooterText(booking) || undefined}
                   extraStatusChip={depositPaid ? { label: "Deposit paid", color: "success" } : undefined}
                 />
               );

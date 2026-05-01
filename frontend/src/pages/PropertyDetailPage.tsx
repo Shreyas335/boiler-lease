@@ -216,11 +216,10 @@ export default function PropertyDetailPage() {
       listing.management_fee_percent,
       bookingDates.start_date,
       bookingDates.end_date,
+      listing.platform_fee_percentage,
     );
   }, [listing, bookingDates, bookingDatesValidForPricing]);
 
-  const managementPctLabel =
-    listing?.management_fee_percent != null ? listing.management_fee_percent : null;
 
   if (loading) {
     return (
@@ -490,21 +489,22 @@ export default function PropertyDetailPage() {
                               {formatUsd(priceBreakdown.baseRent)}
                             </Typography>
                           </Stack>
-                          <Stack direction="row" justifyContent="space-between" alignItems="baseline" gap={2}>
-                            <Typography variant="body2" color="text.secondary">
-                              Platform fee (flat)
-                            </Typography>
-                            <Typography variant="body2">{formatUsd(priceBreakdown.platformFee)}</Typography>
-                          </Stack>
-                          {managementPctLabel != null && (
+                          {priceBreakdown.managementFeeFlat > 0 && (
                             <Stack direction="row" justifyContent="space-between" alignItems="baseline" gap={2}>
                               <Typography variant="body2" color="text.secondary">
-                                Management fee ({managementPctLabel}%)
-                                {listing.approved_by_company_name
-                                  ? ` — ${listing.approved_by_company_name}`
-                                  : ""}
+                                Management flat fee
+                                {listing.approved_by_company_name ? ` — ${listing.approved_by_company_name}` : ""}
                               </Typography>
-                              <Typography variant="body2">{formatUsd(priceBreakdown.managementFee)}</Typography>
+                              <Typography variant="body2">{formatUsd(priceBreakdown.managementFeeFlat)}</Typography>
+                            </Stack>
+                          )}
+                          {priceBreakdown.managementFeePercent > 0 && (
+                            <Stack direction="row" justifyContent="space-between" alignItems="baseline" gap={2}>
+                              <Typography variant="body2" color="text.secondary">
+                                Management fee
+                                {listing.approved_by_company_name ? ` — ${listing.approved_by_company_name}` : ""}
+                              </Typography>
+                              <Typography variant="body2">{formatUsd(priceBreakdown.managementFeePercent)}</Typography>
                             </Stack>
                           )}
                           <Stack direction="row" justifyContent="space-between" alignItems="baseline" gap={2} sx={{ pt: 0.5, borderTop: "1px solid", borderColor: "divider" }}>

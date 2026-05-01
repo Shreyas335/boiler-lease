@@ -428,8 +428,16 @@ export default function DashboardPage() {
                       <Grid size={{ xs: 12, sm: 6, md: 3 }}>
                         <Card variant="outlined">
                           <CardContent sx={{ textAlign: "center" }}>
-                            <Typography variant="h3" color="warning.main">{dashStats.pending_approvals}</Typography>
-                            <Typography variant="body2" color="text.secondary">Pending Approvals</Typography>
+                            <Typography variant="h3" color="warning.main">{dashStats.pending_booking_approvals}</Typography>
+                            <Typography variant="body2" color="text.secondary">Pending Booking Approvals</Typography>
+                          </CardContent>
+                        </Card>
+                      </Grid>
+                      <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+                        <Card variant="outlined">
+                          <CardContent sx={{ textAlign: "center" }}>
+                            <Typography variant="h3" color="warning.main">{dashStats.pending_listing_approvals}</Typography>
+                            <Typography variant="body2" color="text.secondary">Pending Posting Approvals</Typography>
                           </CardContent>
                         </Card>
                       </Grid>

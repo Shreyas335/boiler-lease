@@ -15,17 +15,18 @@ function round2(n: number): number {
 export interface BookingPriceBreakdown {
   nights: number;
   baseRent: number;
-  platformFee: number;
-  managementFee: number;
+  managementFeeFlat: number;
+  managementFeePercent: number;
   total: number;
 }
 
 export function computeBookingPriceBreakdown(
   monthlyRentStr: string,
-  platformFeeFlatStr: string | undefined,
+  platformFeeFlatStr: string | undefined | null,
   managementFeePercentStr: string | null | undefined,
   startDate: string,
   endDate: string,
+  platformFeePercentageStr?: string | null,
 ): BookingPriceBreakdown | null {
   if (!startDate || !endDate) return null;
   const start = parseDateOnly(startDate);
@@ -38,19 +39,22 @@ export function computeBookingPriceBreakdown(
   if (!Number.isFinite(monthly) || monthly < 0) return null;
 
   const baseRent = (monthly * nights) / 30;
-  const platformFlat = Number(platformFeeFlatStr ?? "0");
-  const mgmtStr = managementFeePercentStr;
-  const mgmtPct = mgmtStr != null && mgmtStr !== "" ? Number(mgmtStr) : 0;
 
-  const platformFee = Number.isFinite(platformFlat) && platformFlat > 0 ? platformFlat : 0;
-  const managementFee = (baseRent * (Number.isFinite(mgmtPct) ? mgmtPct : 0)) / 100;
-  const total = baseRent + platformFee + managementFee;
+  const flatRaw = Number(platformFeeFlatStr ?? "0");
+  const managementFeeFlat = Number.isFinite(flatRaw) && flatRaw > 0 ? flatRaw : 0;
+
+  const cfgPctRaw = platformFeePercentageStr != null && platformFeePercentageStr !== "" ? Number(platformFeePercentageStr) : 0;
+  const bookingPctRaw = managementFeePercentStr != null && managementFeePercentStr !== "" ? Number(managementFeePercentStr) : 0;
+  const totalPct = (Number.isFinite(cfgPctRaw) ? cfgPctRaw : 0) + (Number.isFinite(bookingPctRaw) ? bookingPctRaw : 0);
+  const managementFeePercent = (baseRent * totalPct) / 100;
+
+  const total = baseRent + managementFeeFlat + managementFeePercent;
 
   return {
     nights,
     baseRent: round2(baseRent),
-    platformFee: round2(platformFee),
-    managementFee: round2(managementFee),
+    managementFeeFlat: round2(managementFeeFlat),
+    managementFeePercent: round2(managementFeePercent),
     total: round2(total),
   };
 }
