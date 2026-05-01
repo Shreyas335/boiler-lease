@@ -1489,16 +1489,21 @@ def update_booking_status(request, booking_id):
     if not serializer.is_valid():
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+    serializer.save()
+
     if serializer.validated_data.get("status") == PropertyBooking.Status.CONFIRMED:
         if booking.listing.approved_by_company_id:
             try:
                 fee_cfg = booking.listing.approved_by_company.fee_config
                 booking.platform_fee_percentage_snapshot = fee_cfg.platform_fee_percentage
                 booking.platform_fee_flat_snapshot = fee_cfg.platform_fee_flat
+                booking.save(update_fields=[
+                    "platform_fee_percentage_snapshot",
+                    "platform_fee_flat_snapshot",
+                ])
             except CompanyFeeConfig.DoesNotExist:
                 pass
 
-    serializer.save()
     response_serializer = ManagedPropertyBookingSerializer(booking)
     return Response(response_serializer.data, status=status.HTTP_200_OK)
 
@@ -1896,13 +1901,19 @@ def stripe_webhook(request):
     sig_header = request.META.get("HTTP_STRIPE_SIGNATURE")
     webhook_secret = settings.STRIPE_WEBHOOK_SECRET
 
-    if not webhook_secret:
+    if webhook_secret:
+        try:
+            event = stripe.Webhook.construct_event(payload, sig_header, webhook_secret)
+        except Exception:
+            return Response({"detail": "Invalid webhook payload/signature."}, status=status.HTTP_400_BAD_REQUEST)
+    elif settings.DEBUG:
+        import json
+        try:
+            event = stripe.Event.construct_from(json.loads(payload), stripe.api_key)
+        except Exception:
+            return Response({"detail": "Invalid webhook payload."}, status=status.HTTP_400_BAD_REQUEST)
+    else:
         return Response({"detail": "Webhook secret not configured."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-    try:
-        event = stripe.Webhook.construct_event(payload, sig_header, webhook_secret)
-    except Exception:
-        return Response({"detail": "Invalid webhook payload/signature."}, status=status.HTTP_400_BAD_REQUEST)
 
     event_type = event.type
     obj = event.data.object
@@ -2626,14 +2637,23 @@ def company_dashboard_stats(request):
         deleted_at__isnull=True
     ).count()
 
-    pending_approvals = ApprovalRequest.objects.filter(
+    pending_listing_approvals = ApprovalRequest.objects.filter(
         management_company=company,
         status=ApprovalRequest.Status.PENDING
     ).count()
+    pending_booking_approvals = PropertyBooking.objects.filter(
+        listing__approved_by_company=company,
+        status=PropertyBooking.Status.PENDING,
+    ).count()
+    pending_approvals = pending_listing_approvals + pending_booking_approvals
 
     active_bookings = PropertyBooking.objects.filter(
         listing__approved_by_company=company,
-        status=PropertyBooking.Status.CONFIRMED
+        status__in=[
+            PropertyBooking.Status.CONFIRMED,
+            PropertyBooking.Status.PARTIALLY_PAID,
+            PropertyBooking.Status.FULLY_PAID,
+        ],
     ).count()
 
     booking_ids = list(
@@ -2661,6 +2681,8 @@ def company_dashboard_stats(request):
     return Response({
         'total_listings': total_listings,
         'pending_approvals': pending_approvals,
+        'pending_booking_approvals': pending_booking_approvals,
+        'pending_listing_approvals': pending_listing_approvals,
         'active_bookings': active_bookings,
         'recent_transactions': txn_data,
     })

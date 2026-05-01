@@ -79,8 +79,8 @@ export interface PropertyListingSummary {
   primary_photo_url: string;
   is_favorited: boolean;
   tags?: string[];
-  /** Flat platform fee amount from server settings. */
-  platform_fee_flat?: string;
+  platform_fee_flat?: string | null;
+  platform_fee_percentage?: string | null;
   management_fee_percent?: string | null;
 }
 
@@ -108,6 +108,8 @@ export interface BookingRecord {
   booked_at: string;
   monthly_rent_snapshot: string | null;
   security_deposit_snapshot: string | null;
+  platform_fee_percentage_snapshot: string | null;
+  platform_fee_flat_snapshot: string | null;
   deposit_paid_at: string | null;
   status: "pending" | "confirmed" | "partially_paid" | "fully_paid" | "declined" | "cancelled";
   status_label: string;

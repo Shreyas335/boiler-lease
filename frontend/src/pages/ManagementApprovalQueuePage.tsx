@@ -13,9 +13,9 @@ import {
   Tabs,
   Typography,
 } from "@mui/material";
-import { Link as RouterLink } from "react-router-dom";
 import { getApprovalRequests, type ApprovalRequestSummary } from "../api/company";
 import { useAuth } from "../contexts/AuthContext";
+import ApprovalRequestDetailView from "../components/ApprovalRequestDetailView";
 
 function formatMoney(value: string) {
   const n = Number(value);
@@ -43,21 +43,24 @@ export default function ManagementApprovalQueuePage() {
   const [requests, setRequests] = useState<ApprovalRequestSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+
+  async function loadRequests() {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await getApprovalRequests(tab === "all" ? undefined : tab);
+      setRequests(data);
+    } catch {
+      setError("Unable to load approval requests.");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   useEffect(() => {
-    async function load() {
-      setLoading(true);
-      setError(null);
-      try {
-        const data = await getApprovalRequests(tab === "all" ? undefined : tab);
-        setRequests(data);
-      } catch {
-        setError("Unable to load approval requests.");
-      } finally {
-        setLoading(false);
-      }
-    }
-    void load();
+    void loadRequests();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 
   if (user?.user_type !== "management") {
@@ -65,6 +68,20 @@ export default function ManagementApprovalQueuePage() {
       <Box sx={{ py: 6, px: 2 }}>
         <Container maxWidth="md">
           <Alert severity="error">Only management company users can access this page.</Alert>
+        </Container>
+      </Box>
+    );
+  }
+
+  if (selectedId !== null) {
+    return (
+      <Box sx={{ py: 6, px: 2 }}>
+        <Container maxWidth="md">
+          <ApprovalRequestDetailView
+            id={selectedId}
+            onBack={() => setSelectedId(null)}
+            onReviewed={() => { void loadRequests(); }}
+          />
         </Container>
       </Box>
     );
@@ -138,10 +155,9 @@ export default function ManagementApprovalQueuePage() {
                     </Box>
                     {req.status === "pending" && (
                       <Button
-                        component={RouterLink}
-                        to={`/company/approvals/${req.id}`}
                         variant="contained"
                         size="small"
+                        onClick={() => setSelectedId(req.id)}
                       >
                         Review
                       </Button>

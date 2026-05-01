@@ -192,6 +192,8 @@ export interface RecentTransaction {
 export interface CompanyDashboardStats {
   total_listings: number;
   pending_approvals: number;
+  pending_booking_approvals: number;
+  pending_listing_approvals: number;
   active_bookings: number;
   recent_transactions: RecentTransaction[];
 }

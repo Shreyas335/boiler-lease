@@ -43,9 +43,9 @@ export default function FeeConfigSection() {
   return (
     <Card sx={{ mb: 3 }}>
       <CardContent>
-        <Typography variant="h6" sx={{ mb: 2 }}>Fee Configuration</Typography>
+        <Typography variant="h6" sx={{ mb: 2 }}>Management Fee Configuration</Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-          These fees apply to new listings under your company. Existing confirmed bookings
+          These fees are charged to sublessees for listings managed by your company. Existing confirmed bookings
           are not retroactively affected.
         </Typography>
         {loading ? (
@@ -56,7 +56,7 @@ export default function FeeConfigSection() {
             {success && <Alert severity="success">Fee configuration saved.</Alert>}
             <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
               <TextField
-                label="Platform Fee (%)"
+                label="Management Fee (%)"
                 value={feePercentage}
                 onChange={e => { setFeePercentage(e.target.value); setSuccess(false); }}
                 type="number"
@@ -66,7 +66,7 @@ export default function FeeConfigSection() {
                 sx={{ width: 200 }}
               />
               <TextField
-                label="Platform Flat Fee ($)"
+                label="Management Flat Fee ($)"
                 value={feeFlat}
                 onChange={e => { setFeeFlat(e.target.value); setSuccess(false); }}
                 type="number"
