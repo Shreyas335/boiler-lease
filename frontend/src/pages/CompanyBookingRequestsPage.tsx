@@ -7,7 +7,15 @@ import {
   CardContent,
   Chip,
   Container,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  Rating,
   Stack,
+  Tab,
+  Tabs,
+  TextField,
   Typography,
   type ChipProps,
 } from "@mui/material";
@@ -18,6 +26,7 @@ import {
   type ManagedBookingRecord,
 } from "../api/listings";
 import { useAuth } from "../contexts/AuthContext";
+import api from "../api/axios";
 
 function getBookingStatusMeta(status: ManagedBookingRecord["status"]): {
   label: string;
@@ -55,6 +64,18 @@ export default function CompanyBookingRequestsPage() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [busyBookingId, setBusyBookingId] = useState<number | null>(null);
   const [busyExtensionId, setBusyExtensionId] = useState<number | null>(null);
+  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [ratingDialog, setRatingDialog] = useState<{
+    open: boolean;
+    bookingId: number | null;
+    sublesseeId: number | null;
+  }>({ open: false, bookingId: null, sublesseeId: null });
+  const [ratingScore, setRatingScore] = useState<number | null>(null);
+  const [ratingReview, setRatingReview] = useState('');
+  const [ratingSaving, setRatingSaving] = useState(false);
+  const [ratingSuccess, setRatingSuccess] = useState<Record<number, boolean>>({});
+  const [ratingError, setRatingError] = useState<string | null>(null);
 
   const canAccess = user?.user_type === "management" && user.company_status === "approved";
 
@@ -99,6 +120,26 @@ export default function CompanyBookingRequestsPage() {
       window.clearInterval(intervalId);
     };
   }, [canAccess]);
+
+  const handleSubmitRating = async () => {
+    if (!ratingDialog.sublesseeId || !ratingScore) return;
+    setRatingSaving(true);
+    setRatingError(null);
+    try {
+      await api.post(`/profiles/${ratingDialog.sublesseeId}/rate/`, {
+        score: ratingScore,
+        review: ratingReview,
+      });
+      setRatingSuccess(prev => ({ ...prev, [ratingDialog.bookingId!]: true }));
+      setRatingDialog({ open: false, bookingId: null, sublesseeId: null });
+      setRatingScore(null);
+      setRatingReview('');
+    } catch {
+      setRatingError('Failed to submit rating. Please try again.');
+    } finally {
+      setRatingSaving(false);
+    }
+  };
 
   async function handleStatusUpdate(
     bookingId: number,
@@ -195,13 +236,47 @@ export default function CompanyBookingRequestsPage() {
           {successMessage && <Alert severity="success">{successMessage}</Alert>}
           {error && <Alert severity="error">{error}</Alert>}
 
+          <TextField
+            label="Search by property name or address"
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            fullWidth
+            size="small"
+            sx={{ mb: 2 }}
+          />
+
+          <Tabs
+            value={statusFilter}
+            onChange={(_, v: string) => setStatusFilter(v)}
+            sx={{ mb: 2 }}
+          >
+            <Tab label="All" value="all" />
+            <Tab label="Pending" value="pending" />
+            <Tab label="Confirmed" value="confirmed" />
+            <Tab label="Declined" value="declined" />
+            <Tab label="Cancelled" value="cancelled" />
+          </Tabs>
+
           {loading ? (
             <Typography>Loading booking requests...</Typography>
-          ) : bookings.length === 0 ? (
-            <Alert severity="info">No booking requests for your company&apos;s listings yet.</Alert>
-          ) : (
+          ) : (() => {
+            const filteredBookings = (bookings ?? []).filter(booking => {
+              const matchesStatus = statusFilter === 'all' || booking.status === statusFilter;
+              const q = searchQuery.toLowerCase();
+              const matchesSearch = !q ||
+                booking.listing?.title?.toLowerCase().includes(q) ||
+                booking.listing?.city?.toLowerCase().includes(q) ||
+                booking.listing?.street_line_1?.toLowerCase().includes(q);
+              return matchesStatus && matchesSearch;
+            });
+
+            if (filteredBookings.length === 0) {
+              return <Alert severity="info">No booking requests match your filters.</Alert>;
+            }
+
+            return (
             <Stack spacing={2}>
-              {bookings.map((booking) => {
+              {filteredBookings.map((booking) => {
                 const statusMeta = getBookingStatusMeta(booking.status);
                 const isPending = booking.status === "pending";
                 const isBusy = busyBookingId === booking.id;
@@ -295,15 +370,79 @@ export default function CompanyBookingRequestsPage() {
                             </Button>
                           </Stack>
                         )}
+
+                        {booking.status === 'confirmed' && new Date(booking.end_date) < new Date() && (
+                          ratingSuccess[booking.id]
+                            ? <Chip label="Rated" color="success" size="small" />
+                            : (
+                              <Button
+                                size="small"
+                                variant="outlined"
+                                onClick={() => setRatingDialog({
+                                  open: true,
+                                  bookingId: booking.id,
+                                  sublesseeId: booking.sublessee_id,
+                                })}
+                              >
+                                Rate Tenant
+                              </Button>
+                            )
+                        )}
                       </Stack>
                     </CardContent>
                   </Card>
                 );
               })}
             </Stack>
-          )}
+            );
+          })()}
         </Stack>
       </Container>
+
+      <Dialog
+        open={ratingDialog.open}
+        onClose={() => setRatingDialog({ open: false, bookingId: null, sublesseeId: null })}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Rate Tenant</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Rate this tenant's conduct during their stay.
+          </Typography>
+          {ratingError && <Alert severity="error" sx={{ mb: 2 }}>{ratingError}</Alert>}
+          <Rating
+            value={ratingScore}
+            onChange={(_, v) => setRatingScore(v)}
+            size="large"
+          />
+          <TextField
+            label="Optional review"
+            value={ratingReview}
+            onChange={e => setRatingReview(e.target.value)}
+            multiline
+            rows={3}
+            fullWidth
+            inputProps={{ maxLength: 500 }}
+            sx={{ mt: 2 }}
+            helperText={`${ratingReview.length}/500`}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => setRatingDialog({ open: false, bookingId: null, sublesseeId: null })}
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={() => void handleSubmitRating()}
+            disabled={!ratingScore || ratingSaving}
+            variant="contained"
+          >
+            {ratingSaving ? 'Saving...' : 'Submit Rating'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }

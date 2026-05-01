@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   Alert,
   Box,
+  Chip,
   Container,
   Paper,
   Table,
@@ -90,35 +91,55 @@ export default function PaymentHistoryPage() {
           <Alert severity="info">You don&apos;t have any completed payments yet.</Alert>
         ) : (
           <TableContainer component={Paper} variant="outlined">
-            <Table size="medium" sx={{ minWidth: 650 }}>
+            <Table size="medium" sx={{ minWidth: 700 }}>
               <TableHead>
                 <TableRow>
-                  <TableCell>Paid</TableCell>
-                  <TableCell>Title</TableCell>
+                  <TableCell>Date</TableCell>
+                  <TableCell>Property</TableCell>
+                  <TableCell>Stay</TableCell>
+                  <TableCell>Type</TableCell>
+                  <TableCell>Status</TableCell>
                   <TableCell align="right">Amount</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {rows.map((tx) => {
-                  const title = tx.listing_title?.trim() || "Security deposit";
-                  const showDepositSubtitle = Boolean(tx.listing_title?.trim());
-                  return (
-                    <TableRow key={tx.id} hover>
-                      <TableCell>{formatDateTime(tx.paid_at)}</TableCell>
-                      <TableCell>
-                        <Typography variant="subtitle1" sx={{ fontWeight: 600, lineHeight: 1.3 }}>
-                          {title}
+                {rows.map((tx) => (
+                  <TableRow key={tx.id} hover>
+                    <TableCell sx={{ whiteSpace: "nowrap" }}>
+                      {formatDateTime(tx.paid_at ?? tx.created_at)}
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2" fontWeight={600}>
+                        {tx.listing_title ?? "—"}
+                      </Typography>
+                      {tx.listing_address && (
+                        <Typography variant="caption" color="text.secondary">
+                          {tx.listing_address}
                         </Typography>
-                        {showDepositSubtitle && (
-                          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25 }}>
-                            Security deposit
-                          </Typography>
-                        )}
-                      </TableCell>
-                      <TableCell align="right">{formatMoney(tx.amount, tx.currency)}</TableCell>
-                    </TableRow>
-                  );
-                })}
+                      )}
+                    </TableCell>
+                    <TableCell sx={{ whiteSpace: "nowrap" }}>
+                      {tx.booking_start_date && tx.booking_end_date
+                        ? `${tx.booking_start_date} – ${tx.booking_end_date}`
+                        : "—"}
+                    </TableCell>
+                    <TableCell>{tx.transaction_type}</TableCell>
+                    <TableCell>
+                      <Chip
+                        label={tx.status.charAt(0).toUpperCase() + tx.status.slice(1)}
+                        size="small"
+                        color={
+                          tx.status === "succeeded"
+                            ? "success"
+                            : tx.status === "pending"
+                              ? "warning"
+                              : "error"
+                        }
+                      />
+                    </TableCell>
+                    <TableCell align="right">{formatMoney(tx.amount, tx.currency)}</TableCell>
+                  </TableRow>
+                ))}
               </TableBody>
             </Table>
           </TableContainer>

@@ -80,6 +80,33 @@ class ManagementCompany(models.Model):
         return f"{self.company_name} ({self.get_status_display()})"
 
 
+class CompanyFeeConfig(models.Model):
+    company = models.OneToOneField(
+        ManagementCompany,
+        on_delete=models.CASCADE,
+        related_name='fee_config'
+    )
+    platform_fee_percentage = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text='Fee as a percentage of monthly rent (e.g. 5.00 = 5%)'
+    )
+    platform_fee_flat = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text='Flat fee in USD added to each booking'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f'FeeConfig for {self.company.company_name}'
+
+
 class CompanyDocument(models.Model):
 
     class DocumentType(models.TextChoices):
@@ -430,6 +457,20 @@ class PropertyBooking(models.Model):
         null=True,
         blank=True,
     )
+    platform_fee_percentage_snapshot = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text='Company fee percentage frozen at booking confirmation time'
+    )
+    platform_fee_flat_snapshot = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text='Company flat fee frozen at booking confirmation time'
+    )
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING, db_index=True)
     deposit_paid_at = models.DateTimeField(null=True, blank=True)
     booked_at = models.DateTimeField(auto_now_add=True, db_index=True)
@@ -602,6 +643,11 @@ class UserRating(models.Model):
     rater = models.ForeignKey(User, on_delete=models.CASCADE, related_name='ratings_given')
     rated_user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='ratings_received')
     score = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(5)])
+    review = models.TextField(
+        blank=True,
+        default='',
+        help_text='Optional written review to accompany the numeric rating'
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

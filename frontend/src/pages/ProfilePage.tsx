@@ -9,6 +9,7 @@ import {
   Container,
   Divider,
   Stack,
+  TextField,
   Typography,
 } from "@mui/material";
 import Rating from "@mui/material/Rating";
@@ -29,6 +30,9 @@ export default function ProfilePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [ratingLoading, setRatingLoading] = useState(false);
+  const [pendingScore, setPendingScore] = useState<number | null>(null);
+  const [pendingReview, setPendingReview] = useState<string>("");
+  const [reviewDirty, setReviewDirty] = useState(false);
   const [blockLoading, setBlockLoading] = useState(false);
 
   const userId = Number(id);
@@ -41,6 +45,8 @@ export default function ProfilePage() {
       try {
         const data = await getUserProfile(userId);
         setProfile(data);
+        setPendingScore(data.my_rating);
+        setPendingReview(data.my_review ?? "");
       } catch {
         setError("User not found.");
       } finally {
@@ -50,21 +56,13 @@ export default function ProfilePage() {
     loadProfile();
   }, [userId]);
 
-  async function handleRatingChange(_: React.SyntheticEvent, value: number | null) {
-    if (!profile || value === null) return;
+  async function handleSubmitReview() {
+    if (!profile || !pendingScore) return;
     setRatingLoading(true);
     try {
-      const result = await rateUser(userId, value);
-      setProfile((prev) =>
-        prev
-          ? {
-              ...prev,
-              my_rating: result.my_rating,
-              average_rating: result.average_rating,
-              rating_count: result.rating_count,
-            }
-          : prev
-      );
+      const result = await rateUser(userId, pendingScore, pendingReview);
+      setProfile(result);
+      setReviewDirty(false);
     } catch {
       // ignore
     } finally {
@@ -165,11 +163,7 @@ export default function ProfilePage() {
               Rating
             </Typography>
             <Stack direction="row" spacing={1} alignItems="center">
-              <Rating
-                value={profile.average_rating ?? 0}
-                precision={0.1}
-                readOnly
-              />
+              <Rating value={profile.average_rating ?? 0} precision={0.1} readOnly />
               <Typography variant="body2" color="text.secondary">
                 {profile.average_rating !== null
                   ? profile.average_rating.toFixed(1)
@@ -181,16 +175,66 @@ export default function ProfilePage() {
             {!isOwnProfile && (
               <Box sx={{ mt: 2 }}>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
-                  Your rating:
+                  {profile.my_rating ? "Your rating:" : "Leave a rating:"}
                 </Typography>
                 <Rating
-                  value={profile.my_rating ?? 0}
-                  onChange={handleRatingChange}
+                  value={pendingScore ?? 0}
+                  onChange={(_, v) => { setPendingScore(v); setReviewDirty(true); }}
                   disabled={ratingLoading}
                 />
+                {(pendingScore || reviewDirty) && (
+                  <Stack spacing={1} sx={{ mt: 1 }}>
+                    <TextField
+                      label="Review (optional)"
+                      multiline
+                      minRows={2}
+                      value={pendingReview}
+                      onChange={e => { setPendingReview(e.target.value); setReviewDirty(true); }}
+                      size="small"
+                      fullWidth
+                    />
+                    <Box>
+                      <Button
+                        variant="contained"
+                        size="small"
+                        disabled={ratingLoading || !pendingScore}
+                        onClick={() => void handleSubmitReview()}
+                      >
+                        {profile.my_rating ? "Update review" : "Submit review"}
+                      </Button>
+                    </Box>
+                  </Stack>
+                )}
               </Box>
             )}
           </Box>
+
+          {profile.reviews.length > 0 && (
+            <>
+              <Divider />
+              <Box>
+                <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 1 }}>
+                  Reviews
+                </Typography>
+                <Stack spacing={2}>
+                  {profile.reviews.map((r) => (
+                    <Box key={r.id} sx={{ p: 2, border: "1px solid", borderColor: "divider", borderRadius: 1 }}>
+                      <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
+                        <Rating value={r.score} readOnly size="small" />
+                        <Typography variant="body2" fontWeight={600}>{r.rater_display}</Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          {new Date(r.created_at).toLocaleDateString()}
+                        </Typography>
+                      </Stack>
+                      {r.review && (
+                        <Typography variant="body2" color="text.secondary">{r.review}</Typography>
+                      )}
+                    </Box>
+                  ))}
+                </Stack>
+              </Box>
+            </>
+          )}
 
           {!isOwnProfile && (
             <>

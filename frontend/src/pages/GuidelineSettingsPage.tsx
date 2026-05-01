@@ -42,6 +42,7 @@ import { getListingAmenities } from "../api/listings";
 import type { ListingAmenity } from "../api/listings";
 import type { GuidelineRecord, GuidelineFormData } from "../types/guidelines";
 import { emptyForm, recordToForm } from "../types/guidelines";
+import FeeConfigSection from '../components/FeeConfigSection';
 
 // ─── Guideline form dialog ────────────────────────────────────────────────────
 
@@ -381,12 +382,14 @@ export default function GuidelineSettingsPage() {
   return (
     <Container maxWidth="md" sx={{ py: 4 }}>
       <Typography variant="h4" fontWeight={700} mb={1}>
-        Guideline Settings
+        Guidelines / Fees
       </Typography>
       <Typography variant="body1" color="text.secondary" mb={3}>
         Define listing requirements per building. Each guideline represents a building your
         company manages (e.g. Verve Apartments, The Hub).
       </Typography>
+
+      <FeeConfigSection />
 
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
 

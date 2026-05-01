@@ -1,3 +1,12 @@
+export interface UserRatingDetail {
+  id: number;
+  rater_display: string;
+  rater_username: string;
+  score: number;
+  review: string;
+  created_at: string;
+}
+
 export interface UserProfile {
   id: number;
   username: string;
@@ -10,6 +19,8 @@ export interface UserProfile {
   average_rating: number | null;
   rating_count: number;
   my_rating: number | null;
+  my_review: string | null;
+  reviews: UserRatingDetail[];
   is_blocked: boolean;
 }
 

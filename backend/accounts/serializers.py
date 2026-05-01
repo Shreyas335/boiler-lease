@@ -12,6 +12,7 @@ from .models import (
     BookingGroupMembership,
     BookingExtensionRequest,
     CompanyDocument,
+    CompanyFeeConfig,
     FavoriteListing,
     FeedbackSubmission,
     Guideline,
@@ -383,12 +384,13 @@ class PropertyListingSerializer(serializers.ModelSerializer):
     media = serializers.SerializerMethodField()
     approved_by_company_name = serializers.SerializerMethodField()
     approved_by_company_user_id = serializers.SerializerMethodField()
-    platform_fee_flat = serializers.SerializerMethodField()
     management_fee_percent = serializers.SerializerMethodField()
     owner_id = serializers.IntegerField(source="owner.id", read_only=True)
     owner_username = serializers.CharField(source="owner.username", read_only=True)
     owner_first_name = serializers.CharField(source="owner.first_name", read_only=True)
     owner_last_name = serializers.CharField(source="owner.last_name", read_only=True)
+    platform_fee_percentage = serializers.SerializerMethodField()
+    platform_fee_flat = serializers.SerializerMethodField()
 
     class Meta:
         model = PropertyListing
@@ -438,14 +440,12 @@ class PropertyListingSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
             "tags",
-            "platform_fee_flat",
             "management_fee_percent",
             "amenities",
             "media",
+            "platform_fee_percentage",
+            "platform_fee_flat",
         )
-
-    def get_platform_fee_flat(self, obj):
-        return _listing_platform_fee_flat_str()
 
     def get_management_fee_percent(self, obj):
         return _listing_management_fee_percent_str(obj)
@@ -468,12 +468,32 @@ class PropertyListingSerializer(serializers.ModelSerializer):
             return obj.approved_by_company.user_id
         return None
 
+    def get_platform_fee_percentage(self, obj):
+        if obj.approved_by_company_id:
+            try:
+                cfg = obj.approved_by_company.fee_config
+                return str(cfg.platform_fee_percentage) if cfg.platform_fee_percentage is not None else None
+            except Exception:
+                pass
+        return None
+
+    def get_platform_fee_flat(self, obj):
+        if obj.approved_by_company_id:
+            try:
+                cfg = obj.approved_by_company.fee_config
+                return str(cfg.platform_fee_flat) if cfg.platform_fee_flat is not None else None
+            except Exception:
+                pass
+        return None
+
 
 class PropertyListingSummarySerializer(serializers.ModelSerializer):
     primary_photo_url = serializers.SerializerMethodField()
     is_favorited = serializers.SerializerMethodField()
     platform_fee_flat = serializers.SerializerMethodField()
+    platform_fee_percentage = serializers.SerializerMethodField()
     management_fee_percent = serializers.SerializerMethodField()
+    approved_by_company_name = serializers.SerializerMethodField()
 
     class Meta:
         model = PropertyListing
@@ -490,17 +510,37 @@ class PropertyListingSummarySerializer(serializers.ModelSerializer):
             "approval_status",
             "tags",
             "platform_fee_flat",
+            "platform_fee_percentage",
             "management_fee_percent",
+            "approved_by_company_name",
             "created_at",
             "primary_photo_url",
             "is_favorited",
         )
 
+    def _fee_cfg(self, obj):
+        if not obj.approved_by_company_id:
+            return None
+        try:
+            return obj.approved_by_company.fee_config
+        except Exception:
+            return None
+
     def get_platform_fee_flat(self, obj):
-        return _listing_platform_fee_flat_str()
+        cfg = self._fee_cfg(obj)
+        return str(cfg.platform_fee_flat) if cfg and cfg.platform_fee_flat is not None else None
+
+    def get_platform_fee_percentage(self, obj):
+        cfg = self._fee_cfg(obj)
+        return str(cfg.platform_fee_percentage) if cfg and cfg.platform_fee_percentage is not None else None
 
     def get_management_fee_percent(self, obj):
         return _listing_management_fee_percent_str(obj)
+
+    def get_approved_by_company_name(self, obj):
+        if obj.approved_by_company_id:
+            return obj.approved_by_company.company_name
+        return None
 
     def get_primary_photo_url(self, obj):
         media = (
@@ -548,6 +588,8 @@ class PropertyBookingSerializer(serializers.ModelSerializer):
             "booked_at",
             "monthly_rent_snapshot",
             "security_deposit_snapshot",
+            "platform_fee_percentage_snapshot",
+            "platform_fee_flat_snapshot",
             "deposit_paid_at",
             "status",
             "status_label",
@@ -787,11 +829,13 @@ class BookingExtensionRequestDecisionSerializer(serializers.Serializer):
 class ManagedPropertyBookingSerializer(PropertyBookingSerializer):
     sublessee_name = serializers.SerializerMethodField()
     sublessee_email = serializers.EmailField(source="sublessee.email", read_only=True)
+    sublessee_id = serializers.IntegerField(source="sublessee.id", read_only=True)
 
     class Meta(PropertyBookingSerializer.Meta):
         fields = PropertyBookingSerializer.Meta.fields + (
             "sublessee_name",
             "sublessee_email",
+            "sublessee_id",
         )
 
     def get_sublessee_name(self, obj):
@@ -1222,6 +1266,10 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
 
 class TransactionRecordSerializer(serializers.ModelSerializer):
     listing_title = serializers.SerializerMethodField()
+    listing_address = serializers.SerializerMethodField()
+    booking_start_date = serializers.SerializerMethodField()
+    booking_end_date = serializers.SerializerMethodField()
+    transaction_type = serializers.SerializerMethodField()
 
     class Meta:
         model = TransactionRecord
@@ -1230,16 +1278,18 @@ class TransactionRecordSerializer(serializers.ModelSerializer):
             "amount",
             "currency",
             "booking_reference",
+            "transaction_type",
             "listing_title",
+            "listing_address",
+            "booking_start_date",
+            "booking_end_date",
             "status",
-            "stripe_payment_intent_id",
-            "stripe_checkout_session_id",
             "paid_at",
             "created_at",
         )
         read_only_fields = fields
 
-    def get_listing_title(self, obj):
+    def _get_booking(self, obj):
         ref = (obj.booking_reference or "").strip()
         if not ref:
             return None
@@ -1247,19 +1297,41 @@ class TransactionRecordSerializer(serializers.ModelSerializer):
             bid = int(ref)
         except ValueError:
             return None
-        titles = self.context.get("listing_titles_by_booking_id")
-        if titles is not None:
-            return titles.get(bid)
+        bookings = self.context.get("bookings_by_id")
+        if bookings is not None:
+            return bookings.get(bid)
         request = self.context.get("request")
         user = getattr(request, "user", None) if request else None
         if not user or not user.is_authenticated:
             return None
-        booking = (
+        return (
             PropertyBooking.objects.filter(pk=bid, sublessee=user)
             .select_related("listing")
             .first()
         )
+
+    def get_listing_title(self, obj):
+        booking = self._get_booking(obj)
         return booking.listing.title if booking else None
+
+    def get_listing_address(self, obj):
+        booking = self._get_booking(obj)
+        if not booking:
+            return None
+        l = booking.listing
+        parts = [p for p in [l.street_line_1, l.city, l.state] if p]
+        return ", ".join(parts) if parts else None
+
+    def get_booking_start_date(self, obj):
+        booking = self._get_booking(obj)
+        return str(booking.start_date) if booking else None
+
+    def get_booking_end_date(self, obj):
+        booking = self._get_booking(obj)
+        return str(booking.end_date) if booking else None
+
+    def get_transaction_type(self, obj):
+        return "Security Deposit"
 
 
 class OwnerListingTransactionSerializer(serializers.ModelSerializer):
@@ -1311,6 +1383,13 @@ class ManagementCompanySerializer(serializers.ModelSerializer):
 
 class CompanyBookingFeeUpdateSerializer(serializers.Serializer):
     booking_fee_percent = serializers.DecimalField(max_digits=5, decimal_places=2, min_value=0, max_value=100)
+
+
+class CompanyFeeConfigSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CompanyFeeConfig
+        fields = ('platform_fee_percentage', 'platform_fee_flat', 'created_at', 'updated_at')
+        read_only_fields = ('created_at', 'updated_at')
 
 
 class PublicGuidelineSerializer(serializers.ModelSerializer):
@@ -1438,10 +1517,25 @@ class ApprovalRequestDetailSerializer(serializers.ModelSerializer):
         return []
 
 
+class UserRatingDetailSerializer(serializers.ModelSerializer):
+    rater_display = serializers.SerializerMethodField()
+    rater_username = serializers.CharField(source="rater.username")
+
+    class Meta:
+        model = UserRating
+        fields = ("id", "rater_display", "rater_username", "score", "review", "created_at")
+
+    def get_rater_display(self, obj):
+        name = f"{obj.rater.first_name} {obj.rater.last_name}".strip()
+        return name or obj.rater.username
+
+
 class UserProfileSerializer(serializers.ModelSerializer):
     average_rating = serializers.SerializerMethodField()
     rating_count = serializers.SerializerMethodField()
     my_rating = serializers.SerializerMethodField()
+    my_review = serializers.SerializerMethodField()
+    reviews = serializers.SerializerMethodField()
     is_blocked = serializers.SerializerMethodField()
 
     class Meta:
@@ -1458,6 +1552,8 @@ class UserProfileSerializer(serializers.ModelSerializer):
             "average_rating",
             "rating_count",
             "my_rating",
+            "my_review",
+            "reviews",
             "is_blocked",
         )
         read_only_fields = fields
@@ -1475,6 +1571,17 @@ class UserProfileSerializer(serializers.ModelSerializer):
             return None
         rating = UserRating.objects.filter(rater=request.user, rated_user=obj).first()
         return rating.score if rating else None
+
+    def get_my_review(self, obj):
+        request = self.context.get("request")
+        if not request or not request.user.is_authenticated:
+            return None
+        rating = UserRating.objects.filter(rater=request.user, rated_user=obj).first()
+        return rating.review if rating else None
+
+    def get_reviews(self, obj):
+        qs = obj.ratings_received.select_related("rater").order_by("-created_at")
+        return UserRatingDetailSerializer(qs, many=True).data
 
     def get_is_blocked(self, obj):
         request = self.context.get("request")
@@ -1502,6 +1609,7 @@ class UserProfileUpdateSerializer(serializers.ModelSerializer):
 
 class UserRatingSerializer(serializers.Serializer):
     score = serializers.IntegerField(min_value=1, max_value=5)
+    review = serializers.CharField(required=False, allow_blank=True, default='')
 
 
 class BlockedUserSerializer(serializers.ModelSerializer):

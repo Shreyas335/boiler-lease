@@ -36,6 +36,8 @@ interface PropertySummaryCardProps {
     disabled?: boolean;
     color?: "primary" | "error";
   };
+  extraStatusChip?: { label: string; color: ChipProps["color"] };
+  bookingDetails?: { label: string; value: string }[];
 }
 
 export default function PropertySummaryCard({
@@ -48,6 +50,8 @@ export default function PropertySummaryCard({
   actionButton,
   secondaryActionButton,
   extensionButton,
+  extraStatusChip,
+  bookingDetails,
 }: PropertySummaryCardProps) {
   return (
     <Card>
@@ -127,6 +131,7 @@ export default function PropertySummaryCard({
                 Available {listing.availability_start_date} to {listing.availability_end_date}
               </Typography>
               {statusLabel && <Chip size="small" label={statusLabel} color={statusColor} variant="outlined" />}
+              {extraStatusChip && <Chip size="small" label={extraStatusChip.label} color={extraStatusChip.color} variant="outlined" />}
             </Stack>
             <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
               {actionButton && (
@@ -163,7 +168,7 @@ export default function PropertySummaryCard({
                 </Button>
               )}
               <Button component={RouterLink} to={`/properties/${listing.id}`} variant="text" size="small">
-                View details
+                View Property
               </Button>
             </Stack>
           </Stack>
@@ -175,6 +180,19 @@ export default function PropertySummaryCard({
                 Approved by {listing.approved_by_company_name}
               </Typography>
             </Stack>
+          )}
+
+          {bookingDetails && bookingDetails.length > 0 && (
+            <Box sx={{ pt: 0.5, borderTop: "1px solid", borderColor: "divider" }}>
+              <Stack spacing={0.5}>
+                {bookingDetails.map(({ label, value }) => (
+                  <Stack key={label} direction="row" justifyContent="space-between" gap={2}>
+                    <Typography variant="body2" color="text.secondary">{label}</Typography>
+                    <Typography variant="body2" fontWeight={500} sx={{ textAlign: "right" }}>{value}</Typography>
+                  </Stack>
+                ))}
+              </Stack>
+            </Box>
           )}
 
           {footerText && (

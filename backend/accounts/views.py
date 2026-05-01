@@ -29,6 +29,7 @@ from .models import (
     BookingGroupMembership,
     BookingExtensionRequest,
     CompanyDocument,
+    CompanyFeeConfig,
     FavoriteListing,
     Guideline,
     ListingAmenity,
@@ -49,6 +50,7 @@ from .pagination import PropertyListingPagination
 from .serializers import (
     AccountUpdateSerializer,
     ApprovalRequestCreateSerializer,
+    CompanyFeeConfigSerializer,
     ApprovalRequestDetailSerializer,
     ApprovalRequestSummarySerializer,
     BookingGroupCreateSerializer,
@@ -1488,6 +1490,20 @@ def update_booking_status(request, booking_id):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     serializer.save()
+
+    if serializer.validated_data.get("status") == PropertyBooking.Status.CONFIRMED:
+        if booking.listing.approved_by_company_id:
+            try:
+                fee_cfg = booking.listing.approved_by_company.fee_config
+                booking.platform_fee_percentage_snapshot = fee_cfg.platform_fee_percentage
+                booking.platform_fee_flat_snapshot = fee_cfg.platform_fee_flat
+                booking.save(update_fields=[
+                    "platform_fee_percentage_snapshot",
+                    "platform_fee_flat_snapshot",
+                ])
+            except CompanyFeeConfig.DoesNotExist:
+                pass
+
     response_serializer = ManagedPropertyBookingSerializer(booking)
     return Response(response_serializer.data, status=status.HTTP_200_OK)
 
@@ -1608,19 +1624,24 @@ def my_payment_history(request):
             booking_ids.append(int(ref))
         except ValueError:
             pass
-    titles_by_booking_id = {}
+    bookings_by_id = {}
     if booking_ids:
         for b in PropertyBooking.objects.filter(
             pk__in=booking_ids,
-            sublessee=request.user,
-        ).select_related("listing"):
-            titles_by_booking_id[b.pk] = b.listing.title
+        ).filter(
+            Q(sublessee=request.user)
+            | Q(
+                group__memberships__user=request.user,
+                group__memberships__status=BookingGroupMembership.Status.CONFIRMED,
+            )
+        ).select_related("listing").distinct():
+            bookings_by_id[b.pk] = b
     serializer = TransactionRecordSerializer(
         transactions,
         many=True,
         context={
             "request": request,
-            "listing_titles_by_booking_id": titles_by_booking_id,
+            "bookings_by_id": bookings_by_id,
         },
     )
     return Response(serializer.data)
@@ -1880,13 +1901,19 @@ def stripe_webhook(request):
     sig_header = request.META.get("HTTP_STRIPE_SIGNATURE")
     webhook_secret = settings.STRIPE_WEBHOOK_SECRET
 
-    if not webhook_secret:
+    if webhook_secret:
+        try:
+            event = stripe.Webhook.construct_event(payload, sig_header, webhook_secret)
+        except Exception:
+            return Response({"detail": "Invalid webhook payload/signature."}, status=status.HTTP_400_BAD_REQUEST)
+    elif settings.DEBUG:
+        import json
+        try:
+            event = stripe.Event.construct_from(json.loads(payload), stripe.api_key)
+        except Exception:
+            return Response({"detail": "Invalid webhook payload."}, status=status.HTTP_400_BAD_REQUEST)
+    else:
         return Response({"detail": "Webhook secret not configured."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-    try:
-        event = stripe.Webhook.construct_event(payload, sig_header, webhook_secret)
-    except Exception:
-        return Response({"detail": "Invalid webhook payload/signature."}, status=status.HTTP_400_BAD_REQUEST)
 
     event_type = event.type
     obj = event.data.object
@@ -2540,13 +2567,15 @@ def rate_user(request, user_id):
         rated_user = User.objects.get(pk=user_id)
     except User.DoesNotExist:
         return Response({"detail": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+    score = request.data.get("score")
+    review = request.data.get("review", "")
     serializer = UserRatingSerializer(data=request.data)
     if not serializer.is_valid():
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-    UserRating.objects.update_or_create(
+    rating, created = UserRating.objects.update_or_create(
         rater=request.user,
         rated_user=rated_user,
-        defaults={"score": serializer.validated_data["score"]},
+        defaults={"score": score, "review": review},
     )
     return Response(UserProfileSerializer(rated_user, context={"request": request}).data)
 
@@ -2573,3 +2602,140 @@ def blocked_users_list(request):
     blocks = UserBlock.objects.filter(blocker=request.user).select_related("blocked_user")
     serializer = BlockedUserSerializer(blocks, many=True)
     return Response(serializer.data)
+
+
+@api_view(['GET', 'PUT'])
+@permission_classes([IsAuthenticated])
+def company_fee_config(request):
+    if not _is_approved_management(request):
+        return Response(
+            {'detail': 'Approved management company required.'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+    company = request.user.management_company
+    fee_config, _ = CompanyFeeConfig.objects.get_or_create(company=company)
+    if request.method == 'GET':
+        return Response(CompanyFeeConfigSerializer(fee_config).data)
+    serializer = CompanyFeeConfigSerializer(fee_config, data=request.data, partial=True)
+    serializer.is_valid(raise_exception=True)
+    serializer.save()
+    return Response(serializer.data)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def company_dashboard_stats(request):
+    if not _is_approved_management(request):
+        return Response(
+            {'detail': 'Approved management company required.'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+    company = request.user.management_company
+
+    total_listings = PropertyListing.objects.filter(
+        approved_by_company=company,
+        deleted_at__isnull=True
+    ).count()
+
+    pending_listing_approvals = ApprovalRequest.objects.filter(
+        management_company=company,
+        status=ApprovalRequest.Status.PENDING
+    ).count()
+    pending_booking_approvals = PropertyBooking.objects.filter(
+        listing__approved_by_company=company,
+        status=PropertyBooking.Status.PENDING,
+    ).count()
+    pending_approvals = pending_listing_approvals + pending_booking_approvals
+
+    active_bookings = PropertyBooking.objects.filter(
+        listing__approved_by_company=company,
+        status__in=[
+            PropertyBooking.Status.CONFIRMED,
+            PropertyBooking.Status.PARTIALLY_PAID,
+            PropertyBooking.Status.FULLY_PAID,
+        ],
+    ).count()
+
+    booking_ids = list(
+        PropertyBooking.objects.filter(
+            listing__approved_by_company=company
+        ).values_list('id', flat=True)
+    )
+    booking_refs = [str(bid) for bid in booking_ids]
+    recent_txns = TransactionRecord.objects.filter(
+        booking_reference__in=booking_refs
+    ).order_by('-created_at')[:5]
+
+    txn_data = [
+        {
+            'id': t.id,
+            'amount': str(t.amount),
+            'currency': t.currency,
+            'status': t.status,
+            'paid_at': t.paid_at,
+            'booking_reference': t.booking_reference,
+        }
+        for t in recent_txns
+    ]
+
+    return Response({
+        'total_listings': total_listings,
+        'pending_approvals': pending_approvals,
+        'pending_booking_approvals': pending_booking_approvals,
+        'pending_listing_approvals': pending_listing_approvals,
+        'active_bookings': active_bookings,
+        'recent_transactions': txn_data,
+    })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def company_listings(request):
+    if not _is_approved_management(request):
+        return Response(
+            {'detail': 'Approved management company required.'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+    company = request.user.management_company
+
+    qs = PropertyListing.objects.filter(
+        Q(approved_by_company=company) | Q(approval_requests__management_company=company),
+        deleted_at__isnull=True
+    ).distinct()
+
+    status_filter = request.query_params.get('status')
+    if status_filter == 'active':
+        qs = qs.filter(
+            approval_status=PropertyListing.ApprovalStatus.APPROVED,
+            status=PropertyListing.ListingStatus.PUBLISHED
+        )
+    elif status_filter == 'pending':
+        qs = qs.filter(approval_status=PropertyListing.ApprovalStatus.PENDING)
+    elif status_filter == 'archived':
+        qs = qs.filter(status=PropertyListing.ListingStatus.ARCHIVED)
+
+    search = request.query_params.get('search', '').strip()
+    if search:
+        qs = qs.filter(
+            Q(title__icontains=search) |
+            Q(street_line_1__icontains=search) |
+            Q(city__icontains=search)
+        )
+
+    qs = qs.order_by('-created_at')
+
+    data = [
+        {
+            'id': listing.id,
+            'title': listing.title,
+            'monthly_rent': str(listing.monthly_rent),
+            'status': listing.status,
+            'approval_status': listing.approval_status,
+            'city': listing.city,
+            'state': listing.state,
+            'street_line_1': listing.street_line_1,
+            'created_at': listing.created_at,
+        }
+        for listing in qs
+    ]
+    return Response(data)

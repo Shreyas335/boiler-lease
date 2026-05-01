@@ -161,6 +161,67 @@ export async function reviewApprovalRequest(
   return data;
 }
 
+export interface CompanyFeeConfig {
+  platform_fee_percentage: string | null;
+  platform_fee_flat: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function getFeeConfig(): Promise<CompanyFeeConfig> {
+  const { data } = await api.get<CompanyFeeConfig>('/company/fee-config/');
+  return data;
+}
+
+export async function updateFeeConfig(
+  config: { platform_fee_percentage?: string | null; platform_fee_flat?: string | null }
+): Promise<CompanyFeeConfig> {
+  const { data } = await api.put<CompanyFeeConfig>('/company/fee-config/', config);
+  return data;
+}
+
+export interface RecentTransaction {
+  id: number;
+  amount: string;
+  currency: string;
+  status: string;
+  paid_at: string | null;
+  booking_reference: string;
+}
+
+export interface CompanyDashboardStats {
+  total_listings: number;
+  pending_approvals: number;
+  pending_booking_approvals: number;
+  pending_listing_approvals: number;
+  active_bookings: number;
+  recent_transactions: RecentTransaction[];
+}
+
+export async function getCompanyDashboardStats(): Promise<CompanyDashboardStats> {
+  const { data } = await api.get<CompanyDashboardStats>('/company/dashboard/');
+  return data;
+}
+
+export interface CompanyListing {
+  id: number;
+  title: string;
+  monthly_rent: string;
+  status: string;
+  approval_status: string;
+  city: string;
+  state: string;
+  street_line_1: string;
+  created_at: string;
+}
+
+export async function getCompanyListings(
+  params?: { status?: string; search?: string }
+): Promise<CompanyListing[]> {
+  const { data } = await api.get<CompanyListing[]>('/company/listings/', { params });
+  return data;
+}
+
 function formToPayload(form: GuidelineFormData) {
   return {
     name: form.name,

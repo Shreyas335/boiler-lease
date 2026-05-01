@@ -37,12 +37,9 @@ export async function uploadProfilePicture(
 export async function rateUser(
   userId: number,
   score: number,
-): Promise<{ average_rating: number; my_rating: number; rating_count: number }> {
-  const { data } = await api.post<{
-    average_rating: number;
-    my_rating: number;
-    rating_count: number;
-  }>(`/profiles/${userId}/rate/`, { score });
+  review?: string,
+): Promise<UserProfile> {
+  const { data } = await api.post<UserProfile>(`/profiles/${userId}/rate/`, { score, review: review ?? "" });
   return data;
 }
 
