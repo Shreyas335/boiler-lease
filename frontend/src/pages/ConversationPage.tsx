@@ -171,20 +171,8 @@ export default function ConversationPage() {
     setOfferSubmitting(true);
     setOfferError(null);
     try {
-      const offer = await submitOffer(convId, price, offerStartDate, offerEndDate, offerNote.trim());
-      // The backend also creates a message; it arrives via WebSocket, but optimistically add it
-      const optimisticMsg: Message = {
-        id: Date.now(), // temporary id; WS echo deduplication keeps the real one
-        conversation: convId,
-        sender_id: user!.id,
-        sender_username: user!.username,
-        content: `Sent a price offer: $${price.toLocaleString()}/mo`,
-        offer,
-        created_at: new Date().toISOString(),
-        is_read: true,
-      };
-      messageIdsRef.current.add(optimisticMsg.id);
-      setMessages((prev) => [...prev, optimisticMsg]);
+      await submitOffer(convId, price, offerStartDate, offerEndDate, offerNote.trim());
+      // Backend creates the message and broadcasts it via WebSocket — no optimistic add needed
       setOfferModalOpen(false);
       setOfferPrice("");
       setOfferStartDate("");
